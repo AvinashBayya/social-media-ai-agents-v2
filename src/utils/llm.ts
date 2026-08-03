@@ -215,7 +215,13 @@ function isTransient(err: unknown): boolean {
   return status === 429 || status >= 500;
 }
 
-async function chat(prompt: string, opts: ChatOptions = {}): Promise<ChatResult> {
+/**
+ * Exported so task-specific modules (analysis-llm.ts) can own their own prompts
+ * without duplicating transport, caching, failover or the reasoning-model
+ * handling above. Prompts stay server-side in those modules; the browser only
+ * ever calls a typed server function, so no raw prompt crosses the wire.
+ */
+export async function chat(prompt: string, opts: ChatOptions = {}): Promise<ChatResult> {
   const primary = primaryProvider();
   const fallback = fallbackProvider();
 
@@ -305,11 +311,14 @@ function stripFences(text: string): string {
     .trim();
 }
 
-async function chatJson<T>(
+// Generic over the schema rather than over a bare T: binding to z.ZodType<T>
+// makes TypeScript unify T with the schema's INPUT type, so any field carrying
+// a .default() came back optional and every caller had to re-assert it.
+export async function chatJson<S extends z.ZodTypeAny>(
   prompt: string,
-  schema: z.ZodType<T>,
+  schema: S,
   opts: ChatOptions = {},
-): Promise<{ value: T; model: string; provider: string; cacheHit: boolean }> {
+): Promise<{ value: z.infer<S>; model: string; provider: string; cacheHit: boolean }> {
   const res = await chat(prompt, { ...opts, json: true });
 
   let parsed: unknown;

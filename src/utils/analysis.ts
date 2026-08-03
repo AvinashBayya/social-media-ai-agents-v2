@@ -234,10 +234,15 @@ function contentTokens(article: Article): string[] {
 
 /**
  * TF-IDF over the current corpus. Pure and deterministic.
- * A single-article corpus yields idf 0 for every term, so the result is empty
- * rather than a list of meaningless ties — stated instead of silently ranked.
+ *
+ * With fewer than two documents there is no corpus to be inverse-frequent
+ * against: idf collapses to the same constant for every term and the output is
+ * a raw term-frequency list wearing a TF-IDF label. That is returned empty
+ * rather than ranked, so the UI states "not enough articles" instead of
+ * presenting a meaningless order as a finding.
  */
 export function extractKeywords(article: Article, corpus: Article[], limit = 10): Keyword[] {
+  if (corpus.length < 2) return [];
   const tokens = contentTokens(article);
   if (tokens.length === 0) return [];
 
@@ -257,6 +262,49 @@ export function extractKeywords(article: Article, corpus: Article[], limit = 10)
   }
 
   return out.sort((a, b) => b.score - a.score || a.term.localeCompare(b.term)).slice(0, limit);
+}
+
+/**
+ * Corpus-level term ranking: the same TF-IDF, summed across every article.
+ *
+ * Used for "what is this collection about". `documentCount` is carried through
+ * because it is the only auditable part — an analyst can check that 7 articles
+ * really do mention the term, whereas a bare rank is unfalsifiable. No
+ * percentage change is reported: that would need a previous collection to
+ * compare against, and we do not persist one.
+ */
+export function corpusTerms(corpus: Article[], limit = 8): Keyword[] {
+  if (corpus.length < 2) return [];
+
+  const docTokens = corpus.map(contentTokens);
+  const docSets = docTokens.map((t) => new Set(t));
+  const n = corpus.length;
+
+  const totals = new Map<string, { score: number; tf: number; documentCount: number; idf: number }>();
+  docTokens.forEach((tokens) => {
+    if (tokens.length === 0) return;
+    const counts = new Map<string, number>();
+    for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
+    for (const [term, count] of counts) {
+      const documentCount = docSets.filter((s) => s.has(term)).length;
+      const tf = count / tokens.length;
+      const idf = Math.log(n / (1 + documentCount)) + 1;
+      const prev = totals.get(term) ?? { score: 0, tf: 0, documentCount, idf };
+      totals.set(term, {
+        score: prev.score + tf * idf,
+        tf: prev.tf + tf,
+        documentCount,
+        idf,
+      });
+    }
+  });
+
+  return Array.from(totals.entries())
+    // A term appearing in exactly one article says nothing about the collection.
+    .filter(([, v]) => v.documentCount > 1)
+    .map(([term, v]) => ({ term, tf: v.tf, idf: v.idf, score: v.score, documentCount: v.documentCount }))
+    .sort((a, b) => b.score - a.score || a.term.localeCompare(b.term))
+    .slice(0, limit);
 }
 
 // ─── 3. Clustering (union-find) ────────────────────────────────────────────

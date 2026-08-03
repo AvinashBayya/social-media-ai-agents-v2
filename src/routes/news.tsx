@@ -4,7 +4,7 @@ import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Newspaper, Globe2, TrendingUp, ExternalLink, MapPin } from "lucide-react";
+import { Newspaper, Globe2, TrendingUp, ExternalLink, MapPin, Languages } from "lucide-react";
 import {
   buildUpstreamQuery,
   containsAnyWord,
@@ -12,8 +12,18 @@ import {
   parseQuery,
   scoreMatch,
 } from "@/utils/search";
-import { domainOf as domainFromUrl, titleSimilarity } from "@/utils/credibility";
+import {
+  clusterStories,
+  corpusTerms,
+  detectLanguage,
+  sourceKeyOf,
+  SAME_STORY_THRESHOLD,
+  type Article,
+  type StoryCluster,
+} from "@/utils/analysis";
+import { reputationOf, TIER_SCORES } from "@/utils/credibility";
 import { ArticleAiPanel } from "@/components/article-ai";
+import { ClusterPanel } from "@/components/cluster-panel";
 import { LlmQuotaCard } from "@/components/llm-quota";
 
 /**
@@ -85,6 +95,8 @@ function getSourcePropagandaRisk(source: string): { risk: string } {
 }
 
 interface APIStory {
+  /** Stable within one response; used to tie a story to its cluster. */
+  id: string;
   primaryTitle: string;
   /** Snippet/content from the feed. Feeds Module 1's citation_depth factor. */
   body?: string;
@@ -109,6 +121,16 @@ interface APIStory {
   propagandaRisk?: string;
   /** Query relevance; 0 when browsing without a query. Used for ranking. */
   relevance?: number;
+  /** Id of the story cluster this article belongs to (Module 2). */
+  clusterId?: string;
+  /** Independent sources in the cluster, after collapsing syndicated copies. */
+  independentSources?: number;
+  /** Sources dropped as syndicated re-publication of another cluster member. */
+  syndicatedSources?: number;
+  /** Deterministic script/language detection — no model call. */
+  language?: string;
+  /** True when the script is unambiguous but the language within it is not. */
+  languageAmbiguous?: boolean;
 }
 
 export function safeIsoDate(pubDate?: string | null): string {
@@ -120,6 +142,22 @@ export function safeIsoDate(pubDate?: string | null): string {
   } catch {
     return new Date().toISOString();
   }
+}
+
+/**
+ * APIStory -> the Article shape Module 2 works in. The feed's own fields carry
+ * different names for historical reasons; converting here rather than renaming
+ * them keeps the six routes that already consume APIStory working.
+ */
+function toArticle(s: APIStory): Article {
+  return {
+    id: s.id,
+    title: s.primaryTitle,
+    source: s.primarySource,
+    url: s.primaryLink || s.url || s.sourceUrl || "",
+    pubDate: s.pubDate,
+    body: s.body,
+  };
 }
 
 export const fetchNews = createServerFn({ method: "GET" })
@@ -243,6 +281,9 @@ export const fetchNews = createServerFn({ method: "GET" })
             const propagandaRisk = getSourcePropagandaRisk(source).risk;
 
             stories.push({
+              // Unique within this response. Clustering needs a stable handle on
+              // each article, and the feed gives us no upstream identifier.
+              id: `s${stories.length}`,
               primaryTitle: title,
               // Carried through so Module 1's citation_depth factor has real text
               // to scan. Without it that factor is permanently skipped.
@@ -270,23 +311,6 @@ export const fetchNews = createServerFn({ method: "GET" })
         }
       }
 
-      // Real corroboration: count how many OTHER domains in this collection carry
-      // the same story, matched on significant-token overlap of the headline.
-      // This is the honest replacement for the character-code arithmetic, and it
-      // is the same signal Module 1 scores as its corroboration factor.
-      for (const story of stories) {
-        const own = domainFromUrl(story.primaryLink || story.url || "") || story.primarySource;
-        const carriers = new Set<string>();
-        for (const other of stories) {
-          if (other === story) continue;
-          const d = domainFromUrl(other.primaryLink || other.url || "") || other.primarySource;
-          if (!d || d === own) continue;
-          if (titleSimilarity(story.primaryTitle, other.primaryTitle) >= 0.42) carriers.add(d);
-        }
-        // The story's own outlet plus every independent domain carrying it.
-        story.sourceCount = carriers.size + 1;
-      }
-
       // With a query, rank by how well each story matches and fall back to
       // recency for ties. Without one there is nothing to rank against, so the
       // feed stays chronological.
@@ -299,10 +323,38 @@ export const fetchNews = createServerFn({ method: "GET" })
           return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
         });
       }
-      return { stories: stories.slice(0, 35) };
+
+      // Trim BEFORE clustering. Clustering the full collection and then slicing
+      // would report "5 sources reporting this" on a card whose other four
+      // members were cut — a count the analyst cannot check against the page.
+      const shown = stories.slice(0, 35);
+
+      // Corroboration comes from Module 2's clusterStories(), which is the single
+      // story-identity implementation in the application. This route used to run
+      // its own title matching at a 0.42 threshold while Module 1 used 0.45, so
+      // /news and /sources could disagree about the same two articles.
+      const clusters = clusterStories(shown.map(toArticle));
+      const byId = new Map<string, StoryCluster>();
+      for (const c of clusters) for (const m of c.members) byId.set(m.id, c);
+
+      for (const story of shown) {
+        const cluster = byId.get(story.id);
+        const lang = detectLanguage({ title: story.primaryTitle, body: story.body });
+        story.language = lang.name;
+        story.languageAmbiguous = lang.ambiguous;
+        if (!cluster) continue;
+        story.clusterId = cluster.id;
+        story.independentSources = cluster.independentDomains.length;
+        story.syndicatedSources = cluster.syndicatedDomains.length;
+        // Kept for existing consumers (gis, exports, subjects, agents), now
+        // meaning independent sources rather than the old ad-hoc carrier count.
+        story.sourceCount = cluster.independentDomains.length;
+      }
+
+      return { stories: shown, clusters };
     } catch (error) {
       console.error("Failed to parse RSS news feeds:", error);
-      return { stories: [] as APIStory[] };
+      return { stories: [] as APIStory[], clusters: [] as StoryCluster[] };
     }
   });
 
@@ -1316,48 +1368,94 @@ function formatRelativeTime(dateStr: string): string {
   }
 }
 
+/**
+ * Outlet coverage within THIS collection.
+ *
+ * Both numbers here used to be invented: credibility was
+ * `85 + (name.charCodeAt(0) % 13)` — the first letter of the outlet's name — and
+ * the article count was `count * 15 + 8`, inflating 2 collected articles into
+ * "38 articles". Now the count is the count, and the rating is the outlet's
+ * tier from Module 1's reputation table, which is a documented editorial
+ * judgement rather than arithmetic on a string. Outlets absent from the table
+ * report "unrated" instead of being assigned a number.
+ */
 function getOutletCoverage(storiesList: APIStory[]) {
-  const counts: Record<string, { count: number; region: string; maxThreat: string }> = {};
+  const counts = new Map<string, { count: number; region: string; domain: string }>();
   for (const s of storiesList) {
-    const srcName = s.primarySource || "Unknown Source";
-    if (!counts[srcName]) {
-      counts[srcName] = { count: 0, region: s.countryCode || "Global", maxThreat: s.threatLevel };
-    }
-    counts[srcName].count += 1;
-    if (s.countryCode) counts[srcName].region = s.countryCode;
-    if (s.threatLevel === "high" || s.threatLevel === "critical") {
-      counts[srcName].maxThreat = s.threatLevel;
-    }
+    const name = s.primarySource || "Unknown Source";
+    const entry = counts.get(name) ?? {
+      count: 0,
+      region: s.countryCode || "Global",
+      domain: sourceKeyOf(toArticle(s)),
+    };
+    entry.count += 1;
+    if (s.countryCode) entry.region = s.countryCode;
+    counts.set(name, entry);
   }
 
-  return Object.entries(counts).map(([name, data]) => {
-    const cred = Math.min(98, 85 + (name.charCodeAt(0) % 13));
-    let tone: "verified" | "medium" | "unverified" = "verified";
-    if (data.maxThreat === "critical") tone = "unverified";
-    else if (data.maxThreat === "high") tone = "medium";
+  return Array.from(counts.entries())
+    .map(([name, data]) => {
+      const rep = reputationOf(data.domain);
+      return {
+        name,
+        region: data.region,
+        articles: data.count,
+        tier: rep ? rep.tier.replace("_", " ").toLowerCase() : null,
+        tierScore: rep ? TIER_SCORES[rep.tier] : null,
+        note: rep
+          ? `${data.domain} is listed as ${rep.tier.replace("_", " ")} (${rep.type}) in Module 1's reputation table.`
+          : `${data.domain || name} is not in Module 1's reputation table, so no rating is asserted.`,
+      };
+    })
+    .sort((a, b) => b.articles - a.articles || a.name.localeCompare(b.name));
+}
 
-    return {
-      name,
-      region: data.region,
-      articles: data.count * 15 + 8,
-      credibility: cred,
-      tone,
-    };
-  }).sort((a, b) => b.articles - a.articles);
+interface FeedGroup {
+  /** Null only for a story the server could not place in a cluster. */
+  cluster: StoryCluster | null;
+  stories: APIStory[];
+}
+
+/**
+ * Group the feed by story cluster, keeping the ranking the server produced: a
+ * cluster appears where its highest-ranked member appeared in the flat list, so
+ * grouping never promotes a low-relevance story up the page.
+ */
+function groupByCluster(stories: APIStory[], clusters: StoryCluster[]): FeedGroup[] {
+  const byId = new Map(clusters.map((c) => [c.id, c]));
+  const seen = new Set<string>();
+  const groups: FeedGroup[] = [];
+
+  for (const s of stories) {
+    const id = s.clusterId;
+    if (!id) {
+      groups.push({ cluster: null, stories: [s] });
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    groups.push({
+      cluster: byId.get(id) ?? null,
+      stories: stories.filter((x) => x.clusterId === id),
+    });
+  }
+  return groups;
 }
 
 const validTones = new Set(["positive", "negative", "neutral", "critical", "high", "medium", "low", "verified", "unverified"]);
 
 function Page() {
-  const { stories: fetchedStories } = Route.useLoaderData();
-  const stories = fetchedStories || [];
+  const loaded = Route.useLoaderData();
+  const stories = loaded?.stories || [];
+  const clusters = loaded?.clusters || [];
 
   const outlets = getOutletCoverage(stories);
-
-  const categories = Array.from(new Set(stories.map(s => s.category).filter(Boolean)));
-  const narratives = categories.length > 0 
-    ? categories.map(cat => `${cat.charAt(0).toUpperCase() + cat.slice(1)} developments`)
-    : ["Central bank policy shock", "Election disinformation", "Space program milestones", "AI regulation debate", "Fintech breach fallout"];
+  const groups = groupByCluster(stories, clusters);
+  // Real TF-IDF over the collected corpus. The previous version listed either
+  // article categories or, when there were none, five hardcoded topics, each
+  // captioned with an invented "+152%" rise nothing had measured.
+  const terms = corpusTerms(stories.map(toArticle), 8);
+  const corroborated = groups.filter((g) => (g.cluster?.independentDomains.length ?? 0) > 1).length;
 
   return (
     <AppShell>
@@ -1367,57 +1465,113 @@ function Page() {
         badge={<Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary"><Newspaper className="size-3.5" />Live wires</Badge>}
       />
 
+      {stories.length > 0 && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          {stories.length} article{stories.length === 1 ? "" : "s"} collected ·{" "}
+          {groups.length} distinct stor{groups.length === 1 ? "y" : "ies"} after clustering ·{" "}
+          {corroborated} corroborated by more than one independent source. Clustering is
+          deterministic (Jaccard title similarity ≥ {SAME_STORY_THRESHOLD}); no model is
+          involved and the same grouping drives Module 1's corroboration score.
+        </p>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-3">
-          {stories.length > 0 ? (
-            stories.map((s, i) => {
-              const timeAgo = formatRelativeTime(s.pubDate);
-              const threatTone = validTones.has(s.threatLevel) ? (s.threatLevel as any) : "neutral";
-              const cred = s.isAlert ? "unverified" : "verified";
-              
+          {groups.length > 0 ? (
+            groups.map((g, gi) => {
+              const lead = g.stories[0];
+              const others = g.stories.slice(1);
+              const multi = (g.cluster?.independentDomains.length ?? 0) > 1;
+
               return (
-                <Card key={i}>
+                <Card key={g.cluster?.id ?? `orphan-${gi}`}>
                   <CardContent className="p-4">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">{s.primarySource}</span>
-                      <MapPin className="size-3" />{s.countryCode || "Global"}
+                      <span className="font-semibold text-foreground">{lead.primarySource}</span>
+                      <MapPin className="size-3" />
+                      {lead.countryCode || "Global"}
                       <span>·</span>
-                      <span>{timeAgo} ago</span>
+                      <span>{formatRelativeTime(lead.pubDate)} ago</span>
+                      {lead.language && (
+                        <Badge
+                          variant="outline"
+                          className="gap-1 text-[10px] font-normal"
+                          title={
+                            lead.languageAmbiguous
+                              ? "Script detected from Unicode ranges. The specific language within this script cannot be determined from script alone, so it is reported as ambiguous rather than guessed."
+                              : "Detected from Unicode script ranges — deterministic, no model call."
+                          }
+                        >
+                          <Languages className="size-2.5" />
+                          {lead.language}
+                          {lead.languageAmbiguous ? " ?" : ""}
+                        </Badge>
+                      )}
                       <div className="ml-auto flex gap-1.5">
-                        <Tone tone={threatTone} />
-                        <Tone tone={cred} />
+                        <Tone tone={validTones.has(lead.threatLevel) ? (lead.threatLevel as any) : "neutral"} />
+                        <Tone tone={lead.isAlert ? "unverified" : "verified"} />
                       </div>
                     </div>
-                    <h3 className="mt-2 text-lg font-semibold leading-snug">{s.primaryTitle}</h3>
+
+                    <h3 className="mt-2 text-lg font-semibold leading-snug">{lead.primaryTitle}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Carried by {s.sourceCount} domain{s.sourceCount === 1 ? "" : "s"} in this
-                      collection{s.velocity ? ` · velocity ${s.velocity.level}` : ""}. Category: {s.category || "general"}.
+                      Category: {lead.category || "general"}.
+                      {lead.velocity ? ` Velocity ${lead.velocity.level}.` : ""}
                     </p>
-                    <div className="mt-2 flex gap-1.5 items-center">
-                      <Badge variant="secondary" className="font-normal">
-                        {s.sourceCount} outlet{s.sourceCount === 1 ? "" : "s"}
-                        {s.importanceScore === null ? "" : ` · Importance ${s.importanceScore}%`}
-                      </Badge>
-                      {s.url && (
-                        <Button asChild size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-xs">
-                          <a
-                            href={s.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="open-link"
-                          >
+
+                    <div className="mt-2 flex items-center gap-1.5">
+                      {lead.url && (
+                        <Button asChild size="sm" variant="ghost" className="h-7 gap-1 text-xs">
+                          <a href={lead.url} target="_blank" rel="noopener noreferrer" className="open-link">
                             Open <ExternalLink className="size-3" />
                           </a>
                         </Button>
                       )}
                     </div>
+
                     {/* On-demand only — 35 automatic model calls per page load would
                         exhaust a free tier in minutes. */}
                     <ArticleAiPanel
-                      title={s.primaryTitle}
-                      body={(s as any).contentSnippet || ""}
-                      source={s.primarySource}
+                      title={lead.primaryTitle}
+                      body={lead.body || ""}
+                      source={lead.primarySource}
                     />
+
+                    {g.cluster && multi && (
+                      <div className="mt-3">
+                        <ClusterPanel cluster={g.cluster} />
+                      </div>
+                    )}
+
+                    {others.length > 0 && (
+                      <div className="mt-3 space-y-1.5 border-t pt-2.5">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          Also in this story ({others.length})
+                        </div>
+                        {others.map((o) => (
+                          <div key={o.id} className="flex items-start gap-2 text-xs">
+                            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                              {o.primarySource}
+                            </span>
+                            {o.url ? (
+                              <a
+                                href={o.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="min-w-0 flex-1 truncate text-foreground hover:underline"
+                              >
+                                {o.primaryTitle}
+                              </a>
+                            ) : (
+                              <span className="min-w-0 flex-1 truncate">{o.primaryTitle}</span>
+                            )}
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {formatRelativeTime(o.pubDate)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -1435,35 +1589,67 @@ function Page() {
           <LlmQuotaCard />
           <Card>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold"><Globe2 className="size-4" />Outlet coverage</h3>
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <Globe2 className="size-4" />
+                Outlet coverage
+              </h3>
               <div className="mt-3 space-y-2">
-                {outlets.slice(0, 6).map((o) => (
-                  <div key={o.name} className="flex items-center justify-between rounded-md border bg-card p-2">
-                    <div>
-                      <div className="text-sm font-medium">{o.name}</div>
-                      <div className="text-[11px] text-muted-foreground">{o.region} · {o.articles} articles</div>
+                {outlets.slice(0, 8).map((o) => (
+                  <div key={o.name} className="flex items-center justify-between gap-2 rounded-md border bg-card p-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{o.name}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {o.region} · {o.articles} article{o.articles === 1 ? "" : "s"} here
+                      </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="text-[11px] tabular-nums text-muted-foreground">Cred {o.credibility}</span>
-                      <Tone tone={o.tone} />
-                    </div>
+                    <span
+                      className="shrink-0 font-mono text-[10px] text-muted-foreground"
+                      title={o.note}
+                    >
+                      {o.tier ? `${o.tier} · ${o.tierScore?.toFixed(2)}` : "unrated"}
+                    </span>
                   </div>
                 ))}
               </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                Counts are articles collected in this run, not totals. Tier is Module 1's
+                documented reputation rating; outlets absent from the table show "unrated"
+                rather than an invented score.
+              </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold"><TrendingUp className="size-4" />Narratives rising</h3>
-              <div className="mt-3 space-y-2 text-sm">
-                {narratives.slice(0, 5).map((n, i) => (
-                  <div key={n} className="flex items-center justify-between rounded-md border bg-card px-3 py-1.5">
-                    <span>{n}</span>
-                    <span className="text-[11px] font-semibold text-primary">+{Math.max(10, 200 - i * 38)}%</span>
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <TrendingUp className="size-4" />
+                Dominant terms
+              </h3>
+              {terms.length > 0 ? (
+                <>
+                  <div className="mt-3 space-y-2 text-sm">
+                    {terms.map((t) => (
+                      <div
+                        key={t.term}
+                        className="flex items-center justify-between rounded-md border bg-card px-3 py-1.5"
+                      >
+                        <span>{t.term}</span>
+                        <span className="text-[11px] tabular-nums text-muted-foreground">
+                          {t.documentCount} article{t.documentCount === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    TF-IDF over this collection. No rise/fall percentage is shown — that
+                    would need a previous collection to compare against, and none is stored.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Not enough articles collected to rank terms.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
