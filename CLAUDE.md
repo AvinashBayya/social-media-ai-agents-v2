@@ -1,0 +1,148 @@
+# Sentinel AI
+
+OSINT analysis and monitoring platform built for **ADITI 4.0 / iDEX Problem Statement 18**, sponsored by the Indian Air Force. Stage: pre-selection demo.
+
+## Stack
+
+Generated with Lovable from the `tanstack_start_ts` template.
+
+- TanStack Start 1.168 (SSR), React 19, TypeScript, Vite 8, Bun
+- Tailwind 4, shadcn/ui
+- 27 routes under `src/routes/` (flat file-based routing, plus `__root.tsx`)
+- i18n covering 15 Indian languages under `src/i18n/locales/`
+
+## PS-18 required modules
+
+1. Source credibility check, scored on user-defined factors
+2. Open-source content analysis
+3. Social media content analysis
+4. Image and video analysis, including deepfake / synthetic media detection
+5. Report extraction and GIS output, built on open-source LLMs
+
+Plus real-time monitoring of user-defined subjects, and data mining at scale.
+
+## Current state
+
+The frontend is good and worth keeping. Everything behind it needs building: no database (all state is localStorage), no auth, no backend. Roughly 15–20% of PS-18 is covered.
+
+`src/utils/gemini.ts` has been **deleted**. It is replaced by `src/utils/llm.ts` — see the LLM section below.
+
+## Hard constraints
+
+**Open-source LLMs only.** Do not propose Gemini, Azure OpenAI, or any hosted commercial LLM API. Do not propose Llama or anything derived from it — Meta's Acceptable Use Policy explicitly bans military and espionage use, which disqualifies it for an IAF system.
+
+Approved models:
+- Sarvam (Apache 2.0, Indian)
+- Mistral 3 (Apache 2.0)
+- AI4Bharat IndicTrans2 (MIT)
+
+**Never fabricate data.** If something fails, surface an explicit error. Do not write fallbacks that return plausible-looking placeholder results, invented scores, or synthetic content. This is a defence intelligence tool; a fake confidence value is worse than a visible failure.
+
+**Free-tier tooling only.** Zero budget for licences and APIs.
+
+**Deployment target** is Azure Container Apps in Central India.
+
+## LLM layer
+
+`src/utils/llm.ts` is a provider-agnostic client speaking the OpenAI
+`/chat/completions` format. Endpoint and model are **config, never code** — that is what
+makes the vLLM migration a one-line change once GPU quota lands.
+
+```sh
+# Primary
+LLM_BASE_URL=https://api.sarvam.ai/v1
+LLM_API_KEY=<key>
+LLM_MODEL=sarvam-105b
+# Fallback (used only on 429 / 5xx — a 401/403 does not fail over)
+LLM_FALLBACK_BASE_URL=https://api.groq.com/openai/v1
+LLM_FALLBACK_KEY=<key>
+LLM_FALLBACK_MODEL=mistral-saba-24b
+```
+
+**Model IDs — both verified against `/models` on 2026-08-03 with live keys.**
+- Sarvam returns exactly one model: **`sarvam-105b`**. There is no `sarvam-m`.
+- Groq offers **no Mistral model at all** — `mistral-saba-24b` does not exist there.
+  Of Groq's 15 models, the licence-clean chat options are `openai/gpt-oss-120b`,
+  `openai/gpt-oss-20b` (both **Apache 2.0 open-weight**, not the OpenAI API) and
+  `qwen/qwen3.6-27b`. Everything Llama-derived is excluded by Meta's AUP.
+  We use **`openai/gpt-oss-120b`**. Despite the `openai/` prefix these are open weights,
+  self-hostable on vLLM — worth stating explicitly in any pitch, since the prefix
+  invites the wrong assumption.
+
+**Both are REASONING models.** They emit chain-of-thought into `reasoning_content`
+(Sarvam) / `reasoning` (Groq), and that thinking is billed against `max_tokens`. A budget
+sized for the answer alone returns `finish_reason: "length"` with `content: null`.
+Measured: `max_tokens: 16` → empty content; `400` → clean answer. Call budgets are
+1400–2800 accordingly. `llm.ts` throws on truncation rather than returning a partial brief.
+
+**Model licence constraint.** Do not switch to any Llama model, or to DeepSeek R1 Distill
+(distilled from Llama 70B, inherits the licence). Meta's Acceptable Use Policy bans
+military and espionage use. Mistral (Apache 2.0) and Sarvam (Apache 2.0) are clear.
+
+Behaviour that must not regress:
+- Every failure throws `LlmUnavailableError` with the real upstream cause. No fallback text,
+  ever. The UI renders an explicit "AI unavailable" state.
+- JSON responses are validated with zod; a schema mismatch throws rather than coercing.
+- In-memory LRU cache, 500 entries, keyed on sha256(model + system + prompt). Per-process
+  and lost on restart — fine for a demo, needs Redis for real use.
+- `getLlmStats()` server function exposes call counts, cache hit rate, token totals and
+  latency. It is a server function, not `/api/llm/stats` — this TanStack Start version
+  exposes no `createServerFileRoute`, so an HTTP route was not added.
+
+Migration to self-hosted vLLM: point `LLM_BASE_URL` at the vLLM service and set
+`LLM_MODEL`. No application code changes.
+
+**Deployed config (v2, 2026-08-03).** Keys live in Key Vault (`sarvam-key`, `groq-key`) and
+reach the app as `secretref:` env vars via its **system-assigned identity**, which holds
+`Key Vault Secrets User` on the vault. No plaintext key is stored on the container app.
+Rotating a key means updating the vault secret and restarting the revision.
+
+Core logic lives in plain exported functions (`summariseText`, `extractEntitiesFrom`,
+`assessLanguageOf`, `llmStatsSnapshot`, …) with `createServerFn` as thin wrappers. Server
+functions cannot execute outside the Start runtime context, so keeping the logic separate
+is what makes it testable — do not move it back inside the handlers.
+
+## GPU quota request — PENDING (raised 2026-08-01)
+
+Needed later for self-hosted open-source LLM inference (vLLM). **Not yet granted; do not
+run the workload-profile command until it is.**
+
+- Request: `Consumption-GPU-NC8as-T4`, Central India, subscription
+  `8a8baea4-547c-4f55-b206-d6af16a24970`.
+- Central India and South India support the **T4 profile only**. The A100 profile
+  (`Consumption-GPU-NC24-A100`) is **not available in either Indian region** — verified
+  2026-08-01 via `az containerapp env workload-profile list-supported`. Do not plan
+  around A100 without moving region.
+- T4 is 16GB: fits 7B–14B models at 4-bit quantisation. Adequate for the demo. Sarvam and
+  Mistral 3 both fit; size the model to this ceiling.
+- Target environment `sentinel-env` (`rg-sentinel-demo`) is already workload-profiles
+  enabled, so the profile can be added in place — no environment rebuild.
+
+Once approved:
+
+```sh
+export MSYS_NO_PATHCONV=1
+source ./azure-env.sh
+az containerapp env workload-profile add \
+  -g "$RG" -n "$ENV" \
+  --workload-profile-name gpu-t4 \
+  --workload-profile-type Consumption-GPU-NC8as-T4
+```
+
+**Cost conflict — unresolved.** GPU compute is not free-tier and contradicts the zero-budget
+constraint above. An NC8as-T4 runs roughly USD 0.5–0.8/hour, so the USD 30/month budget
+alert (`sentinel-monthly-30usd`) is about 40–60 GPU-hours for the month, before anything
+else. Keep the GPU app scaled to zero when idle and treat it as demo-only. Decide the
+funding source before committing to a self-hosted inference architecture.
+
+## Environment
+
+Windows 11, Git Bash (MINGW64), repo at `D:\social_media_research`, Node 24, Bun, no Docker.
+
+Azure CLI commands run in Git Bash and require:
+
+```sh
+export MSYS_NO_PATHCONV=1
+```
+
+Without it, Git Bash mangles any argument starting with `/` — which is every `--scope` in Azure RBAC commands.
