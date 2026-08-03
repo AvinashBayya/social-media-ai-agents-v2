@@ -10,8 +10,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { llmAnalyseContent, llmExtractEntities } from "@/utils/llm";
 import {
-  DOMAIN_TIERS, DEFAULT_WEIGHTS, domainOf, scoreArticle,
-  type FactorResult, type ScorableArticle,
+  DOMAIN_REPUTATION, TIER_SCORES, defaultFactors, domainOf, reputationOf, scoreArticle,
+  type Article,
 } from "@/utils/credibility";
 import {
   ListChecks,
@@ -82,9 +82,10 @@ function TasksPage() {
         source: "reuters.com", url: "https://www.reuters.com/probe",
         pubDate: new Date().toISOString(),
       };
-      const scored = scoreArticle(probe, { all: [probe] }, DEFAULT_WEIGHTS);
-      const computed = scored.factors.filter((f) => f.score !== null).length;
-      push(`[PASS] Module 1 executed: ${computed}/${scored.factors.length} factors computed, score ${scored.score?.toFixed(2) ?? "n/a"}. Weighting is analyst-configurable on /sources.`);
+      const factors = defaultFactors();
+      const scored = scoreArticle(probe, [probe], factors);
+      const total = scored.breakdown.length + scored.skipped.length;
+      push(`[PASS] Module 1 executed: ${scored.breakdown.length}/${total} factors computed, score ${scored.score?.toFixed(2) ?? "n/a"}. Weighting is analyst-configurable on /sources.`);
     } catch (e: any) {
       push(`[FAIL] Module 1 threw: ${e?.message ?? e}`);
     }
@@ -122,25 +123,24 @@ function TasksPage() {
    */
   const evaluateSource = () => {
     const domain = domainOf(mod1Source) || mod1Source.trim().toLowerCase();
-    const key = Object.keys(DOMAIN_TIERS)
-      .filter((d) => domain === d || domain.endsWith(`.${d}`))
-      .sort((a, b) => b.length - a.length)[0];
+    const entry = reputationOf(domain);
 
-    if (!key) {
+    if (!entry) {
       setMod1Result({
         unrated: true,
         domain,
-        note: `"${mod1Source}" is not in the reputation list. It is unrated, not penalised — add it to DOMAIN_TIERS to score it.`,
+        note: `"${mod1Source}" is not in the reputation table. It is unrated, not penalised — add it to DOMAIN_REPUTATION to score it.`,
       });
       toast.message("Source not in reputation list — reported as unrated.");
       return;
     }
 
-    const reputation = DOMAIN_TIERS[key];
+    const reputation = TIER_SCORES[entry.tier];
     const score = Math.round(((reputation * 100) + mod1Transparency + mod1Citations) / 3);
     setMod1Result({
       unrated: false,
-      domain: key,
+      domain,
+      tier: entry.tier,
       reputation,
       score,
       declared: true,

@@ -86,6 +86,8 @@ function getSourcePropagandaRisk(source: string): { risk: string } {
 
 interface APIStory {
   primaryTitle: string;
+  /** Snippet/content from the feed. Feeds Module 1's citation_depth factor. */
+  body?: string;
   primarySource: string;
   primaryLink?: string;
   url?: string;
@@ -242,6 +244,9 @@ export const fetchNews = createServerFn({ method: "GET" })
 
             stories.push({
               primaryTitle: title,
+              // Carried through so Module 1's citation_depth factor has real text
+              // to scan. Without it that factor is permanently skipped.
+              body: body.trim(),
               primarySource: source,
               primaryLink: item.link,
               url: item.link,
