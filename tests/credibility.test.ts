@@ -107,20 +107,37 @@ describe("corroboration", () => {
     expect(c.syndicated).toEqual([]);
   });
 
-  test("collapses syndicated near-identical headlines to one source", () => {
+  /**
+   * Verbatim re-publication provides NO corroboration for the originating
+   * outlet. Reuters breaks a story and three aggregators reprint the identical
+   * headline: that is one newsroom, not four.
+   *
+   * The pre-refactor implementation returned 1 independent + 2 syndicated here,
+   * because it removed the article's own domain BEFORE collapsing and so
+   * compared the syndicators only against each other — arbitrarily promoting
+   * whichever one it saw first to "independent". Sharing clusterStories() with
+   * Module 2 fixed that: everything now collapses against the origin article.
+   */
+  test("verbatim re-publication yields zero independent corroboration", () => {
     const wire = "India tests hypersonic missile off Odisha coast";
     const syndicated: Article[] = [
-      CORPUS[0],
-      art({ id: "s1", title: wire, source: "MSN", url: "https://www.msn.com/s1" }),
-      art({ id: "s2", title: wire, source: "Yahoo", url: "https://news.yahoo.com/s2" }),
-      art({ id: "s3", title: wire, source: "Flipboard", url: "https://flipboard.com/s3" }),
+      CORPUS[0], // reuters.com, published earliest — the origin
+      art({ id: "s1", title: wire, source: "MSN", url: "https://www.msn.com/s1", pubDate: iso(1) }),
+      art({ id: "s2", title: wire, source: "Yahoo", url: "https://news.yahoo.com/s2", pubDate: iso(1) }),
+      art({ id: "s3", title: wire, source: "Flipboard", url: "https://flipboard.com/s3", pubDate: iso(1) }),
     ];
     const c = analyseCorroboration(syndicated[0], syndicated);
 
-    // Three re-publishers of one wire copy must count as ONE independent source.
-    expect(c.domains).toHaveLength(1);
-    expect(c.syndicated).toHaveLength(2);
+    expect(c.domains).toHaveLength(0);
+    expect(c.syndicated.sort()).toEqual(["flipboard.com", "msn.com", "news.yahoo.com"]);
     expect(titleSimilarity(wire, wire)).toBeGreaterThanOrEqual(SYNDICATION_THRESHOLD);
+  });
+
+  /** A genuine rewrite by a second newsroom IS corroboration, not syndication. */
+  test("rewritten coverage still counts as independent", () => {
+    const c = analyseCorroboration(CORPUS[0], CORPUS);
+    expect(c.domains.length).toBeGreaterThan(0);
+    expect(c.syndicated).toHaveLength(0);
   });
 
   test("score mapping follows the specified curve", () => {

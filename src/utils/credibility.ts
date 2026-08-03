@@ -18,19 +18,22 @@
  *   - All compute functions are pure, so they are testable in isolation.
  */
 
-// ─── Article ───────────────────────────────────────────────────────────────
+// ─── Article and story identity ────────────────────────────────────────────
 
-export interface Article {
-  id: string;
-  title: string;
-  /** Publisher name as reported by the feed. */
-  source: string;
-  url: string;
-  /** ISO 8601. */
-  pubDate: string;
-  /** Article body or snippet, when the feed provides one. */
-  body?: string;
-}
+// Article, tokenisation, similarity and clustering all live in analysis.ts —
+// Module 2 owns the definition of "the same story" and this module consumes it.
+// Re-exported here so existing importers keep working.
+import {
+  clusterFor, clusterStories, domainOf, sourceKeyOf,
+  type Article, type StoryCluster,
+} from "./analysis";
+
+export type { Article, StoryCluster };
+export {
+  domainOf, titleTokens, titleSimilarity, sourceKeyOf,
+  clusterStories, clusterFor,
+  SAME_STORY_THRESHOLD, SYNDICATION_THRESHOLD,
+} from "./analysis";
 
 export interface FactorResult {
   /** 0-1. */
@@ -59,6 +62,12 @@ export interface CredibilityFactor {
 export interface FactorOptions {
   /** Analyst-defined criterion for the custom_keyword factor. */
   customKeywords?: { raise: string[]; lower: string[] };
+  /**
+   * Story clusters for the corpus, computed once by scoreCorpus. Clustering is
+   * O(n^2) in the corpus; recomputing it per article would make scoring the
+   * feed O(n^3). Optional so scoreArticle still works standalone.
+   */
+  clusters?: StoryCluster[];
 }
 
 // ─── Domain reputation table ───────────────────────────────────────────────
@@ -143,21 +152,6 @@ export const DOMAIN_REPUTATION: Record<string, DomainEntry> = {
   "substack.com": { tier: "LOW", type: "blog" },
 };
 
-// ─── Text utilities (pure) ─────────────────────────────────────────────────
-
-/** Strip scheme, credentials, port, path and leading www. Empty when not a domain. */
-export function domainOf(value: string): string {
-  const raw = (value || "").trim().toLowerCase();
-  if (!raw) return "";
-  const host = raw
-    .replace(/^[a-z]+:\/\//, "")
-    .replace(/^[^@/]*@/, "")
-    .split(/[/?#]/)[0]
-    .replace(/:\d+$/, "")
-    .replace(/^www\./, "");
-  return host.includes(".") ? host : "";
-}
-
 /** Longest-suffix lookup, so news.bbc.co.uk resolves to bbc.co.uk. */
 export function reputationOf(domain: string): DomainEntry | null {
   if (!domain) return null;
@@ -167,71 +161,7 @@ export function reputationOf(domain: string): DomainEntry | null {
   return key ? DOMAIN_REPUTATION[key] : null;
 }
 
-const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "of", "in", "on", "to", "for", "with", "at",
-  "by", "from", "as", "is", "are", "was", "were", "be", "been", "after", "over",
-  "says", "said", "amid", "new", "its", "it", "this", "that", "has", "have",
-  "will", "into", "about", "more", "than", "but",
-  // Prepositions that survive the >2-character filter. Leaving these in pads the
-  // Jaccard denominator with noise: "India tests hypersonic missile OFF Odisha
-  // COAST" vs "DRDO confirms Odisha hypersonic missile test" scored 0.444 and
-  // fell just under the 0.45 threshold purely because of "off".
-  "off", "out", "per", "via", "near", "amongst", "among", "onto", "upon",
-]);
-
-/**
- * Very light suffix stripping. Without it "India tests missile" and "missile
- * test confirmed" score 0.30 and read as unrelated. Length guards keep short
- * words intact ("news" stays "news", "gas" stays "gas"). Deliberately cruder
- * and safer than a real stemmer.
- */
-function stem(token: string): string {
-  if (token.length > 5 && token.endsWith("ing")) return token.slice(0, -3);
-  if (token.length > 5 && token.endsWith("ed")) return token.slice(0, -2);
-  if (token.length > 4 && token.endsWith("s") && !token.endsWith("ss")) return token.slice(0, -1);
-  return token;
-}
-
-export function titleTokens(title: string): Set<string> {
-  return new Set(
-    (title || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t.length > 2 && !STOPWORDS.has(t))
-      .map(stem),
-  );
-}
-
-/** Jaccard similarity over significant title tokens. 0-1. */
-export function titleSimilarity(a: string, b: string): number {
-  const ta = titleTokens(a);
-  const tb = titleTokens(b);
-  if (ta.size === 0 || tb.size === 0) return 0;
-  let shared = 0;
-  for (const t of ta) if (tb.has(t)) shared += 1;
-  return shared / (ta.size + tb.size - shared);
-}
-
-/**
- * Same-story threshold.
- *
- * Tuned by hand against live Google News output. 0.30 merged unrelated defence
- * stories that shared "India"/"missile"; 0.60 split genuine rewrites of one
- * event ("India tests hypersonic missile off Odisha" vs "DRDO confirms Odisha
- * hypersonic test") because headline rewrites share only 4-5 significant tokens.
- * 0.45 held both cases correctly and is what the spec suggested independently.
- */
-export const SAME_STORY_THRESHOLD = 0.45;
-
-/**
- * Above this, two headlines are the SAME TEXT rather than two newsrooms
- * reporting the same event — i.e. a syndicated wire pickup. Counting those as
- * independent corroboration is the classic way to make one story look like five.
- */
-export const SYNDICATION_THRESHOLD = 0.9;
-
-// ─── Corroboration analysis (shared by two factors) ────────────────────────
+// ─── Corroboration, derived from Module 2's clusters ──────────────────────
 
 export interface Corroboration {
   /** One entry per INDEPENDENT source, after collapsing syndicated copies. */
@@ -242,38 +172,28 @@ export interface Corroboration {
 }
 
 /**
- * Find independent corroboration for `article` within `corpus`.
- * Pure; safe on an empty corpus.
+ * Corroboration for one article, read off the shared story cluster.
+ *
+ * This used to run its own title matching. It now delegates to
+ * clusterStories() so a corroboration count here and a "N sources reporting
+ * this" group on the news feed can never disagree — there is exactly one
+ * definition of story identity in the application.
  */
-export function analyseCorroboration(article: Article, corpus: Article[]): Corroboration {
-  const ownDomain = domainOf(article.url) || domainOf(article.source) || article.source;
+export function analyseCorroboration(
+  article: Article,
+  corpus: Article[],
+  clusters?: StoryCluster[],
+): Corroboration {
+  const own = sourceKeyOf(article);
+  const cluster = clusterFor(article, clusters ?? clusterStories(corpus));
+  if (!cluster) return { domains: [], syndicated: [], types: [] };
 
-  const candidates: { domain: string; title: string }[] = [];
-  for (const other of corpus) {
-    if (other.id === article.id) continue;
-    const d = domainOf(other.url) || domainOf(other.source) || other.source;
-    if (!d || d === ownDomain) continue;
-    if (titleSimilarity(article.title, other.title) >= SAME_STORY_THRESHOLD) {
-      candidates.push({ domain: d, title: other.title });
-    }
-  }
-
-  // Collapse syndicated copies: a candidate whose headline is ~identical to one
-  // already accepted is the same wire copy re-published, not a second newsroom.
-  const accepted: { domain: string; title: string }[] = [];
-  const syndicated: string[] = [];
-  for (const c of candidates) {
-    if (accepted.some((a) => a.domain === c.domain)) continue;
-    const dupeOf = accepted.find((a) => titleSimilarity(a.title, c.title) >= SYNDICATION_THRESHOLD);
-    if (dupeOf) syndicated.push(c.domain);
-    else accepted.push(c);
-  }
-
+  const domains = cluster.independentDomains.filter((d) => d !== own);
+  const syndicated = cluster.syndicatedDomains.filter((d) => d !== own);
   const types = Array.from(
-    new Set(accepted.map((a) => reputationOf(a.domain)?.type).filter(Boolean) as SourceType[]),
+    new Set(domains.map((d) => reputationOf(d)?.type).filter(Boolean) as SourceType[]),
   );
-
-  return { domains: accepted.map((a) => a.domain), syndicated, types };
+  return { domains, syndicated, types };
 }
 
 const listOf = (items: string[], max = 4): string => {
@@ -313,12 +233,16 @@ export function corroborationScoreFor(count: number): number {
   return 0.95;
 }
 
-function computeCorroboration(article: Article, corpus: Article[]): FactorResult | null {
+function computeCorroboration(
+  article: Article,
+  corpus: Article[],
+  options?: FactorOptions,
+): FactorResult | null {
   // An empty or single-item corpus offers nothing to corroborate against; that
   // is an absence of evidence, not evidence of absence.
   if (corpus.length <= 1) return null;
 
-  const { domains, syndicated } = analyseCorroboration(article, corpus);
+  const { domains, syndicated } = analyseCorroboration(article, corpus, options?.clusters);
   const n = domains.length;
 
   let evidence =
@@ -420,10 +344,14 @@ export function diversityScoreFor(typeCount: number): number {
   return 0.9;
 }
 
-function computeSourceDiversity(article: Article, corpus: Article[]): FactorResult | null {
+function computeSourceDiversity(
+  article: Article,
+  corpus: Article[],
+  options?: FactorOptions,
+): FactorResult | null {
   if (corpus.length <= 1) return null;
 
-  const { domains, types } = analyseCorroboration(article, corpus);
+  const { domains, types } = analyseCorroboration(article, corpus, options?.clusters);
   // With no corroborators there is nothing to be diverse ACROSS. Reporting 0.3
   // here would double-count the corroboration penalty, so skip instead.
   if (domains.length === 0) return null;
@@ -495,7 +423,7 @@ export function defaultFactors(): CredibilityFactor[] {
       weight: 0.3,
       enabled: true,
       requiresLlm: false,
-      compute: (a, c) => computeCorroboration(a, c),
+      compute: (a, c, o) => computeCorroboration(a, c, o),
     },
     {
       id: "citation_depth",
@@ -525,7 +453,7 @@ export function defaultFactors(): CredibilityFactor[] {
       weight: 0.2,
       enabled: true,
       requiresLlm: false,
-      compute: (a, c) => computeSourceDiversity(a, c),
+      compute: (a, c, o) => computeSourceDiversity(a, c, o),
     },
     {
       id: "custom_keyword",
@@ -686,8 +614,14 @@ export function scoreCorpus(
   factors: CredibilityFactor[],
   options?: FactorOptions,
 ): CredibilityScore[] {
+  // Cluster once for the whole corpus, then reuse. Without this each article
+  // would re-cluster the entire feed.
+  const withClusters: FactorOptions = {
+    ...options,
+    clusters: options?.clusters ?? clusterStories(corpus),
+  };
   return corpus
-    .map((a) => scoreArticle(a, corpus, factors, options))
+    .map((a) => scoreArticle(a, corpus, factors, withClusters))
     .sort((x, y) => (y.score ?? -1) - (x.score ?? -1));
 }
 
