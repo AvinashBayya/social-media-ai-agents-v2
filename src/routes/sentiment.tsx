@@ -14,6 +14,7 @@ import {
   Bar,
   Legend,
 } from "recharts";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/sentiment")({
   head: () => ({ meta: [{ title: "Sentiment Analytics — Sentinel AI" }] }),
@@ -54,6 +55,7 @@ function Page() {
         title="Sentiment Analytics"
         description="Overall score, positive/negative/neutral splits, emotion analysis, and per-country/platform comparisons."
       />
+      <SampleDataBanner detail="All series on this page are generated, not measured." />
       <div className="grid gap-4 lg:grid-cols-4">
         {[
           { l: "Overall score", v: "-12", sub: "Slightly negative", val: 44 },

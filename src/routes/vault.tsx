@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   FolderLock
 } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/vault")({
   head: () => ({ meta: [{ title: "Evidence Vault — Sentinel AI" }] }),
@@ -38,13 +39,16 @@ interface EvidenceItem {
   type: "Image" | "Video" | "PDF" | "Screenshot" | "URL" | "Document" | "Social" | "News" | string;
   timestamp: string;
   source: string;
-  hash: string;
+  /** Real SHA-256 of the file bytes; null for manual records with no file. */
+  hash: string | null;
   geo: string;
   entities: string[];
   caseId: string;
-  risk: number;
+  /** Null when no analyst has rated this item. Never auto-generated. */
+  risk: number | null;
   tags: string[];
-  fileSize?: string;
+  /** Null for manually-entered records where no file was supplied. */
+  fileSize?: string | null;
   previewUrl?: string;
 }
 
@@ -147,33 +151,71 @@ function VaultPage() {
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  /**
+   * Compute a real SHA-256 over the file bytes.
+   *
+   * The hash was previously 64 random hex characters. An evidence integrity hash
+   * that is not derived from the evidence defeats the entire purpose of recording
+   * one — two identical files would hash differently, and a tampered file would
+   * still "verify". This uses SubtleCrypto, which needs a secure context; over
+   * plain HTTP on a non-localhost origin it is unavailable, and we report that
+   * rather than falling back to something that looks like a hash.
+   */
+  const sha256OfFile = async (file: File): Promise<string> => {
+    if (!globalThis.crypto?.subtle) {
+      throw new Error("SubtleCrypto unavailable — a secure context (HTTPS) is required to hash evidence.");
+    }
+    const buf = await file.arrayBuffer();
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const file = files[0];
-      const type = file.type.includes("pdf") ? "PDF" : file.type.includes("video") ? "Video" : "Image";
-      addFileEvidence(file.name, type, `${(file.size / 1024 / 1024).toFixed(1)} MB`);
+    if (files.length === 0) return;
+
+    const file = files[0];
+    const type = file.type.includes("pdf") ? "PDF" : file.type.includes("video") ? "Video" : "Image";
+
+    let hash: string;
+    try {
+      hash = await sha256OfFile(file);
+    } catch (err: any) {
+      toast.error(`Evidence not added: ${err?.message ?? err}`);
+      return;
     }
+
+    addFileEvidence(file.name, type, `${(file.size / 1024 / 1024).toFixed(1)} MB`, hash);
   };
 
-  const addFileEvidence = (name: string, type: string, size: string) => {
+  const addFileEvidence = (
+    name: string,
+    type: string,
+    size: string | null,
+    hash: string | null,
+  ) => {
     const list = [...evidenceList];
     const newId = `EVID-0${400 + list.length + 1}`;
-    const hexHash = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
-    
+
     const newItem: EvidenceItem = {
       id: newId,
       title: name,
       type: type,
       timestamp: new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC",
       source: "Local drag & drop upload",
-      hash: hexHash,
+      // Real SHA-256 of the uploaded bytes.
+      hash,
       geo: uploadGeo || "Global",
       entities: ["General Subject"],
       caseId: uploadCaseId,
-      risk: Math.round(50 + Math.random() * 40),
+      // Risk was Math.round(50 + Math.random() * 40) — an invented score that then
+      // drove the high/medium tone on the pinned investigation entry. There is no
+      // basis to score an arbitrary upload, so it is unset until an analyst rates it.
+      risk: null,
       tags: uploadTags ? uploadTags.split(",").map(t => t.trim()) : ["uploaded", type.toLowerCase()],
       fileSize: size
     };
@@ -188,7 +230,7 @@ function VaultPage() {
         type,
         "Evidence Vault Upload",
         `Evidence node attached: ${name} (${size})`,
-        newItem.risk > 70 ? "high" : "medium",
+        "medium",
         newItem
       );
     }
@@ -206,7 +248,8 @@ function VaultPage() {
       toast.error("Please provide an evidence title.");
       return;
     }
-    addFileEvidence(uploadTitle, uploadType, "1.4 MB");
+    // Manual entry: no file supplied, so there is no size and nothing to hash.
+    addFileEvidence(uploadTitle, uploadType, null, null);
   };
 
   // Tag list count helper
@@ -240,6 +283,7 @@ function VaultPage() {
         title="Evidence Vault"
         description="Tamper-proof cryptographic evidence locker. Pin files, documents, and media telemetry directly to active investigations."
       />
+      <SampleDataBanner detail="Seeded evidence records; uploaded files are hashed for real." />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-[#94A3B8]">
         {/* Main Vault Workspace */}
@@ -393,7 +437,9 @@ function VaultPage() {
                       </div>
                       <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
                         <div className="text-[#94A3B8]/50 uppercase text-[8px]">SHA-256 Checksum:</div>
-                        <div className="text-[8px] text-[#06B6D4] select-all break-all leading-normal">{selectedItem.hash}</div>
+                        <div className="text-[8px] text-[#06B6D4] select-all break-all leading-normal">
+                          {selectedItem.hash ?? "No file supplied — nothing to hash."}
+                        </div>
                       </div>
                     </div>
 

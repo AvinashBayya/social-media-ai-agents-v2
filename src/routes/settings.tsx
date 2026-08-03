@@ -12,31 +12,20 @@ import {
 
 export const getCredentials = createServerFn({ method: "GET" })
   .handler(async () => {
+    // An absent credential store means NO credentials are configured.
+    //
+    // This previously fabricated three "Active" accounts on a cache miss —
+    // sentinel_ops_01 / pass_sec_instagram_99, a fake Meta token, a fake GitHub
+    // PAT — and WROTE THEM TO DISK, so the next read returned them as though
+    // they had been configured by an operator. The container never ships data/,
+    // so this fired on every cold start in production, presenting an operator
+    // with a vault of credentials that do not exist.
     try {
       const fs = (await import("fs")).promises;
       const data = await fs.readFile("./data/credentials.json", "utf-8");
       return JSON.parse(data);
     } catch {
-      const defaults = {
-        instagram: [
-          { id: "ig-1", label: "Primary Instagram Scraper", username: "sentinel_ops_01", secret: "pass_sec_instagram_99", status: "Active", lastUsed: "Just now" }
-        ],
-        facebook: [
-          { id: "fb-1", label: "Meta Graph Access Token", username: "MetaAppAgent", secret: "EAAH1234567890abcdef...", status: "Active", lastUsed: "2h ago" }
-        ],
-        github: [
-          { id: "gh-1", label: "GitHub PAT Token", username: "developer_token", secret: "ghp_secureKey999...", status: "Inactive", lastUsed: "Never" }
-        ]
-      };
-      
-      try {
-        const fsLib = (await import("fs")).promises;
-        await fsLib.mkdir("./data", { recursive: true });
-        await fsLib.writeFile("./data/credentials.json", JSON.stringify(defaults, null, 2), "utf-8");
-      } catch (err) {
-        console.error("Failed to write default credentials:", err);
-      }
-      return defaults;
+      return { instagram: [], facebook: [], github: [] };
     }
   });
 

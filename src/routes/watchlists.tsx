@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { getWatchlists, createWatchlist } from "@/utils/watchlist-store";
 import { Bookmark, Plus, Shield, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/watchlists")({
   head: () => ({ meta: [{ title: "Watchlists — Sentinel AI" }] }),
@@ -26,6 +27,7 @@ function WatchlistsPage() {
         title="Tactical Watchlists"
         description="Monitor keyword triggers, handles, and entity clusters across open-source feeds."
       />
+      <SampleDataBanner detail="Seeded watchlists; matches against live feeds are real." />
 
       <div className="p-6 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

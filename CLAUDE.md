@@ -102,17 +102,28 @@ Core logic lives in plain exported functions (`summariseText`, `extractEntitiesF
 functions cannot execute outside the Start runtime context, so keeping the logic separate
 is what makes it testable — do not move it back inside the handlers.
 
-## GPU quota request — PENDING (raised 2026-08-01)
+## GPU quota request — NOT YET RAISED
 
-Needed later for self-hosted open-source LLM inference (vLLM). **Not yet granted; do not
-run the workload-profile command until it is.**
+Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the
+workload-profile command until quota is granted.**
+
+| | |
+|---|---|
+| Status | **Not yet submitted** — no support ticket has been filed |
+| Documented | 2026-08-03 |
+| Date raised | _(fill in when submitted)_ |
+| Ticket ref | _(fill in)_ |
+| Date granted | _(fill in)_ |
 
 - Request: `Consumption-GPU-NC8as-T4`, Central India, subscription
-  `8a8baea4-547c-4f55-b206-d6af16a24970`.
+  `8a8baea4-547c-4f55-b206-d6af16a24970`. Ask for **8 vCPU** of the
+  `Standard NCASv3_T4 Family` (one node); 16 for two concurrent.
 - Central India and South India support the **T4 profile only**. The A100 profile
-  (`Consumption-GPU-NC24-A100`) is **not available in either Indian region** — verified
-  2026-08-01 via `az containerapp env workload-profile list-supported`. Do not plan
+  (`Consumption-GPU-NC24-A100`) is **not available in either Indian region** — re-verified
+  2026-08-03 via `az containerapp env workload-profile list-supported`. Both regions return
+  the same set: D4–D32, E4–E32, Consumption, Flex, Consumption-GPU-NC8as-T4. Do not plan
   around A100 without moving region.
+- `sentinel-env` currently carries only the `Consumption` profile (checked 2026-08-03).
 - T4 is 16GB: fits 7B–14B models at 4-bit quantisation. Adequate for the demo. Sarvam and
   Mistral 3 both fit; size the model to this ceiling.
 - Target environment `sentinel-env` (`rg-sentinel-demo`) is already workload-profiles

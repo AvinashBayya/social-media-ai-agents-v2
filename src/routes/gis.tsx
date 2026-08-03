@@ -151,96 +151,65 @@ function GISPage() {
     });
   }, [activeQuery, L]);
 
-  // Assemble dynamic GeoMarkers from loaded telemetry streams
-  const allMarkers = useMemo((): GeoMarker[] => {
+  /**
+   * Assemble map markers from collected data.
+   *
+   * ONLY items with a real geographic basis are plotted. Previously every stream
+   * was placed with invented coordinates:
+   *   - news     country centroid + up to +/-2.25 deg of Math.random() jitter
+   *   - social   the "GLOBAL" centroid + jitter
+   *   - threats  a hardcoded 45.0N/15.0E (central Europe) + jitter
+   *   - telegram a hardcoded 48.0N/31.0E (Ukraine) + jitter
+   * plus a random 'hour' on every marker, which drove the time-of-day filter.
+   *
+   * On an intelligence map the pin IS the claim. An analyst reading a C2 node in
+   * Croatia that is really of unknown location is worse served than by no pin at
+   * all, so unlocatable items are counted and excluded rather than placed.
+   *
+   * News carries a country code, so it plots at COUNTRY-LEVEL precision, stated
+   * on the marker rather than implied to be exact. Overlap is resolved by a
+   * deterministic golden-angle spiral: presentation only, never persisted, and
+   * identical across renders of the same data.
+   */
+  const { allMarkers, unplaced } = useMemo(() => {
     const list: GeoMarker[] = [];
+    let skipped = 0;
 
-    // Helper to get random coord offset so items do not stack directly on center of country
-    const offset = () => (Math.random() - 0.5) * 4.5;
+    const spread = (i: number, scale = 0.6) => {
+      const angle = i * 2.399963;
+      const radius = scale * Math.sqrt(i);
+      return [radius * Math.cos(angle), radius * Math.sin(angle)] as const;
+    };
 
-    // 1. Process News
+    // News - the country code is real, if coarse.
     newsStories.forEach((s, idx) => {
-      const cc = s.countryCode || "GLOBAL";
-      const coords = COUNTRY_COORDS[cc] || COUNTRY_COORDS.GLOBAL;
-      const hour = Math.floor(Math.random() * 24);
+      const cc = s.countryCode;
+      const coords = cc ? COUNTRY_COORDS[cc] : undefined;
+      if (!coords) { skipped += 1; return; }
+      const [dLat, dLon] = spread(idx);
       list.push({
-        id: `geo-news-${idx}`,
-        lat: coords[0] + offset(),
-        lon: coords[1] + offset(),
+        id: "geo-news-" + idx,
+        lat: coords[0] + dLat,
+        lon: coords[1] + dLon,
         type: "News",
-        title: s.primaryTitle || "News Influx",
-        source: s.primarySource || "GDELT",
+        title: s.primaryTitle || "Untitled report",
+        source: (s.primarySource || "Unknown source") + " \u00b7 country-level precision",
         severity: s.threatLevel || "medium",
         timestamp: s.pubDate || new Date().toISOString(),
-        hour: hour,
+        hour: new Date(s.pubDate || Date.now()).getUTCHours(),
         caseId: s.caseId || "",
         tags: [s.category || "general"],
-        data: s
+        data: s,
       });
     });
 
-    // 2. Process Social
-    socialMentions.forEach((m, idx) => {
-      const coords = COUNTRY_COORDS.GLOBAL;
-      const hour = Math.floor(Math.random() * 24);
-      list.push({
-        id: `geo-soc-${idx}`,
-        lat: coords[0] + offset() * 2,
-        lon: coords[1] + offset() * 2,
-        type: "Social",
-        title: m.text || "Social Mention",
-        source: `${m.platform} (@${m.author})`,
-        severity: m.tone || "medium",
-        timestamp: m.pubDate || new Date().toISOString(),
-        hour: hour,
-        caseId: "",
-        tags: ["social", m.platform],
-        data: m
-      });
-    });
+    // Social mentions, cyber threats and Telegram posts carry NO location data in
+    // any collector we run. Geo-IP for the threat feeds and geocoding for post
+    // text would both be real solutions; neither is implemented, so these are
+    // excluded rather than invented.
+    skipped += socialMentions.length + cyberThreats.length + telegramPosts.length;
 
-    // 3. Process Cyber Threats
-    cyberThreats.forEach((t, idx) => {
-      // Direct cyber intelligence coordinates (e.g. active C2 server clusters)
-      const lat = 45.0 + offset() * 2;
-      const lon = 15.0 + offset() * 2;
-      const hour = Math.floor(Math.random() * 24);
-      list.push({
-        id: `geo-threat-${idx}`,
-        lat: lat,
-        lon: lon,
-        type: "Threat",
-        title: `Active C2 Node: ${t.ip || "Unknown IP"} - ${t.malware || "Malware cluster"}`,
-        source: "Feodo Blocklist",
-        severity: "critical",
-        timestamp: new Date().toISOString(),
-        hour: hour,
-        tags: ["cyber", "c2", t.malware || "botnet"],
-        data: t
-      });
-    });
-
-    // 4. Process Telegram OSINT
-    telegramPosts.forEach((p, idx) => {
-      const lat = 48.0 + offset();
-      const lon = 31.0 + offset(); // Centered near Ukraine/Russia boundaries
-      const hour = Math.floor(Math.random() * 24);
-      list.push({
-        id: `geo-tg-${idx}`,
-        lat: lat,
-        lon: lon,
-        type: "Telegram",
-        title: p.text || "OSINT Signal Alert",
-        source: `Telegram (@${p.channel || "channel"})`,
-        severity: "high",
-        timestamp: p.date || new Date().toISOString(),
-        hour: hour,
-        tags: ["conflict", "telegram"],
-        data: p
-      });
-    });
-
-    return list;
+    return { allMarkers: list, unplaced: skipped };
   }, [newsStories, socialMentions, cyberThreats, telegramPosts]);
 
   // Apply filters to active markers
@@ -607,7 +576,13 @@ function GISPage() {
                   <span className="text-[10px] font-bold text-[#F59E0B] uppercase flex items-center gap-1"><Clock className="size-3" /> SCANNER HOUR: {currentTimeHour.toString().padStart(2, "0")}:00</span>
                 </div>
                 <div className="text-[9px] text-[#94A3B8]/60">
-                  Showing {filteredMarkers.length} of {allMarkers.length} active geolocation alerts
+                  Showing {filteredMarkers.length} of {allMarkers.length} geolocated items
+                  {unplaced > 0 && (
+                    <span className="ml-1 text-[#F59E0B]">
+                      · {unplaced} collected item{unplaced === 1 ? "" : "s"} not plotted (no
+                      location data — social, threat-feed and Telegram sources carry none)
+                    </span>
+                  )}
                 </div>
               </div>
 

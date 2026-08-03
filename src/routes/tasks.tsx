@@ -10,6 +10,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { llmAnalyseContent, llmExtractEntities } from "@/utils/llm";
 import {
+  DOMAIN_TIERS, DEFAULT_WEIGHTS, domainOf, scoreArticle,
+  type FactorResult, type ScorableArticle,
+} from "@/utils/credibility";
+import {
   ListChecks,
   Shield,
   CheckCircle2,
@@ -54,61 +58,95 @@ function TasksPage() {
   const [mod4FileName, setMod4FileName] = useState("capture_drone_exif.jpg");
   const [mod4Result, setMod4Result] = useState<any>(null);
 
-  // Execute verification self test
-  const runSelfTest = () => {
+  /**
+   * Capability probe.
+   *
+   * This previously printed a fixed sequence of "[OK] ... NOMINAL" lines from a
+   * setTimeout chain and concluded "100% compliant with PS18 specs". It executed
+   * nothing and measured nothing. On a compliance console for a defence
+   * evaluation, that is the single most damaging thing in the codebase.
+   *
+   * It now actually exercises what exists and reports what does not.
+   */
+  const runSelfTest = async () => {
     setTesting(true);
-    setSelfTestLog(["[SYS] Initializing PS18 compliance diagnostics...", "[SYS] Auditing Module 1: Source Credibility Check..."]);
-    
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[OK] Module 1 filters loaded: Credibility Score & Cross Verification NOMINAL"]);
-    }, 400);
+    const log: string[] = ["[SYS] Probing implemented capability. No result is asserted without executing it."];
+    setSelfTestLog([...log]);
+    const push = (line: string) => { log.push(line); setSelfTestLog([...log]); };
 
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[SYS] Auditing Module 2: Open Source content analysis (NER & Topic Clustering)..."]);
-    }, 800);
+    // Module 1 — deterministic, runs locally.
+    push("[SYS] Module 1: source credibility...");
+    try {
+      const probe = {
+        id: "probe", title: "Probe article for capability check",
+        source: "reuters.com", url: "https://www.reuters.com/probe",
+        pubDate: new Date().toISOString(),
+      };
+      const scored = scoreArticle(probe, { all: [probe] }, DEFAULT_WEIGHTS);
+      const computed = scored.factors.filter((f) => f.score !== null).length;
+      push(`[PASS] Module 1 executed: ${computed}/${scored.factors.length} factors computed, score ${scored.score?.toFixed(2) ?? "n/a"}. Weighting is analyst-configurable on /sources.`);
+    } catch (e: any) {
+      push(`[FAIL] Module 1 threw: ${e?.message ?? e}`);
+    }
 
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[OK] Module 2 tools loaded: Semantic Search and abstractive summarization NOMINAL"]);
-    }, 1200);
+    // Module 2 — requires a live model, so this is a real network call.
+    push("[SYS] Module 2: content analysis (live model call)...");
+    try {
+      const res: any = await llmExtractEntities({
+        data: { text: "The DRDO conducted a test off the Odisha coast on Tuesday." },
+      });
+      push(`[PASS] Module 2 executed: ${res.entities?.length ?? 0} entities extracted by ${res.model}.`);
+    } catch (e: any) {
+      push(`[FAIL] Module 2 unavailable: ${e?.message ?? e}`);
+    }
 
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[SYS] Auditing Module 3: Social Intelligence (Bot detection & narrative alignment)..."]);
-    }, 1600);
+    push("[NOT IMPLEMENTED] Module 3: social media analysis. Reddit RSS and Google News site: queries are collected, but bot scoring, influence mapping and narrative alignment are not built. Instagram/Facebook require paid API access.");
+    push("[NOT IMPLEMENTED] Module 4: image/video and deepfake detection. No vision model is configured; no image is read.");
+    push("[PARTIAL] Module 5: report generation runs on the configured open-weight LLM. GIS renders real Natural Earth geometry, but per-event coordinates are not geocoded.");
+    push("[SYS] Probe complete. 2 of 5 modules execute; 1 partial; 2 not implemented. This is a prototype, not an accredited system.");
 
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[OK] Module 3 tools loaded: Influencer mapping & Hashtag analysis NOMINAL"]);
-    }, 2000);
-
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[SYS] Auditing Module 4: Computer Vision (OCR & EXIF & Deepfake scans)..."]);
-    }, 2400);
-
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[OK] Module 4 tools loaded: Bounding box object detection & face count NOMINAL"]);
-    }, 2800);
-
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[SYS] Auditing Module 5: Report generation and Leaflet GIS overlays..."]);
-    }, 3200);
-
-    setTimeout(() => {
-      setSelfTestLog(prev => [...prev, "[OK] Module 5 outputs loaded: Executive Reports and Map playback NOMINAL", "[SYS] Diagnostics successful. Sentinel OSINT command center is 100% compliant with PS18 specs."]);
-      setTesting(false);
-      toast.success("Self-Test Completed. All 5 modules are compliant.");
-    }, 3600);
+    setTesting(false);
+    toast.success("Capability probe complete — see log for what actually ran.");
   };
 
-  // Module 1 calculation
+  /**
+   * Module 1 evaluation.
+   *
+   * The bias coefficient was previously a hardcoded ternary: any source string
+   * containing "tass" or "rt" scored 85, everything else 15 — so "Bharti Airtel"
+   * scored as state media because it contains "rt". It now uses the same
+   * reputation list the real credibility engine uses.
+   *
+   * Transparency and citation depth are ANALYST-DECLARED inputs from the sliders,
+   * not measurements. That is labelled in the result rather than implied away.
+   */
   const evaluateSource = () => {
-    const bias = mod1Source.toLowerCase().includes("tass") || mod1Source.toLowerCase().includes("rt") ? 85 : 15;
-    const score = Math.round((mod1Transparency + mod1Citations + (100 - bias)) / 3);
+    const domain = domainOf(mod1Source) || mod1Source.trim().toLowerCase();
+    const key = Object.keys(DOMAIN_TIERS)
+      .filter((d) => domain === d || domain.endsWith(`.${d}`))
+      .sort((a, b) => b.length - a.length)[0];
+
+    if (!key) {
+      setMod1Result({
+        unrated: true,
+        domain,
+        note: `"${mod1Source}" is not in the reputation list. It is unrated, not penalised — add it to DOMAIN_TIERS to score it.`,
+      });
+      toast.message("Source not in reputation list — reported as unrated.");
+      return;
+    }
+
+    const reputation = DOMAIN_TIERS[key];
+    const score = Math.round(((reputation * 100) + mod1Transparency + mod1Citations) / 3);
     setMod1Result({
-      score: score,
-      verification: score > 70 ? "Cross-Verified (3+ independent channels)" : "Unverified / Coordinated Bias Alert",
-      rating: score > 75 ? "A - High Trust" : score > 50 ? "B - Medium Trust" : "C - Low Trust / State Media",
-      biasCoeff: bias
+      unrated: false,
+      domain: key,
+      reputation,
+      score,
+      declared: true,
+      rating: score > 75 ? "A — High trust" : score > 50 ? "B — Medium trust" : "C — Low trust",
     });
-    toast.success("Source evaluated.");
+    toast.success("Source evaluated against the reputation list.");
   };
 
   // Module 2 — content analysis via the configured LLM
@@ -120,47 +158,38 @@ function TasksPage() {
         llmExtractEntities({ data: { text: mod2Text } })
       ]);
 
+      // Every field now comes from the model. The previous fallbacks supplied
+      // "Vector-17 / Moscow / Cluster #42" whenever extraction returned nothing,
+      // so an empty result was indistinguishable from a confident one.
       setMod2Result({
-        ner: nerRes.entities?.length ? nerRes.entities : [
-          { entity: "Vector-17", type: "THREAT", confidence: 0.98 },
-          { entity: "Moscow", type: "LOCATION", confidence: 0.95 }
-        ],
-        topic: analysisRes.topic || "Cyber Threat",
-        sentiment: analysisRes.sentiment || "negative",
-        threatLevel: analysisRes.threatLevel || "critical",
-        cluster: "Cluster #42 — Spaceport Vulnerabilities",
-        summary: analysisRes.summary || "Coordinated threat activity identified near spaceport infrastructure.",
-        keywords: analysisRes.keywords?.length ? analysisRes.keywords : ["cyber", "malware", "vector-17"]
+        ner: nerRes.entities ?? [],
+        topic: analysisRes.topic,
+        sentiment: analysisRes.sentiment,
+        threatLevel: analysisRes.threatLevel,
+        summary: analysisRes.summary,
+        keywords: analysisRes.keywords ?? [],
+        model: analysisRes.model,
+        error: "",
       });
       toast.success("Module 2 analysis complete.");
     } catch (e: any) {
+      setMod2Result({ error: e?.message ?? String(e) });
       toast.error("AI unavailable — Module 2 analysis failed.");
     }
   };
 
-  // Module 3 calculation
-  const analyzeSocial = () => {
-    const isBot = mod3Handle.toLowerCase().includes("bot") || mod3Handle.toLowerCase().includes("disinfo") ? 88 : 24;
-    setMod3Result({
-      botLikelihood: isBot,
-      influencerScore: 35 + (mod3Handle.length * 2) % 60,
-      narrative: isBot > 70 ? "Coordinated narrative amplification (Disinfo cluster)" : "Organic/independent feedback",
-      hashtagGrowth: "+124% weekly hashtag amplification density"
-    });
-    toast.success("Social metrics calculated.");
-  };
-
-  // Module 4 calculation
-  const analyzeMedia = () => {
-    setMod4Result({
-      ocrText: "SERIAL: CN-9821 MODEL: DR-X",
-      metadata: "EXIF: Capture Date 2026-07-24, Cam: Hasselblad, Location: 35.68° N, 51.38° E",
-      deepfake: "12% likelihood of AI alteration (Organic Image)",
-      objects: ["1 Drone", "2 Vehicles", "1 Antenna mast"],
-      faces: 0
-    });
-    toast.success("Media analysis complete.");
-  };
+  // Modules 3 and 4 are NOT implemented.
+  //
+  // Module 3 previously returned a bot likelihood of 88 or 24 depending on
+  // whether the handle contained "bot"/"disinfo", an influencer score derived
+  // from the LENGTH of the handle string, and a hardcoded "+124% weekly"
+  // growth figure.
+  //
+  // Module 4 returned fixed OCR text, fixed EXIF, a fixed "12% likelihood of AI
+  // alteration" and a fixed object list — without reading any image at all.
+  //
+  // Both are deliberately left unimplemented rather than restored in any form:
+  // honest absence is defensible at evaluation, invented forensics is not.
 
   return (
     <AppShell>
@@ -299,22 +328,29 @@ function TasksPage() {
 
                 {mod1Result && (
                   <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2 text-[10px]">
-                    <div className="flex justify-between">
-                      <span>Credibility Index Score:</span>
-                      <strong className="text-white font-bold">{mod1Result.score}/100</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Cross-Verification Status:</span>
-                      <span className="text-[#06B6D4] font-bold">{mod1Result.verification}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Confidence Rating:</span>
-                      <Tone tone={mod1Result.score > 70 ? "verified" : "high"} />
-                    </div>
-                    <div className="flex justify-between">
-                      <span>State Media / Bias coefficient:</span>
-                      <span className="text-red-500 font-bold">{mod1Result.biasCoeff}%</span>
-                    </div>
+                    {mod1Result.unrated ? (
+                      <p className="text-[#F59E0B] leading-relaxed">{mod1Result.note}</p>
+                    ) : (
+                      <>
+                        <div className="flex justify-between">
+                          <span>Composite score:</span>
+                          <strong className="text-white font-bold">{mod1Result.score}/100</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Domain reputation ({mod1Result.domain}):</span>
+                          <span className="text-[#06B6D4] font-bold">{mod1Result.reputation.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Rating:</span>
+                          <strong className="text-white">{mod1Result.rating}</strong>
+                        </div>
+                        <p className="border-t border-[#263548]/30 pt-1.5 text-[9px] leading-relaxed text-[#94A3B8]">
+                          Reputation is from the editable domain list. Transparency and citation
+                          depth are analyst-declared slider values, not measurements. Cross-source
+                          verification is computed per article on the Source Credibility page, not here.
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -338,126 +374,97 @@ function TasksPage() {
 
                 {mod2Result && (
                   <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2.5 text-[10px]">
-                    <div className="space-y-1">
-                      <span className="text-[#94A3B8]/60 uppercase text-[9px] block">Named Entity Recognition (NER):</span>
-                      <div className="flex flex-wrap gap-1">
-                        {mod2Result.entities.map((ent: string, idx: number) => (
-                          <Badge key={idx} variant="outline" className="border-[#263548] text-white bg-[#111827] text-[8px] rounded-none h-4 uppercase">{ent}</Badge>
-                        ))}
+                    {mod2Result.error ? (
+                      <div className="space-y-1">
+                        <span className="font-bold text-[#EF4444]">AI unavailable</span>
+                        <p className="text-[9px] leading-relaxed text-[#EF4444]/80">
+                          No analysis was produced. {mod2Result.error}
+                        </p>
                       </div>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Topic Category:</span>
-                      <strong className="text-white uppercase">{mod2Result.topic}</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Clustering Group:</span>
-                      <span className="text-[#F59E0B] font-bold font-mono">{mod2Result.cluster}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Semantic Search Similarity:</span>
-                      <span className="text-[#06B6D4] font-bold font-mono">{mod2Result.similarity}</span>
-                    </div>
-                    <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
-                      <span className="text-[#94A3B8]/60 uppercase text-[9px] block font-bold">Abstractive Summarization:</span>
-                      <p className="italic text-white">"{mod2Result.summary}"</p>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="text-[9px] uppercase text-[#64748B]">
+                          Generated by {mod2Result.model}
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-[#94A3B8]/60 uppercase text-[9px] block">
+                            Named entities ({mod2Result.ner.length}):
+                          </span>
+                          {mod2Result.ner.length === 0 ? (
+                            <p className="text-[#94A3B8]">The model extracted no entities from this text.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {mod2Result.ner.map((ent: any, idx: number) => (
+                                <Badge key={idx} variant="outline" className="border-[#263548] text-white bg-[#111827] text-[8px] rounded-none h-4 uppercase">
+                                  {ent.entity} · {ent.type} · {ent.confidence}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Topic:</span>
+                          <strong className="text-white uppercase">{mod2Result.topic}</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Sentiment / threat level:</span>
+                          <strong className="text-white uppercase">
+                            {mod2Result.sentiment} / {mod2Result.threatLevel}
+                          </strong>
+                        </div>
+                        <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
+                          <span className="text-[#94A3B8]/60 uppercase text-[9px] block font-bold">Summary:</span>
+                          <p className="italic text-white">"{mod2Result.summary}"</p>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </CardContent>
             </Card>
           )}
 
-          {/* Tab 4: Module 3 Social Intelligence */}
+          {/* Tab 4: Module 3 — NOT IMPLEMENTED */}
           {activeTab === "mod3" && (
             <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#F59E0B]" />
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#64748B]" />
               <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">Module 3: Social Intelligence Calculator</CardTitle>
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">Module 3: Social Intelligence — Not Implemented</CardTitle>
               </CardHeader>
-              <CardContent className="p-4 space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase">Social Profile Handle / Hashtag</label>
-                  <Input value={mod3Handle} onChange={(e) => setMod3Handle(e.target.value)} className="h-8 text-[11px] border-[#263548] bg-[#0B1220] text-white rounded" />
-                </div>
-
-                <Button onClick={analyzeSocial} className="h-7 bg-[#F59E0B] hover:bg-[#F59E0B]/90 text-[#0B1220] font-mono text-[9px] uppercase px-3 rounded font-bold">Evaluate Social Metrics</Button>
-
-                {mod3Result && (
-                  <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2 text-[10px]">
-                    <div className="flex justify-between items-center">
-                      <span>Bot Likelihood score:</span>
-                      <strong className={mod3Result.botLikelihood > 50 ? "text-red-500 font-bold" : "text-green-500 font-bold"}>{mod3Result.botLikelihood}%</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Influencer Score (Reach):</span>
-                      <strong className="text-white">{mod3Result.influencerScore}/100</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Narrative Coordination:</span>
-                      <span className="text-[#06B6D4] font-bold">{mod3Result.narrative}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Hashtag Trend Analysis:</span>
-                      <span className="text-[#22C55E] font-bold">{mod3Result.hashtagGrowth}</span>
-                    </div>
-                  </div>
-                )}
+              <CardContent className="p-4 space-y-3 text-[10px] text-[#94A3B8] font-mono leading-relaxed">
+                <p className="text-[#F59E0B]">This module does not produce a result. Nothing is calculated.</p>
+                <p>
+                  The previous version returned a bot likelihood of 88 or 24 depending on whether the
+                  handle contained "bot" or "disinfo", an influencer score derived from the length of
+                  the handle string, and a fixed "+124% weekly" growth figure. None of it measured anything.
+                </p>
+                <p>
+                  <span className="text-[#F3F4F6] font-bold">What does work:</span> Reddit RSS collection and
+                  Google News <code>site:</code> queries, on the News and Recon pages. Bot scoring, influence
+                  mapping and narrative alignment are not built. Instagram and Facebook require paid API access.
+                </p>
               </CardContent>
             </Card>
           )}
 
-          {/* Tab 5: Module 4 Image & Video */}
+          {/* Tab 5: Module 4 — NOT IMPLEMENTED */}
           {activeTab === "mod4" && (
             <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#EF4444]" />
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#64748B]" />
               <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">Module 4: Computer Vision Sandbox</CardTitle>
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">Module 4: Computer Vision — Not Implemented</CardTitle>
               </CardHeader>
-              <CardContent className="p-4 space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase">Select Mock Media File</label>
-                  <select
-                    value={mod4FileName}
-                    onChange={(e) => setMod4FileName(e.target.value)}
-                    className="w-full h-8 px-2 border border-[#263548] bg-[#0B1220] rounded text-[11px] text-white font-mono outline-none"
-                  >
-                    <option value="capture_drone_exif.jpg">capture_drone_exif.jpg</option>
-                    <option value="deepfake_press_briefing.mp4">deepfake_press_briefing.mp4</option>
-                    <option value="memo_redacted_ocr.png">memo_redacted_ocr.png</option>
-                  </select>
-                </div>
-
-                <Button onClick={analyzeMedia} className="h-7 bg-[#EF4444] hover:bg-[#EF4444]/90 text-white font-mono text-[9px] uppercase px-3 rounded">Analyze Media file</Button>
-
-                {mod4Result && (
-                  <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2.5 text-[10px]">
-                    <div className="flex justify-between">
-                      <span>OCR Text Extraction:</span>
-                      <strong className="text-white font-mono">{mod4Result.ocrText}</strong>
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="text-[#94A3B8]/60 uppercase text-[9px]">EXIF Metadata extracted:</span>
-                      <div className="text-white font-mono text-[9px] break-all leading-normal bg-[#111827] p-2 border border-[#263548]/30 rounded">{mod4Result.metadata}</div>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Deepfake Likelihood:</span>
-                      <strong className="text-red-500">{mod4Result.deepfake}</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Objects Detected:</span>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {mod4Result.objects.map((obj: string, idx: number) => (
-                          <Badge key={idx} variant="outline" className="border-[#263548] text-white bg-[#111827] text-[8px] rounded-none h-4 uppercase">{obj}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Face count:</span>
-                      <span className="text-[#06B6D4] font-bold font-mono">{mod4Result.faces} faces</span>
-                    </div>
-                  </div>
-                )}
+              <CardContent className="p-4 space-y-3 text-[10px] text-[#94A3B8] font-mono leading-relaxed">
+                <p className="text-[#F59E0B]">This module does not produce a result. No image is read.</p>
+                <p>
+                  The previous version returned fixed OCR text, fixed EXIF metadata, a fixed
+                  "12% likelihood of AI alteration" and a fixed object list — without opening any file.
+                  The file selector listed mock filenames that were never loaded.
+                </p>
+                <p>
+                  Deepfake and synthetic-media detection requires a vision model. None is configured, and
+                  no honest free option exists within the current budget.
+                </p>
               </CardContent>
             </Card>
           )}

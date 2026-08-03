@@ -12,11 +12,11 @@ export const Route = createFileRoute("/alerts")({
 
 function AlertsPage() {
   const activeTarget = getActiveTarget();
-  const ALERTS = [
-    { title: `Volume Spike (>50%) detected on ${activeTarget}`, level: "HIGH", time: "12m ago" },
-    { title: `State Media citation flagged in Google News for ${activeTarget}`, level: "MEDIUM", time: "45m ago" },
-    { title: `New C2 IP block match registered`, level: "CRITICAL", time: "2h ago" },
-  ];
+  // These three alerts were invented, with the live target interpolated in and
+  // fake relative timestamps ("12m ago") to look like a real feed. No alerting
+  // pipeline exists: nothing computes volume spikes, flags state-media citations
+  // or watches C2 blocklists for matches. An empty alert centre is correct.
+  const ALERTS: { title: string; level: string; time: string }[] = [];
 
   return (
     <AppShell>

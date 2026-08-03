@@ -167,7 +167,7 @@ function AgentsPage() {
 
       setOutputResult({
         title,
-        classification: riskScore > 70 ? "SECRET // ORCON // NOFORN" : "CONFIDENTIAL // LAW ENFORCEMENT",
+        classification: "UNCLASSIFIED // DEMONSTRATOR",
         risk: riskScore,
         blocks
       });

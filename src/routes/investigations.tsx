@@ -32,6 +32,7 @@ import {
   Tag,
   AlertTriangle
 } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/investigations")({
   head: () => ({ meta: [{ title: "AI Investigations — Sentinel AI" }] }),
@@ -48,7 +49,7 @@ function InvestigationsPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newKeywords, setNewKeywords] = useState("");
-  const [newOwner, setNewOwner] = useState("A. Chen");
+  const [newOwner, setNewOwner] = useState("Unassigned");
 
   // Notes state
   const [noteInput, setNoteInput] = useState("");
@@ -121,7 +122,8 @@ function InvestigationsPage() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => refreshList()} className="font-mono text-xs gap-1.5 border-[#263548] text-[#94A3B8] hover:bg-[#1A2332]">
-              <RefreshCw className="size-3.5" /> Refresh List
+              <RefreshCw className="size-3.5" />
+      <SampleDataBanner detail="Seeded case dossiers." /> Refresh List
             </Button>
             <Button size="sm" onClick={() => setShowCreateForm(!showCreateForm)} className="gap-1.5 font-mono text-xs bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white">
               <Plus className="size-3.5" /> New Investigation

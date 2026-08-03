@@ -15,7 +15,8 @@ export interface Watchlist {
   name: string;
   description: string;
   filters: WatchlistFilters;
-  riskScore: number;
+  /** Null until scored against real matches. Never randomised. */
+  riskScore: number | null;
   createdAt: string;
 }
 
@@ -32,7 +33,7 @@ export interface WatchlistMatch {
 const DEFAULT_WATCHLISTS: Watchlist[] = [
   {
     id: "wl-1",
-    name: "Global Conflict Pulse",
+    name: "[SAMPLE] Global Conflict Pulse",
     description: "Monitoring critical threats, physical conflict nodes, and CIB operations.",
     filters: {
       keywords: ["leak", "surveillance", "drone", "intercept", "cyber attack"],
@@ -50,7 +51,7 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
   },
   {
     id: "wl-2",
-    name: "Enterprise Brand Protection",
+    name: "[SAMPLE] Enterprise Brand Protection",
     description: "Tracking brand risk vectors, vendor vulnerabilities, and leaks for partner entities.",
     filters: {
       keywords: ["breach", "exploit", "hack", "ransomware", "defamation"],
@@ -99,7 +100,9 @@ export function createWatchlist(
     name: name || "New Watchlist",
     description: description || "Intel monitoring filter.",
     filters: filters,
-    riskScore: Math.round(40 + Math.random() * 50),
+    // Was Math.round(40 + Math.random() * 50) — a random risk score attached to
+    // a watchlist the analyst just created, before it had matched anything.
+    riskScore: null,
     createdAt: new Date().toISOString()
   };
   list.unshift(newWatch);
@@ -190,20 +193,13 @@ export function getWatchlistMatches(watchlist: Watchlist, searchData: {
     });
   }
 
-  // Fallback match generator if search results are completely empty (so the dashboard always has live indicators!)
-  if (matches.length === 0) {
-    filters.keywords.slice(0, 3).forEach((kw, idx) => {
-      matches.push({
-        id: `match-fb-${idx}`,
-        source: "System Tracker",
-        title: `Telemetry alert triggered for watchlist criteria: ${kw}`,
-        matchValue: kw,
-        matchType: "Keyword",
-        date: new Date(Date.now() - idx * 1000 * 60 * 15).toISOString(),
-        severity: idx === 0 ? "high" : "medium"
-      });
-    });
-  }
+  // A watchlist that matched nothing returns nothing.
+  //
+  // This previously invented up to three "System Tracker" telemetry alerts with
+  // staggered timestamps, so an empty result looked like a live feed. The comment
+  // said the quiet part out loud: "so the dashboard always has live indicators".
+  // Fabricated watchlist hits are the most misleading thing this system could
+  // put in front of an analyst.
 
   return matches.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Search, ZoomIn, ZoomOut, Maximize2, Route as RouteIcon, Filter } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/graph")({
   head: () => ({ meta: [{ title: "Knowledge Graph — Sentinel AI" }] }),
@@ -65,6 +66,7 @@ function Page() {
           <>
             <Button variant="outline" size="sm" className="gap-1.5">
               <RouteIcon className="size-3.5" />
+      <SampleDataBanner detail="The entity graph is a fixed topology, not derived from collected entities." />
               Path finding
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5">

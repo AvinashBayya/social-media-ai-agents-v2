@@ -913,20 +913,12 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                             if (val > empCount) empCount = val;
                           }
                         }
-                        if (empCount > 0) {
-                          const estimatedLi = empCount * 12;
-                          if (estimatedLi >= 1000000) {
-                            liFollowers = (estimatedLi / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
-                          } else if (estimatedLi >= 1000) {
-                            liFollowers = (estimatedLi / 1000).toFixed(1).replace(/\.0$/, "") + "K";
-                          } else {
-                            liFollowers = estimatedLi.toString();
-                          }
-                        } else if (xFollowers !== "N/A") {
-                          liFollowers = xFollowers;
-                        } else {
-                          liFollowers = "250K";
-                        }
+                        // The follower count was previously Wikidata's employee
+                        // count multiplied by 12 — an invented conversion shown as
+                        // a measured audience size. Wikidata carries no follower
+                        // data, and neither does the search-result URL, so this is
+                        // reported as unavailable.
+                        liFollowers = "N/A";
                       }
 
                       if (p3984 && !isFalseSubreddit) {
@@ -962,7 +954,8 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
               if (xHandle === "No public profile found") {
                 xHandle = "@" + xMatch[1];
                 xStatus = "Monitored · Active Ingestion";
-                xFollowers = "1.2M";
+                // No follower count is available from a search-result URL.
+                xFollowers = "N/A";
               }
             }
             
@@ -971,7 +964,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
               if (liHandle === "No public profile found") {
                 liHandle = liMatch[1];
                 liStatus = "Monitored · Active Ingestion";
-                liFollowers = "450K";
+                liFollowers = "N/A";
               }
             }
           }
@@ -1098,16 +1091,17 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
           if (posCount > negCount) tone = "positive";
           else if (negCount > posCount) tone = "negative";
 
-          const likes = Math.floor(Math.random() * 200) + 10;
-          const shares = Math.floor(likes * (0.05 + Math.random() * 0.1)) + 1;
-
+          // likes/shares were Math.random(); the author was synthesised from the
+          // query ("@r_<query>_user") or hardcoded to "@medium_writer". The
+          // headline, link and date are real, so those are kept and the invented
+          // engagement and authorship dropped.
           mentions.push({
-            author: isReddit ? `@r_${q.toLowerCase().replace(/[^a-z0-9]/g, "")}_user` : `@medium_writer`,
+            author: null,
             platform: isReddit ? "Reddit" : "Medium",
             text: title,
             pubDate: safeIsoDate(item.pubDate),
-            likes,
-            shares,
+            likes: null,
+            shares: null,
             tone,
             url: item.link
           });
@@ -1116,74 +1110,33 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
         console.error("Reddit RSS fetch failed:", rssErr);
       }
 
-      // 4. Combined mentions cache loader (Option 2 - Facebook & Instagram)
+      // 4. Cached Facebook / Instagram mentions.
+      //
+      // This block previously did three things that must never come back:
+      //   1. When the cache file was missing it INVENTED two social posts with
+      //      Math.random() likes and shares and returned them as collected
+      //      intelligence. The container never ships data/, so that branch fired
+      //      on every single request in production.
+      //   2. It wrote those invented posts back to disk, laundering them into
+      //      the cache so they looked collected on the next read.
+      //   3. It shelled out to the Python scraper, interpolating
+      //      the user query into a shell command. python does not exist in
+      //      node:22-alpine, and the scraper logged into Instagram with stored
+      //      credentials, which breaches Meta ToS.
+      //
+      // An absent or empty cache now simply yields no mentions.
       let cachedMatches: any[] = [];
       try {
-        const cacheFilePath = "./data/social_cache.json";
         const fs = (await import("fs")).promises;
-        const cacheRaw = await fs.readFile(cacheFilePath, "utf-8");
+        const cacheRaw = await fs.readFile("./data/social_cache.json", "utf-8");
         const cacheItems = JSON.parse(cacheRaw);
-        
         const queryLower = q.toLowerCase();
-        cachedMatches = cacheItems.filter((item: any) => item.query && item.query.toLowerCase() === queryLower);
-      } catch (cacheErr) {
-        // Cache file not found
-      }
-
-      // If no cached matches exist for this query, generate initial cache entries instantly
-      // and trigger the background Playwright agent automatically to scrape live data!
-      if (cachedMatches.length === 0) {
-        const initialScrapings = [
-          {
-            query: q,
-            author: `@${q.toLowerCase().replace(/[^a-z0-9]/g, "")}_agent`,
-            platform: "Instagram",
-            text: `Ingesting live Instagram visual stories matching search index for ${q}. Progressing with multi-vector research.`,
-            pubDate: new Date().toISOString(),
-            likes: Math.floor(Math.random() * 900) + 50,
-            shares: Math.floor(Math.random() * 45) + 2,
-            url: `https://www.instagram.com/explore/tags/${q.toLowerCase().replace(/\s+/g, "")}/`
-          },
-          {
-            query: q,
-            author: q,
-            platform: "Facebook",
-            text: `Community discussion board updates recorded on Facebook portal regarding ${q}. Ingestion pipeline verified.`,
-            pubDate: new Date(Date.now() - 3600000).toISOString(),
-            likes: Math.floor(Math.random() * 400) + 20,
-            shares: Math.floor(Math.random() * 30) + 1,
-            url: `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`
-          }
-        ];
-
-        cachedMatches = initialScrapings;
-
-        // Save these to the cache file so they are stored
-        try {
-          const cacheFilePath = "./data/social_cache.json";
-          const fs = (await import("fs")).promises;
-          let existingItems = [];
-          try {
-            const raw = await fs.readFile(cacheFilePath, "utf-8");
-            existingItems = JSON.parse(raw);
-          } catch {}
-          
-          const updated = [...initialScrapings, ...existingItems];
-          await fs.writeFile(cacheFilePath, JSON.stringify(updated, null, 2), "utf-8");
-        } catch (writeErr) {
-          console.error("Failed to write initial cache:", writeErr);
-        }
-      }
-
-      // Trigger actual scraper in the background automatically!
-      try {
-        const { exec } = await import("child_process");
-        const cleanQ = q.replace(/"/g, '\\"');
-        exec(`python scripts/agent_scraper.py --query "${cleanQ}"`, (err) => {
-          if (err) console.error("Auto background scraper failed:", err);
-        });
-      } catch (execErr) {
-        console.error("Failed to spawn background scraper:", execErr);
+        cachedMatches = Array.isArray(cacheItems)
+          ? cacheItems.filter((item: any) => item?.query && String(item.query).toLowerCase() === queryLower)
+          : [];
+      } catch {
+        // No cache file, or unreadable. Genuinely zero cached mentions.
+        cachedMatches = [];
       }
 
       // Add matches to mentions list
@@ -1255,7 +1208,9 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
             images.push({
               title: page.title,
               url: page.thumbnail.source,
-              size: `${Math.floor(Math.random() * 500) + 100} KB`,
+              // The API does not report a byte size for thumbnails, and the
+              // previous value was Math.random(). Report nothing instead.
+              size: null,
               type: "Image"
             });
           }
@@ -1310,7 +1265,8 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
           title,
           url: item.link,
           pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
-          size: isPdf ? "1.8 MB" : "428 KB",
+          // Fixed sizes invented per file type; nothing measured them.
+          size: null,
           type: isPdf ? "PDF" : "Document"
         });
       }

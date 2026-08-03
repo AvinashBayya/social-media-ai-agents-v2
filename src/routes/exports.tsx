@@ -61,7 +61,7 @@ function ExportsPage() {
           references: true
         },
         query: activeTarget,
-        analyst: "A. Chen (Lead Intelligence Officer)",
+        analyst: "Unassigned (no authenticated user)",
         data: {
           profile: {
             summary: aiReport.text,
@@ -145,7 +145,7 @@ function ExportsPage() {
                 Select Export Document Format
               </div>
             </div>
-            <span className="text-xs text-[#94A3B8]">Classification: SECRET // NOFORN</span>
+            <span className="text-xs text-[#94A3B8]">Classification: UNCLASSIFIED // DEMONSTRATOR</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">

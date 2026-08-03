@@ -3,6 +3,7 @@ import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Bot, Users } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/network")({
   head: () => ({ meta: [{ title: "Network Analysis — Sentinel AI" }] }),
@@ -62,6 +63,7 @@ function Page() {
         title="Network Analysis"
         description="Clusters, influencers, bot detection, and community structure across social platforms."
       />
+      <SampleDataBanner detail="Account reach and follower figures are illustrative." />
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <Card>
           <CardContent className="p-0">

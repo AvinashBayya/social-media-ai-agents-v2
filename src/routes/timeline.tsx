@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useState, useEffect } from "react";
 import { getInvestigations } from "@/utils/investigations-store";
 import { Clock } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/timeline")({
   head: () => ({ meta: [{ title: "Timeline Explorer — Sentinel AI" }] }),
@@ -99,6 +100,7 @@ function TimelinePage() {
         title="Timeline Explorer"
         description="A chronological view of alerts, dynamic evidence compilation, and case history logs."
       />
+      <SampleDataBanner detail="Timeline events are seeded examples." />
       <Card className="bg-[#111827] border-[#263548] rounded">
         <CardContent className="p-6 font-mono text-xs text-[#94A3B8]">
           <div className="relative pl-6">

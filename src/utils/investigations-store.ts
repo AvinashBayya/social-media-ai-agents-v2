@@ -31,7 +31,7 @@ const DEFAULT_CASES: Investigation[] = [
   {
     id: "INV-2041",
     target: "Vector-17",
-    title: "Vector-17 · surveillance leak",
+    title: "[SAMPLE] Vector-17 · surveillance leak",
     description: "Suspected exposure of internal surveillance program with imagery attributed to watchlist subject Vector-17. Cross-linked with fintech breach chatter.",
     status: "Active",
     owner: "A. Chen",
@@ -74,7 +74,7 @@ const DEFAULT_CASES: Investigation[] = [
   {
     id: "INV-2038",
     target: "Election Integrity",
-    title: "#ElectionIntegrity CIB cluster",
+    title: "[SAMPLE] #ElectionIntegrity CIB cluster",
     description: "Coordinated Inauthentic Behavior targeting electoral narratives using network of automated handles.",
     status: "Active",
     owner: "M. Ortega",
@@ -116,7 +116,7 @@ export function createInvestigation(
   title: string,
   description: string,
   keywords: string[] = [],
-  owner: string = "A. Chen"
+  owner: string = "Unassigned"
 ): Investigation {
   const list = getInvestigations();
   const nextNum = list.length > 0 ? Math.max(...list.map(c => parseInt(c.id.split("-")[1]) || 2000)) + 1 : 2042;

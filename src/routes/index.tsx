@@ -52,6 +52,8 @@ function CommandHub() {
   
   // Executive briefing state (open-weight LLM)
   const [aiBriefing, setAiBriefing] = useState<string>("");
+  const [briefModel, setBriefModel] = useState<string>("");
+  const [briefError, setBriefError] = useState<string>("");
   const [loadingBrief, setLoadingBrief] = useState(false);
 
   useEffect(() => {
@@ -80,6 +82,8 @@ function CommandHub() {
   const fetchAiBrief = async (targetStr: string) => {
     if (typeof window === "undefined") return;
     setLoadingBrief(true);
+    setBriefError("");
+    setAiBriefing("");
     try {
       const res = await llmExecutiveBrief({
         data: {
@@ -88,8 +92,12 @@ function CommandHub() {
         }
       });
       setAiBriefing(res.text);
-    } catch {
-      setAiBriefing(`Automated OSINT intelligence scan active for "${targetStr}". Digital footprint monitoring active across news wires, social streams, and DNS subnets.`);
+      setBriefModel(res.model);
+    } catch (err: any) {
+      // Previously this wrote a fabricated "monitoring active across news wires,
+      // social streams and DNS subnets" briefing whenever the model failed —
+      // an invented intelligence product presented as a real one.
+      setBriefError(err?.message ?? String(err));
     } finally {
       setLoadingBrief(false);
     }
@@ -120,7 +128,7 @@ function CommandHub() {
                   ACTIVE TARGET: {activeTarget.toUpperCase()}
                 </Badge>
                 <span className="text-xs font-mono text-[#94A3B8]">
-                  CLASSIFICATION: <span className="text-[#F3F4F6] font-bold">SECRET // NOFORN</span>
+                  CLASSIFICATION: <span className="text-[#F3F4F6] font-bold">UNCLASSIFIED // DEMONSTRATOR</span>
                 </span>
               </div>
               <Button
@@ -167,43 +175,32 @@ function CommandHub() {
           </div>
         </Card>
 
-        {/* Executive Triage Metrics Bar */}
-        <div className="grid grid-[#263548] grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="bg-[#111827] border-[#263548] p-4">
-            <div className="text-[10px] font-mono text-[#94A3B8] uppercase">Confidence Score</div>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-mono font-bold text-[#F3F4F6]">85%</span>
-              <span className="text-[10px] font-mono text-[#10B981] font-bold">HIGH CONF</span>
-            </div>
-            <Progress value={85} className="h-1.5 mt-3 bg-[#0B1220] [&>div]:bg-[#10B981]" />
-          </Card>
+        {/*
+          Executive triage metrics.
 
-          <Card className="bg-[#111827] border-[#263548] p-4">
-            <div className="text-[10px] font-mono text-[#94A3B8] uppercase">Overall Threat Risk</div>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-mono font-bold text-[#EF4444]">68/100</span>
-              <span className="text-[10px] font-mono text-[#EF4444] font-bold">ELEVATED</span>
-            </div>
-            <Progress value={68} className="h-1.5 mt-3 bg-[#0B1220] [&>div]:bg-[#EF4444]" />
-          </Card>
+          These four tiles previously displayed 85% / 68 / -12 / 148 as constants
+          — they were never computed from anything and did not change with the
+          target. Aggregate scoring across modules is not implemented, so they
+          report no value rather than a confident-looking invented one.
 
-          <Card className="bg-[#111827] border-[#263548] p-4">
-            <div className="text-[10px] font-mono text-[#94A3B8] uppercase">Public Sentiment</div>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-mono font-bold text-[#F59E0B]">-12</span>
-              <span className="text-[10px] font-mono text-[#F59E0B] font-bold">MODERATE NEGATIVE</span>
-            </div>
-            <Progress value={40} className="h-1.5 mt-3 bg-[#0B1220] [&>div]:bg-[#F59E0B]" />
-          </Card>
-
-          <Card className="bg-[#111827] border-[#263548] p-4">
-            <div className="text-[10px] font-mono text-[#94A3B8] uppercase">Evidence Collected</div>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-mono font-bold text-[#3B82F6]">148</span>
-              <span className="text-[10px] font-mono text-[#3B82F6] font-bold">NODES EXPRESSED</span>
-            </div>
-            <Progress value={90} className="h-1.5 mt-3 bg-[#0B1220] [&>div]:bg-[#3B82F6]" />
-          </Card>
+          Source credibility IS scored for real, per article, on /sources.
+        */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[
+            { label: "Confidence Score", why: "No aggregate confidence model implemented." },
+            { label: "Overall Threat Risk", why: "No cross-module risk aggregation implemented." },
+            { label: "Public Sentiment", why: "Sentiment is not computed over collected data." },
+            { label: "Evidence Collected", why: "Evidence store is local-only and uncounted." },
+          ].map((m) => (
+            <Card key={m.label} className="bg-[#111827] border-[#263548] p-4">
+              <div className="text-[10px] font-mono text-[#94A3B8] uppercase">{m.label}</div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-mono font-bold text-[#64748B]">—</span>
+                <span className="text-[10px] font-mono text-[#64748B] font-bold">NOT MEASURED</span>
+              </div>
+              <p className="mt-3 text-[9px] font-mono leading-relaxed text-[#64748B]">{m.why}</p>
+            </Card>
+          ))}
         </div>
 
         {/* AI Briefing & Strategic Recommendations */}
@@ -213,7 +210,7 @@ function CommandHub() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-mono flex items-center gap-2 text-[#F3F4F6]">
                   <Bot className="size-4 text-[#10B981]" />
-                  EXECUTIVE AI BRIEFING (GEMINI 2.0 FLASH)
+                  EXECUTIVE AI BRIEFING
                 </CardTitle>
                 <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 font-mono text-[10px]">
                   LIVE GENERATION
@@ -226,34 +223,60 @@ function CommandHub() {
                   <RefreshCw className="size-5 animate-spin mx-auto text-[#10B981]" />
                   <p>Querying the configured LLM for a target intelligence brief...</p>
                 </div>
-              ) : (
-                <div className="text-xs font-mono text-[#CBD5E1] whitespace-pre-wrap leading-relaxed">
-                  {aiBriefing}
+              ) : briefError ? (
+                <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
+                  <div className="text-xs font-mono font-bold text-[#EF4444]">AI unavailable</div>
+                  <p className="mt-1 text-[10px] font-mono leading-relaxed text-[#EF4444]/80">
+                    No briefing was produced. {briefError}
+                  </p>
                 </div>
+              ) : aiBriefing ? (
+                <>
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-[#64748B]">
+                    AI-generated · {briefModel}
+                  </div>
+                  <div className="text-xs font-mono text-[#CBD5E1] whitespace-pre-wrap leading-relaxed">
+                    {aiBriefing}
+                  </div>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs font-mono text-[#64748B]">
+                  No briefing generated yet.
+                </p>
               )}
             </CardContent>
           </Card>
 
           <Card className="bg-[#111827] border-[#263548]">
             <CardHeader className="border-b border-[#263548] pb-3">
+              {/*
+                These three were static strings with the target interpolated in.
+                Nothing generated them and they never varied, so presenting them
+                as machine-derived analysis was false. Relabelled as the fixed
+                procedural checklist they actually are.
+              */}
               <CardTitle className="text-sm font-mono flex items-center gap-2 text-[#F3F4F6]">
-                <Sparkles className="size-4 text-[#F59E0B]" />
-                AI RECOMMENDATIONS
+                <Sparkles className="size-4 text-[#64748B]" />
+                STANDARD ANALYST CHECKLIST
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-3">
-              <div className="p-3 rounded bg-[#0B1220] border border-[#263548] text-xs font-mono space-y-1">
-                <span className="text-[#EF4444] font-bold">REC_01:</span>
-                <p className="text-[#94A3B8]">Execute deep OSINT scan on associated C2 subnets for {activeTarget}.</p>
-              </div>
-              <div className="p-3 rounded bg-[#0B1220] border border-[#263548] text-xs font-mono space-y-1">
-                <span className="text-[#F59E0B] font-bold">REC_02:</span>
-                <p className="text-[#94A3B8]">Set volume threshold alerts (&gt;50% spike) on social mentions.</p>
-              </div>
-              <div className="p-3 rounded bg-[#0B1220] border border-[#263548] text-xs font-mono space-y-1">
-                <span className="text-[#10B981] font-bold">REC_03:</span>
-                <p className="text-[#94A3B8]">Perform WHOIS & DNS history tracking to detect domain shifts.</p>
-              </div>
+              <p className="text-[10px] font-mono leading-relaxed text-[#64748B]">
+                A fixed procedural checklist, not generated analysis.
+              </p>
+              {[
+                "Run OSINT enumeration on infrastructure associated with the target.",
+                "Configure volume-threshold alerting on social mentions.",
+                "Track WHOIS and DNS history to detect domain changes.",
+              ].map((step, i) => (
+                <div
+                  key={i}
+                  className="p-3 rounded bg-[#0B1220] border border-[#263548] text-xs font-mono space-y-1"
+                >
+                  <span className="text-[#94A3B8] font-bold">STEP_0{i + 1}:</span>
+                  <p className="text-[#94A3B8]">{step}</p>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>

@@ -20,7 +20,7 @@ export function ClassifiedHeader({ level = "SECRET", className = "" }: Classifie
         <ShieldCheck className="size-3 text-[#3B82F6]" /> CONTROL SYSTEM: OSINT//STRICT
       </span>
       <Badge variant="outline" className={`${colorClass} text-[8px] font-bold rounded-none h-4 uppercase px-1`}>
-        {level} // NOFORN
+        UNCLASSIFIED // DEMONSTRATOR
       </Badge>
     </div>
   );

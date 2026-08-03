@@ -269,7 +269,7 @@ function TopBar() {
                 <CircleUser className="size-3" />
               </span>
               <span className="hidden text-left leading-none sm:block" data-no-translate>
-                <span className="block text-[10px] font-bold uppercase tracking-wider">A. Chen</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wider">Not signed in</span>
               </span>
               <ChevronDown className="size-3 text-[#94A3B8]" />
             </Button>

@@ -11,6 +11,7 @@ import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchSocialIntelligence } from "./news";
 import { toast } from "sonner";
 import { Search, Radio, Share2, Users, Tag, MessageSquare, ShieldAlert } from "lucide-react";
+import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/social")({
   head: () => ({ meta: [{ title: "Social Intelligence — Sentinel AI" }] }),
@@ -99,6 +100,7 @@ function SocialIntelligencePage() {
           <form onSubmit={handleSearchSubmit} className="flex gap-2">
             <div className="relative">
               <Search className="absolute left-2 top-2 size-3.5 text-[#94A3B8]" />
+      <SampleDataBanner detail="Platform volume and health figures are illustrative." />
               <Input
                 value={searchVal}
                 onChange={(e) => setSearchVal(e.target.value)}
