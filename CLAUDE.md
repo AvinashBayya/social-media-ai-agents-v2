@@ -4,7 +4,9 @@ OSINT analysis and monitoring platform built for **ADITI 4.0 / iDEX Problem Stat
 
 ## Stack
 
-Generated with Lovable from the `tanstack_start_ts` template.
+Originally scaffolded from a TanStack Start template. All Lovable tooling, branding and
+the `@lovable.dev/vite-tanstack-config` build package have been removed; `vite.config.ts`
+now composes the plugin list explicitly (order matters — see the comment in that file).
 
 - TanStack Start 1.168 (SSR), React 19, TypeScript, Vite 8, Bun
 - Tailwind 4, shadcn/ui

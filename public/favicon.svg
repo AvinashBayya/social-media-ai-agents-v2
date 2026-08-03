@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Sentinel AI">
+  <!--
+    Sentinel AI mark.
+
+    Built to survive 16px: one solid silhouette and one counter-form. An earlier
+    version outlined the shield instead of filling it, which left a ~1px rim at
+    favicon size and read as a smudge. Solid shield + a single dark aperture with
+    a cyan pupil reads as a sensor watching from behind a shield, and stays
+    legible when the browser scales it down.
+
+    The dark rounded plate keeps it visible against both light and dark chrome.
+  -->
+  <rect width="32" height="32" rx="7" fill="#0B1220"/>
+  <path
+    d="M16 4.4 26.4 8.1v7.9c0 5.9-4.2 10.3-10.4 12.1C9.8 26.3 5.6 21.9 5.6 16V8.1z"
+    fill="#06B6D4"/>
+  <circle cx="16" cy="15.2" r="5.4" fill="#0B1220"/>
+  <circle cx="16" cy="15.2" r="2.4" fill="#06B6D4"/>
+</svg>
