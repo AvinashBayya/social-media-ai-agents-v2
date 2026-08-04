@@ -1,257 +1,437 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AppShell, PageHeader, Tone } from "@/components/app-shell";
+import { useEffect, useRef, useState } from "react";
+import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Play, Pause, SkipBack, SkipForward, Volume2, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Upload, Loader2, AlertTriangle, Film, Scissors, Type, Fingerprint, Info,
+} from "lucide-react";
+import {
+  findNearDuplicates, OCR_LANGUAGES, OCR_LOW_CONFIDENCE,
+  type DuplicateReport, type HashedImage, type OcrReport,
+} from "@/utils/imaging";
+import {
+  dataUrlToBlob, extractKeyframes, loadImageCorpus, rememberImage, runOcr,
+  MediaError, type KeyframeResult,
+} from "@/utils/imaging-client";
+import { NotImplementedPanel } from "@/components/not-implemented";
+
+/**
+ * Video Intelligence — Module 4 (PS-18 §6.4).
+ *
+ * The previous version of this page was invented in full: five scenes with
+ * captions and timestamps, a five-line "audio transcript" of a press briefing
+ * that never happened, an object table reading "Faces 4 · 92%", a rolling
+ * sentiment chart, and a "Deepfake analysis 14%" panel captioned "facial
+ * artifact and audio-sync analysis suggest authentic capture". No video was ever
+ * decoded, and no such analysis existed.
+ *
+ * This replaces it with what actually runs with no GPU and no server: the
+ * browser decodes the file, keyframes are painted to a canvas at a fixed
+ * interval, each is perceptually hashed, scene cuts come from the distance
+ * between consecutive hashes, and every frame is matched against the image
+ * corpus. A video reusing a known still is a strong recontextualisation signal
+ * and needs no model at all.
+ *
+ * Audio transcription is NOT implemented — see the panel for why.
+ */
 
 export const Route = createFileRoute("/videos")({
   head: () => ({ meta: [{ title: "Video Intelligence — Sentinel AI" }] }),
   component: Page,
 });
 
-const scenes = [
-  {
-    t: "00:02",
-    label: "Press pool wide shot",
-    objs: ["podium", "microphones"],
-    tone: "neutral" as const,
-  },
-  { t: "00:34", label: "Close-up · speaker", objs: ["face", "flag"], tone: "neutral" as const },
-  {
-    t: "01:12",
-    label: "Cutaway · reporters",
-    objs: ["camera", "notebook"],
-    tone: "neutral" as const,
-  },
-  {
-    t: "02:08",
-    label: "Q&A · aggressive tone",
-    objs: ["face", "gesture"],
-    tone: "negative" as const,
-  },
-  { t: "03:41", label: "Exit montage", objs: ["door", "vehicle"], tone: "neutral" as const },
-];
+const CARD = "bg-[#111827] border-[#263548]";
+const DEFAULT_LANGS = ["eng"];
+/** Frame budget. 60 keyframes at 2s covers two minutes; beyond that the tab suffers. */
+const MAX_FRAMES = 60;
 
-const transcript = [
-  {
-    t: "00:00",
-    s: "Anchor",
-    text: "Officials arrive at the press briefing amid rising speculation about the surveillance program.",
-  },
-  {
-    t: "00:34",
-    s: "Minister",
-    text: "We categorically deny any unauthorized access to citizen data. Our systems are secure.",
-  },
-  {
-    t: "01:22",
-    s: "Reporter A",
-    text: "Yet three independent researchers have published overlapping indicators — how do you respond?",
-  },
-  {
-    t: "02:08",
-    s: "Minister",
-    text: "We will not comment on unverified material. The ministry stands by its earlier statement.",
-  },
-  {
-    t: "03:15",
-    s: "Anchor",
-    text: "The briefing ended after eleven minutes without further questions being taken.",
-  },
-];
+const fmtTime = (s: number) =>
+  `${Math.floor(s / 60).toString().padStart(2, "0")}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
 
 function Page() {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [result, setResult] = useState<KeyframeResult | null>(null);
+  const [name, setName] = useState("");
+  const [interval, setIntervalSeconds] = useState(2);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState("");
+
+  const [corpus, setCorpus] = useState<HashedImage[]>([]);
+  const [matches, setMatches] = useState<Record<number, DuplicateReport>>({});
+  const [selected, setSelected] = useState<number | null>(null);
+
+  const [langs, setLangs] = useState<string[]>(DEFAULT_LANGS);
+  const [ocr, setOcr] = useState<Record<number, OcrReport>>({});
+  const [ocrError, setOcrError] = useState("");
+
+  useEffect(() => setCorpus(loadImageCorpus()), []);
+
+  const analyse = async (file: File) => {
+    setError("");
+    setResult(null);
+    setMatches({});
+    setOcr({});
+    setSelected(null);
+    setName(file.name);
+    setBusy("Decoding video");
+
+    try {
+      const stored = loadImageCorpus();
+      const res = await extractKeyframes(file, interval, MAX_FRAMES, (done, total) => {
+        setProgress({ done, total });
+        setBusy("Extracting keyframes");
+      });
+
+      // Each keyframe is matched against the image corpus. A video that reuses a
+      // still already seen in an article is the recontextualisation case this
+      // module exists to catch.
+      const found: Record<number, DuplicateReport> = {};
+      res.frames.forEach((f, i) => {
+        const report = findNearDuplicates({ hash: f.hash, id: `${file.name}#${i}` }, stored);
+        if (report.matches.length > 0) found[i] = report;
+      });
+      setMatches(found);
+      setResult(res);
+    } catch (err: any) {
+      setError(err instanceof MediaError ? `[${err.stage}] ${err.message}` : (err?.message ?? String(err)));
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  };
+
+  const ocrFrame = async (index: number) => {
+    if (!result) return;
+    const frame = result.frames[index];
+    if (!frame.dataUrl) return;
+    setBusy("Running OCR");
+    setOcrError("");
+    try {
+      const blob = await dataUrlToBlob(frame.dataUrl);
+      const report = await runOcr(blob, langs);
+      setOcr((prev) => ({ ...prev, [index]: report }));
+    } catch (err: any) {
+      setOcrError(err?.message ?? String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const addFrameToCorpus = (index: number) => {
+    if (!result) return;
+    const frame = result.frames[index];
+    const next = rememberImage({
+      id: `${name}#${fmtTime(frame.time)}`,
+      hash: frame.hash,
+      source: "video keyframe",
+      url: "",
+      seenAt: new Date().toISOString(),
+      context: `Keyframe at ${fmtTime(frame.time)} of ${name}`,
+    });
+    setCorpus(next);
+  };
+
+  const cutIndexes = new Set(result?.scenes.cuts.map((c) => c.index) ?? []);
+
   return (
     <AppShell>
       <PageHeader
         title="Video Intelligence"
-        description="Timeline analysis with detected objects, transcripts, scene changes, and deepfake scoring."
+        description="In-browser keyframe extraction, scene-cut detection and perceptual matching. No GPU, no server — the file is never uploaded."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <Card>
-          <CardContent className="p-0">
-            <div
-              className="relative aspect-video overflow-hidden rounded-t-lg"
-              style={{
-                background: "linear-gradient(120deg, oklch(0.4 0.05 250), oklch(0.7 0.1 240))",
-              }}
-            >
-              <div className="absolute inset-0 grid place-items-center">
-                <button className="grid size-16 place-items-center rounded-full bg-white/90 text-primary shadow-xl">
-                  <Play className="size-7 pl-1" />
-                </button>
-              </div>
-              <div className="absolute left-3 top-3 rounded-md bg-black/50 px-2 py-1 text-[11px] font-medium text-white">
-                LIVE · GlobalNews · 03:41
-              </div>
-              <div className="absolute right-3 top-3">
-                <Tone tone="medium" />
-              </div>
+      <Card className={`${CARD} mb-4`}>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-2">
+            <Button size="sm" onClick={() => fileRef.current?.click()} disabled={busy !== null} className="h-8 gap-1.5">
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+              {busy ?? "Upload video"}
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="video/*"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) analyse(f); }}
+              className="hidden"
+            />
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                Sample interval (s)
+              </label>
+              <Input
+                type="number" min={0.5} max={30} step={0.5}
+                value={interval}
+                onChange={(e) => setIntervalSeconds(Math.max(0.5, Number(e.target.value) || 2))}
+                className="mt-1 h-8 w-24 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+              />
             </div>
 
-            {/* Controls */}
-            <div className="px-4 py-2">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="tabular-nums">00:47</span>
-                <div className="relative flex-1">
-                  <div className="h-1 rounded-full bg-muted" />
-                  <div
-                    className="absolute left-0 top-0 h-1 rounded-full bg-primary"
-                    style={{ width: "22%" }}
-                  />
-                  {scenes.map((s, i) => (
-                    <span
+            {progress && (
+              <span className="font-mono text-[10px] text-[#94A3B8]">
+                frame {progress.done}/{progress.total}
+              </span>
+            )}
+            <span className="ml-auto text-[10px] text-[#64748B]">
+              {corpus.length} image(s) in the matching corpus
+            </span>
+          </div>
+
+          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+            <Info className="mt-px size-3 shrink-0" />
+            Frames are sampled at a fixed interval, so a scene cut is located to within one
+            interval rather than to the exact frame. Sampling stops at {MAX_FRAMES} frames.
+          </p>
+
+          {error && (
+            <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
+              <span className="font-mono text-[10px] leading-relaxed text-[#EF4444]">{error}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {!result ? (
+        <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
+          <Card className={CARD}>
+            <CardContent className="p-10 text-center">
+              <Film className="mx-auto size-8 text-[#263548]" />
+              <p className="mt-3 text-sm text-[#94A3B8]">No video loaded.</p>
+              <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-[#64748B]">
+                Upload a file to extract keyframes. Decoding, hashing and OCR all run in this
+                tab — nothing is sent to a server, and there is no server-side media pipeline
+                to send it to.
+              </p>
+            </CardContent>
+          </Card>
+          <NotImplementedPanel />
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
+          <div className="space-y-4">
+            <Card className={CARD}>
+              <CardContent className="p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Film className="size-3.5 text-[#3B82F6]" />
+                  <span className="truncate text-xs font-bold uppercase text-white">{name}</span>
+                  <span className="ml-auto font-mono text-[10px] text-[#94A3B8]">
+                    {fmtTime(result.duration)} · {result.frames.length} keyframes @ {interval}s
+                  </span>
+                </div>
+
+                {result.truncated && (
+                  <p className="mt-1.5 text-[10px] text-[#F59E0B]">
+                    Sampling stopped at {MAX_FRAMES} frames — the remainder of the video was not
+                    analysed. Raise the interval to cover the whole duration.
+                  </p>
+                )}
+
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-6">
+                  {result.frames.map((f, i) => (
+                    <button
                       key={i}
-                      className="absolute top-0 h-1 w-0.5 bg-foreground/60"
-                      style={{ left: `${(i + 1) * 18}%` }}
-                    />
+                      onClick={() => setSelected(selected === i ? null : i)}
+                      className={`overflow-hidden rounded border text-left ${
+                        selected === i
+                          ? "border-[#3B82F6]"
+                          : cutIndexes.has(i)
+                            ? "border-[#F59E0B]/60"
+                            : "border-[#263548]"
+                      }`}
+                    >
+                      {f.dataUrl && (
+                        <img src={f.dataUrl} alt={`frame at ${fmtTime(f.time)}`} className="h-16 w-full object-cover" />
+                      )}
+                      <div className="flex items-center gap-1 px-1 py-0.5 font-mono text-[9px] text-[#94A3B8]">
+                        {fmtTime(f.time)}
+                        {cutIndexes.has(i) && <Scissors className="size-2.5 text-[#F59E0B]" />}
+                        {matches[i] && <Fingerprint className="size-2.5 text-[#8B5CF6]" />}
+                      </div>
+                    </button>
                   ))}
                 </div>
-                <span className="tabular-nums">03:41</span>
-              </div>
-              <div className="mt-1.5 flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="size-8">
-                  <SkipBack className="size-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="size-8">
-                  <Pause className="size-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="size-8">
-                  <SkipForward className="size-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="size-8">
-                  <Volume2 className="size-4" />
-                </Button>
-                <span className="ml-auto text-[11px] text-muted-foreground flex items-center gap-1">
-                  <MapPin className="size-3" />
-                  Washington, US · 2025-11-19
-                </span>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            {/* Scenes */}
-            <div className="border-t p-4">
-              <h3 className="mb-2 text-sm font-semibold">Scene changes</h3>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                {scenes.map((s, i) => (
-                  <div key={i} className="rounded-md border bg-card p-2">
-                    <div
-                      className="mb-1.5 h-14 rounded"
-                      style={{ background: `oklch(0.7 0.1 ${(i * 70) % 360})` }}
-                    />
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                      <span className="font-mono">{s.t}</span>
-                      <Tone tone={s.tone} />
-                    </div>
-                    <p className="mt-0.5 line-clamp-2 text-xs">{s.label}</p>
+            <Card className={CARD}>
+              <CardContent className="p-4">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
+                  <Scissors className="size-3.5 text-[#F59E0B]" />
+                  Scene cuts
+                </h3>
+                {result.scenes.cuts.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-[#64748B]">
+                    No cut exceeded the threshold between sampled frames. With a {interval}s
+                    interval, cuts shorter than that can fall entirely between samples.
+                  </p>
+                ) : (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {result.scenes.cuts.map((c) => (
+                      <Badge
+                        key={c.index}
+                        variant="outline"
+                        className="cursor-pointer border-[#F59E0B]/40 bg-[#F59E0B]/10 font-mono text-[10px] font-normal text-[#F59E0B]"
+                        onClick={() => setSelected(c.index)}
+                      >
+                        {fmtTime(c.time)} · Δ{c.distanceFromPrevious}
+                      </Badge>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                )}
+                <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                  {result.scenes.method}
+                  {result.scenes.meanDistance !== null &&
+                    ` Mean consecutive-frame distance ${result.scenes.meanDistance.toFixed(1)}.`}
+                </p>
+              </CardContent>
+            </Card>
 
-            {/* Transcript */}
-            <div className="border-t p-4">
-              <h3 className="mb-2 text-sm font-semibold">Audio transcript</h3>
-              <div className="space-y-2">
-                {transcript.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`flex gap-3 rounded-md p-2 ${i === 1 ? "bg-primary/5" : ""}`}
-                  >
-                    <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {r.t}
+            {Object.keys(matches).length > 0 && (
+              <Card className="border-[#8B5CF6]/40 bg-[#111827]">
+                <CardContent className="p-4">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
+                    <Fingerprint className="size-3.5 text-[#8B5CF6]" />
+                    Keyframes matching previously seen images
+                  </h3>
+                  <p className="mt-1 text-[10px] leading-relaxed text-[#94A3B8]">
+                    A video reusing a still that already appeared elsewhere is a
+                    recontextualisation signal. It is a fact about where the image has been
+                    seen, not a claim about intent.
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {Object.entries(matches).map(([idx, report]) => (
+                      <div key={idx} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
+                        <button
+                          onClick={() => setSelected(Number(idx))}
+                          className="font-mono text-[10px] text-[#3B82F6] hover:underline"
+                        >
+                          frame {fmtTime(result.frames[Number(idx)].time)}
+                        </button>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                          {report.summary}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {selected !== null && (
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold uppercase text-white">
+                      Frame at {fmtTime(result.frames[selected].time)}
                     </span>
-                    <span className="w-20 shrink-0 text-xs font-medium">{r.s}</span>
-                    <p className="min-w-0 flex-1 text-sm">{r.text}</p>
+                    <span className="ml-auto font-mono text-[10px] text-[#94A3B8]">
+                      pHash {result.frames[selected].hash}
+                    </span>
                   </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold">Detected objects</h3>
-              <div className="mt-3 space-y-2">
-                {[
-                  { l: "Faces", n: 4, p: 92 },
-                  { l: "Text overlays", n: 6, p: 88 },
-                  { l: "Logos (news chyron)", n: 2, p: 96 },
-                  { l: "Weapons", n: 0, p: 0 },
-                  { l: "Vehicles", n: 3, p: 74 },
-                ].map((o) => (
-                  <div key={o.l} className="flex items-center justify-between text-xs">
-                    <span>{o.l}</span>
-                    <div className="flex items-center gap-2">
-                      <Progress value={o.p} className="h-1 w-24" />
-                      <span className="w-8 text-right tabular-nums">{o.n}</span>
+                  {result.frames[selected].dataUrl && (
+                    <img
+                      src={result.frames[selected].dataUrl}
+                      alt={`keyframe at ${fmtTime(result.frames[selected].time)}`}
+                      className="mt-2 max-h-72 w-full rounded bg-[#0B1220] object-contain"
+                    />
+                  )}
+
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {OCR_LANGUAGES.slice(0, 8).map((l) => {
+                      const on = langs.includes(l.code);
+                      return (
+                        <button
+                          key={l.code}
+                          onClick={() =>
+                            setLangs((prev) =>
+                              prev.includes(l.code) ? prev.filter((c) => c !== l.code) : [...prev, l.code],
+                            )
+                          }
+                          title={l.accuracyNote}
+                          className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                            on
+                              ? "border-[#06B6D4]/50 bg-[#06B6D4]/10 text-[#06B6D4]"
+                              : "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                          }`}
+                        >
+                          {l.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-2 flex gap-1.5">
+                    <Button
+                      size="sm" variant="outline"
+                      disabled={busy !== null || langs.length === 0}
+                      onClick={() => ocrFrame(selected)}
+                      className="h-7 gap-1 text-[10px]"
+                    >
+                      {busy === "Running OCR" ? <Loader2 className="size-3 animate-spin" /> : <Type className="size-3" />}
+                      OCR this frame
+                    </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      onClick={() => addFrameToCorpus(selected)}
+                      className="h-7 gap-1 text-[10px]"
+                    >
+                      <Fingerprint className="size-3" />
+                      Add to corpus
+                    </Button>
+                  </div>
+
+                  {ocrError && (
+                    <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
+                      <span className="text-[10px] leading-relaxed text-[#EF4444]">{ocrError}</span>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                  )}
 
-          <Card>
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold">Deepfake analysis</h3>
-              <div className="mt-2 flex items-baseline justify-between">
-                <span className="text-3xl font-semibold">14%</span>
-                <Tone tone="low" />
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Facial artifact and audio-sync analysis suggest authentic capture with light
-                editing.
-              </p>
-              <Progress value={14} className="mt-3 h-1.5" />
-            </CardContent>
-          </Card>
+                  {ocr[selected] && (
+                    <div className="mt-2 space-y-1.5">
+                      {ocr[selected].words.length === 0 ? (
+                        <p className="text-[11px] text-[#64748B]">
+                          No text recognised in this frame with the selected languages.
+                        </p>
+                      ) : (
+                        <>
+                          <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-[#263548] bg-[#0B1220] p-2 text-[11px] text-[#F3F4F6]">
+                            {ocr[selected].text}
+                          </pre>
+                          <div className="font-mono text-[10px] text-[#94A3B8]">
+                            mean confidence{" "}
+                            {ocr[selected].meanConfidence?.toFixed(1) ?? "—"} ·{" "}
+                            {ocr[selected].lowConfidenceCount} word(s) below {OCR_LOW_CONFIDENCE}
+                          </div>
+                        </>
+                      )}
+                      {ocr[selected].accuracyNotes.map((n, i) => (
+                        <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">{n}</p>
+                      ))}
+                    </div>
+                  )}
 
-          <Card>
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold">Sentiment · rolling</h3>
-              <div className="mt-2 space-y-1.5 text-xs">
-                <SentBar label="00:00-01:00" pos={30} neu={60} neg={10} />
-                <SentBar label="01:00-02:00" pos={20} neu={55} neg={25} />
-                <SentBar label="02:00-03:00" pos={10} neu={40} neg={50} />
-                <SentBar label="03:00-03:41" pos={22} neu={58} neg={20} />
-              </div>
-            </CardContent>
-          </Card>
+                  {matches[selected] && (
+                    <p className="mt-2 rounded border border-[#8B5CF6]/30 bg-[#8B5CF6]/5 p-2 text-[10px] leading-relaxed text-[#94A3B8]">
+                      {matches[selected].summary}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <NotImplementedPanel />
+          </div>
         </div>
-      </div>
+      )}
     </AppShell>
-  );
-}
-
-function SentBar({
-  label,
-  pos,
-  neu,
-  neg,
-}: {
-  label: string;
-  pos: number;
-  neu: number;
-  neg: number;
-}) {
-  return (
-    <div>
-      <div className="mb-0.5 flex justify-between text-[10px] text-muted-foreground">
-        <span>{label}</span>
-        <span>
-          {pos}/{neu}/{neg}
-        </span>
-      </div>
-      <div className="flex h-1.5 overflow-hidden rounded-full">
-        <span style={{ width: `${pos}%`, background: "oklch(0.68 0.17 145)" }} />
-        <span style={{ width: `${neu}%`, background: "oklch(0.6 0.19 255)" }} />
-        <span style={{ width: `${neg}%`, background: "oklch(0.62 0.23 27)" }} />
-      </div>
-    </div>
   );
 }
