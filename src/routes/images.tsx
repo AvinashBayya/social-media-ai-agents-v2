@@ -172,6 +172,12 @@ function Page() {
         url: typeof source === "string" ? source : "",
         seenAt,
         context: name,
+        // Carried into the Module 5 map. Omitted entirely when there is no fix —
+        // spreading `gps: undefined` would still create the key.
+        ...(exif?.gps ? { gps: exif.gps } : {}),
+        ...(exif?.camera.model
+          ? { camera: [exif.camera.make, exif.camera.model].filter(Boolean).join(" ") }
+          : {}),
       });
       setCorpus(next);
 

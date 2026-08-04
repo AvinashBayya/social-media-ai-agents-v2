@@ -163,6 +163,38 @@ Recorded in `NOT_IMPLEMENTED` in `imaging.ts` and asserted by a test.
 EXIF absence is reported as absence — every major platform strips it on upload, so a missing
 block is the normal case for redistributed media, not evidence of tampering.
 
+## Reports + GIS (Module 5)
+
+§6.5 is the **only** place PS-18 names the open-source LLM requirement explicitly, so every
+product shows its model — on screen, in the provenance block, and in the PDF footer of every
+page. That visibility is compliance evidence.
+
+**Geo source reality, verified live 2026-08-04:**
+- **UCDP GED now returns 401** — `API token required. Add header: x-ucdp-access-token`. Every
+  version (23.1/24.1/25.1). Set `UCDP_API_TOKEN` to enable the conflict layer; without it the
+  layer reports the missing credential rather than showing zero events.
+- **GDELT GEO API (`/api/v2/geo/geo`) is 404** — retired. GDELT DOC only gives
+  `sourcecountry` = **the publishing outlet's country, not the event location** (a Sputnik
+  article about India carries `China`). Plotted at country precision and labelled as such.
+- **GDELT rate limit: 1 request / 5 seconds**, enforced with a 429.
+- **USGS earthquake feed** — free, keyless, precise epicentres. The only open dataset giving
+  precisely located + timestamped + magnitude-bearing events, so it anchors the precision,
+  time-slider and magnitude-sizing work.
+- **ReliefWeb** needs an approved `appname`. Not wired.
+- **Shodan InternetDB returns no geolocation** — host geo needs the paid API. Layer declared
+  and empty rather than faked.
+
+**Coordinate honesty is the load-bearing rule.** No record without a real coordinate is ever
+plotted; unplaceable records are counted and reported. Exact fixes render as points, anything
+coarser as a dashed uncertainty circle. `0,0` is rejected as a missing-value sentinel.
+
+**Sourcing discipline in `reports.ts`:** every judgement/finding cites numbered sources;
+citations are resolved against the real source list *after* generation; failure retries once
+with the violations and then throws. Partial products are never returned.
+
+`export-helpers.ts` was deleted — exports.tsx now renders the same product object the analyst
+reviewed, so a figure can no longer differ between screen and file.
+
 ## GPU quota request — NOT YET RAISED
 
 Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the

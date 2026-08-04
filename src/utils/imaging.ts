@@ -223,6 +223,14 @@ export interface HashedImage {
   seenAt: string;
   /** Article or post the image appeared in. */
   context?: string;
+  /**
+   * EXIF GPS fix, when the file carried one. Present so Module 5's map can plot
+   * analysed imagery — omitted entirely when absent, never zeroed, because 0,0
+   * is a real place and a missing fix must not become one.
+   */
+  gps?: GpsFix;
+  /** Camera as reported by EXIF, for the map popup. */
+  camera?: string;
 }
 
 export interface DuplicateMatch {

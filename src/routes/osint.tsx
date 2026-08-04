@@ -319,11 +319,14 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
       ucdpEvents: ucdpEventsList,
       gdeltStories: gdeltStoriesList,
       flightCount: openSkyFlightCount,
-      gpsStatus: "GPS Jamming High: 14 hotzones active in Baltic / Eastern Europe",
-      orefAlerts: [
-        { time: new Date().toLocaleTimeString(), zone: "Galilee, Israel", alert: "Rocket Alert - Interceptions Reported" },
-        { time: new Date(Date.now() - 600000).toLocaleTimeString(), zone: "Tel Aviv, Israel", alert: "Rocket Alert - Interception Verified" }
-      ]
+      // gpsStatus was the fixed string "GPS Jamming High: 14 hotzones active in
+      // Baltic / Eastern Europe" and orefAlerts was two hardcoded rocket alerts
+      // for Galilee and Tel Aviv, stamped with the CURRENT time so they always
+      // looked live. Both were fabricated intelligence attributed to real
+      // systems — Israel's Home Front Command among them. No collector produces
+      // either, so both are absent.
+      gpsStatus: null,
+      orefAlerts: [] as { time: string; zone: string; alert: string }[],
     };
   });
 
@@ -996,9 +999,12 @@ function Page() {
                   <Wifi className="size-3.5" /> GPS Interference
                 </span>
                 <div className="text-sm font-semibold text-foreground leading-snug">
-                  {geopoliticalData?.gpsStatus || "14 Active Jamming Hotspots"}
+                  Not collected
                 </div>
-                <p className="text-xs text-muted-foreground">Signal degradation reports mapped in conflict areas.</p>
+                <p className="text-xs text-muted-foreground">
+                  No GPS-interference feed is wired. GPSJAM and the ADS-B NIC-derived datasets
+                  would supply this; neither is connected, so no figure is shown.
+                </p>
               </CardContent>
             </Card>
 
@@ -1008,12 +1014,14 @@ function Page() {
                   <AlertTriangle className="size-3.5" /> Israel OREF Alerts
                 </span>
                 <div className="text-xs font-mono bg-red-500/10 text-red-400 p-2.5 rounded border border-red-500/20 overflow-y-auto max-h-16">
-                  {geopoliticalData?.orefAlerts?.map((a: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-[10px]">
-                      <span>{a.zone}</span>
-                      <span>{a.time}</span>
-                    </div>
-                  )) || "No active OREF alerts detected"}
+                  {(geopoliticalData?.orefAlerts?.length ?? 0) > 0
+                    ? geopoliticalData.orefAlerts.map((a: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-[10px]">
+                          <span>{a.zone}</span>
+                          <span>{a.time}</span>
+                        </div>
+                      ))
+                    : "No OREF collector is connected. This panel stays empty rather than showing alerts nobody issued."}
                 </div>
               </CardContent>
             </Card>

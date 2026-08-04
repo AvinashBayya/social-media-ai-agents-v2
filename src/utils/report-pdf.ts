@@ -1,0 +1,301 @@
+/**
+ * Module 5 — PDF rendering for intelligence products.
+ *
+ * pdf-lib, already a dependency, so no new licence surface. Laid out as a real
+ * product rather than a text dump: classification banner top and bottom of every
+ * page, numbered sources with their credibility, page numbers, and a provenance
+ * footer on EVERY page — not just the last — because pages get separated and a
+ * loose sheet with AI-generated judgements on it should still say so.
+ *
+ * Pure layout: takes a finished product, emits bytes. No LLM, no network.
+ */
+
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { bandFor } from "./credibility";
+import type { IntelligenceProduct, SourceRef } from "./reports";
+
+const A4: [number, number] = [595.28, 841.89];
+const MARGIN = 52;
+const BODY_SIZE = 9.5;
+const LINE = 12.5;
+
+const INK = rgb(0.09, 0.11, 0.15);
+const MUTED = rgb(0.42, 0.46, 0.53);
+const ACCENT = rgb(0.15, 0.39, 0.92);
+const WARN = rgb(0.72, 0.33, 0.02);
+const RULE = rgb(0.82, 0.85, 0.89);
+
+interface Ctx {
+  doc: PDFDocument;
+  page: PDFPage;
+  y: number;
+  regular: PDFFont;
+  bold: PDFFont;
+  italic: PDFFont;
+  mono: PDFFont;
+  pages: PDFPage[];
+}
+
+/**
+ * pdf-lib's StandardFonts are WinAnsi-encoded and throw on any character
+ * outside it — an en dash or a curly quote from the model would abort the whole
+ * export. Transliterating the common offenders and stripping the rest keeps a
+ * PDF possible; the Markdown export preserves the original text exactly.
+ */
+function toWinAnsi(text: string): string {
+  return (text || "")
+    .replace(/[‘’‚′]/g, "'")
+    .replace(/[“”„″]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/•/g, "-")
+    .replace(/ /g, " ")
+    .replace(/[←-⇿∀-⋿]/g, "")
+    // Anything still outside Latin-1 becomes '?', which is visible and honest
+    // rather than silently dropping a word.
+    .replace(/[^\x20-\x7E¡-ÿ\n]/g, "?");
+}
+
+function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const out: string[] = [];
+  for (const paragraph of toWinAnsi(text).split("\n")) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) { out.push(""); continue; }
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+        line = candidate;
+      } else {
+        if (line) out.push(line);
+        // A single word longer than the column: hard-split rather than overflow.
+        if (font.widthOfTextAtSize(word, size) > maxWidth) {
+          let chunk = "";
+          for (const ch of word) {
+            if (font.widthOfTextAtSize(chunk + ch, size) > maxWidth) { out.push(chunk); chunk = ch; }
+            else chunk += ch;
+          }
+          line = chunk;
+        } else {
+          line = word;
+        }
+      }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+const contentWidth = () => A4[0] - MARGIN * 2;
+
+function newPage(ctx: Ctx): void {
+  const page = ctx.doc.addPage(A4);
+  ctx.pages.push(page);
+  ctx.page = page;
+  ctx.y = A4[1] - MARGIN - 18;
+}
+
+function ensure(ctx: Ctx, needed: number): void {
+  if (ctx.y - needed < MARGIN + 46) newPage(ctx);
+}
+
+function text(
+  ctx: Ctx,
+  value: string,
+  opts: { font?: PDFFont; size?: number; colour?: any; indent?: number; gap?: number } = {},
+): void {
+  const font = opts.font ?? ctx.regular;
+  const size = opts.size ?? BODY_SIZE;
+  const indent = opts.indent ?? 0;
+  const lines = wrap(value, font, size, contentWidth() - indent);
+  for (const line of lines) {
+    ensure(ctx, LINE);
+    ctx.page.drawText(line, {
+      x: MARGIN + indent,
+      y: ctx.y,
+      size,
+      font,
+      color: opts.colour ?? INK,
+    });
+    ctx.y -= LINE;
+  }
+  ctx.y -= opts.gap ?? 0;
+}
+
+function heading(ctx: Ctx, value: string): void {
+  ensure(ctx, LINE * 3);
+  ctx.y -= 6;
+  ctx.page.drawText(toWinAnsi(value.toUpperCase()), {
+    x: MARGIN, y: ctx.y, size: 10.5, font: ctx.bold, color: ACCENT,
+  });
+  ctx.y -= 5;
+  ctx.page.drawLine({
+    start: { x: MARGIN, y: ctx.y },
+    end: { x: A4[0] - MARGIN, y: ctx.y },
+    thickness: 0.6,
+    color: RULE,
+  });
+  ctx.y -= LINE;
+}
+
+const citation = (nums: number[]) => `[${nums.join("] [")}]`;
+
+/**
+ * Draw the classification banner, page number and provenance footer on every
+ * page. Done at the end because the page count is only known then.
+ */
+function decorate(ctx: Ctx, product: IntelligenceProduct): void {
+  const total = ctx.pages.length;
+  ctx.pages.forEach((page, i) => {
+    const banner = toWinAnsi(product.classification);
+    const bannerWidth = ctx.bold.widthOfTextAtSize(banner, 8);
+    page.drawText(banner, {
+      x: (A4[0] - bannerWidth) / 2, y: A4[1] - MARGIN + 12, size: 8, font: ctx.bold, color: WARN,
+    });
+    page.drawText(banner, {
+      x: (A4[0] - bannerWidth) / 2, y: MARGIN - 26, size: 8, font: ctx.bold, color: WARN,
+    });
+
+    const footer = toWinAnsi(
+      `AI-generated by ${product.provenance.model} - requires analyst review - ` +
+        `${product.sources.length} cited source(s)`,
+    );
+    page.drawText(footer, { x: MARGIN, y: MARGIN - 14, size: 6.5, font: ctx.regular, color: MUTED });
+
+    const num = `Page ${i + 1} of ${total}`;
+    page.drawText(num, {
+      x: A4[0] - MARGIN - ctx.regular.widthOfTextAtSize(num, 6.5),
+      y: MARGIN - 14, size: 6.5, font: ctx.regular, color: MUTED,
+    });
+  });
+}
+
+export interface PdfOptions {
+  /** PNG bytes of the GIS view, embedded when the product has geospatial content. */
+  mapPng?: Uint8Array;
+  mapCaption?: string;
+}
+
+export async function renderProductPdf(
+  product: IntelligenceProduct,
+  options: PdfOptions = {},
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`${product.typeLabel} - ${product.subject}`);
+  doc.setSubject(product.classification);
+  doc.setProducer("Sentinel AI");
+  doc.setCreator(`Sentinel AI / ${product.provenance.model}`);
+
+  const ctx: Ctx = {
+    doc,
+    page: null as unknown as PDFPage,
+    y: 0,
+    regular: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+    italic: await doc.embedFont(StandardFonts.HelveticaOblique),
+    mono: await doc.embedFont(StandardFonts.Courier),
+    pages: [],
+  };
+  newPage(ctx);
+
+  // ── Header ──
+  text(ctx, product.typeLabel, { font: ctx.bold, size: 17 });
+  text(ctx, product.subject, { font: ctx.regular, size: 12, colour: MUTED, gap: 6 });
+
+  const meta = [
+    `Generated: ${product.provenance.generatedAt}`,
+    `Model: ${product.provenance.model} (${product.provenance.provider})`,
+    `Sources: ${product.sources.length}`,
+    `Contributing modules: ${product.provenance.modules.join(", ")}`,
+  ];
+  for (const m of meta) text(ctx, m, { font: ctx.mono, size: 7.5, colour: MUTED });
+  ctx.y -= 6;
+
+  // ── Bottom line ──
+  heading(ctx, "Bottom Line");
+  text(ctx, product.bottomLine, { gap: 4 });
+
+  // ── Key judgements ──
+  heading(ctx, "Key Judgements");
+  product.keyJudgements.forEach((kj, i) => {
+    ensure(ctx, LINE * 3);
+    text(ctx, `KJ-${i + 1}  (${kj.confidence.toUpperCase()} CONFIDENCE)`, {
+      font: ctx.bold, size: 8.5, colour: ACCENT,
+    });
+    text(ctx, `${kj.judgement} ${citation(kj.sources)}`, { indent: 12 });
+    text(ctx, `Confidence basis: ${kj.confidenceRationale}`, {
+      font: ctx.italic, size: 8, colour: MUTED, indent: 12, gap: 5,
+    });
+  });
+
+  // ── Findings ──
+  heading(ctx, "Findings");
+  for (const f of product.findings) {
+    const tag = f.kind === "assessment" ? "  [ANALYST ASSESSMENT - not reported fact]" : "";
+    text(ctx, `- ${f.text} ${citation(f.sources)}`, { indent: 6 });
+    if (tag) text(ctx, tag.trim(), { font: ctx.italic, size: 7.5, colour: WARN, indent: 14 });
+    ctx.y -= 2;
+  }
+
+  // ── Map ──
+  if (options.mapPng && options.mapPng.length > 0) {
+    heading(ctx, "Geospatial View");
+    try {
+      const png = await doc.embedPng(options.mapPng);
+      const maxW = contentWidth();
+      const scale = Math.min(1, maxW / png.width);
+      const w = png.width * scale;
+      const h = png.height * scale;
+      ensure(ctx, h + LINE * 2);
+      ctx.page.drawImage(png, { x: MARGIN, y: ctx.y - h, width: w, height: h });
+      ctx.y -= h + 6;
+      text(ctx, options.mapCaption ?? "Plotted from real coordinates only.", {
+        font: ctx.italic, size: 7.5, colour: MUTED, gap: 4,
+      });
+    } catch {
+      // A bad capture must not lose the whole product.
+      text(ctx, "Map capture could not be embedded; the rest of the product is unaffected.", {
+        font: ctx.italic, size: 8, colour: WARN, gap: 4,
+      });
+    }
+  }
+
+  // ── Gaps ──
+  heading(ctx, "Intelligence Gaps");
+  text(ctx, "What this collection could NOT establish, and why.", {
+    font: ctx.italic, size: 8, colour: MUTED, gap: 3,
+  });
+  for (const g of product.gaps) {
+    text(ctx, `- ${g.gap}`, { font: ctx.bold, size: 8.5, indent: 6 });
+    text(ctx, g.why, { size: 8, colour: MUTED, indent: 14 });
+    ctx.y -= 3;
+  }
+
+  // ── Sources ──
+  heading(ctx, "Sources");
+  for (const s of product.sources) {
+    ensure(ctx, LINE * 3);
+    text(ctx, `[${s.n}] ${s.title}`, { font: ctx.bold, size: 8.5 });
+    text(ctx, `${s.outlet}${s.publishedAt ? ` - ${s.publishedAt}` : ""} - ${s.module}`, {
+      size: 7.5, colour: MUTED, indent: 12,
+    });
+    text(ctx, `Credibility: ${credibilityLine(s)}`, { size: 7.5, colour: MUTED, indent: 12 });
+    if (s.url) text(ctx, s.url, { font: ctx.mono, size: 6.5, colour: ACCENT, indent: 12 });
+    ctx.y -= 3;
+  }
+
+  // ── Provenance ──
+  heading(ctx, "Provenance");
+  text(ctx, product.provenance.notice, { size: 8, colour: WARN });
+
+  decorate(ctx, product);
+  return doc.save();
+}
+
+function credibilityLine(s: SourceRef): string {
+  const score =
+    s.credibility === null
+      ? "not scored"
+      : `${(s.credibility * 100).toFixed(0)}% (${bandFor(s.credibility).label})`;
+  return `${score} - ${s.credibilityRationale}`;
+}

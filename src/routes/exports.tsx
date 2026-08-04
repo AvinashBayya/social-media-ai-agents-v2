@@ -1,272 +1,335 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, FileText, Sparkles, RefreshCw, CheckCircle2, FileCode, FileSpreadsheet, AlertTriangle } from "lucide-react";
-import { getActiveTarget } from "@/utils/active-target";
-import { fetchNews, fetchSocialIntelligence, fetchOSINT } from "./news";
-import { llmReport } from "@/utils/llm";
-import { defaultFactors, scoreCorpus, type Article } from "@/utils/credibility";
-import { compileReportText, generatePDFBlob, generateHTML, generateCSV, generateJSON } from "@/utils/export-helpers";
-import { useState } from "react";
-import { toast } from "sonner";
+import {
+  Download, FileText, FileCode, FileSpreadsheet, Loader2, AlertTriangle, Info, Archive,
+} from "lucide-react";
+import { bandFor } from "@/utils/credibility";
+import { toMarkdown, type IntelligenceProduct } from "@/utils/reports";
+import { renderProductPdf } from "@/utils/report-pdf";
+
+/**
+ * Export Manager — Module 5.
+ *
+ * This page used to run its own collection and build its own dossier, with a
+ * hardcoded `risk: 75` and `credibility: 88` printed into the PDF under a
+ * classification header, two invented recommendations, and a heading reading
+ * "LAST GENERATED GEMINI AI REPORT SUMMARY" for a model this project cannot use.
+ *
+ * It is now a pure export surface over the products generated on the Report
+ * Generator page. There is exactly ONE product pipeline, so a figure can no
+ * longer differ between what the analyst reviewed on screen and what landed in
+ * the exported file — which is how the invented scores survived in the first
+ * place.
+ */
 
 export const Route = createFileRoute("/exports")({
   head: () => ({ meta: [{ title: "Exports — Sentinel AI" }] }),
   component: ExportsPage,
 });
 
+const CARD = "bg-[#111827] border-[#263548]";
+const STORE_KEY = "sentinel_products";
+
+function loadProducts(): IntelligenceProduct[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+type Format = "pdf" | "markdown" | "json" | "csv";
+
+const FORMATS: { id: Format; name: string; desc: string; icon: any }[] = [
+  { id: "pdf", name: "PDF", desc: "Laid-out product with numbered sources, page numbers and a provenance footer on every page", icon: FileText },
+  { id: "markdown", name: "Markdown", desc: "Full text for pasting into another system", icon: FileText },
+  { id: "json", name: "JSON", desc: "The product structure, including every source and citation", icon: FileCode },
+  { id: "csv", name: "CSV", desc: "Source table with credibility scores", icon: FileSpreadsheet },
+];
+
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** CSV of the source table. Quotes are doubled so a comma in a title cannot shift columns. */
+function toCsv(product: IntelligenceProduct): string {
+  const esc = (v: string | number | null) =>
+    `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+  const rows = [
+    ["citation", "title", "outlet", "published", "module", "credibility_pct", "credibility_band", "rationale", "url"].join(","),
+    ...product.sources.map((s) =>
+      [
+        esc(s.n),
+        esc(s.title),
+        esc(s.outlet),
+        esc(s.publishedAt),
+        esc(s.module),
+        esc(s.credibility === null ? "" : Math.round(s.credibility * 100)),
+        esc(s.credibility === null ? "not scored" : bandFor(s.credibility).label),
+        esc(s.credibilityRationale),
+        esc(s.url),
+      ].join(","),
+    ),
+  ];
+  return rows.join("\n");
+}
+
 function ExportsPage() {
-  const activeTarget = getActiveTarget();
-  const [loadingFormat, setLoadingFormat] = useState<string | null>(null);
-  const [lastExport, setLastExport] = useState<{ format: string; text: string; model: string } | null>(null);
-  const [exportError, setExportError] = useState("");
+  const [products, setProducts] = useState<IntelligenceProduct[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Format | null>(null);
+  const [error, setError] = useState("");
 
-  const handleExport = async (format: string) => {
-    setLoadingFormat(format);
-    setExportError("");
-    toast.info(`Gathering live intelligence & generating AI analysis for "${activeTarget}"...`);
+  useEffect(() => {
+    const list = loadProducts();
+    setProducts(list);
+    if (list.length > 0) setSelectedId(list[list.length - 1].id);
+  }, []);
 
+  const product = useMemo(
+    () => products.find((p) => p.id === selectedId) ?? null,
+    [products, selectedId],
+  );
+
+  const meanCredibility = useMemo(() => {
+    if (!product) return null;
+    const scored = product.sources.map((s) => s.credibility).filter((c): c is number => c !== null);
+    return scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
+  }, [product]);
+
+  const doExport = async (format: Format) => {
+    if (!product) return;
+    setBusy(format);
+    setError("");
+    const stem = `${product.type}_${product.subject.replace(/[^a-zA-Z0-9]/g, "_")}`;
     try {
-      // 1. Fetch real intelligence data across modules
-      const [newsRes, socialRes, osintRes] = await Promise.all([
-        fetchNews({ data: { query: activeTarget, q: activeTarget } }),
-        fetchSocialIntelligence({ data: { query: activeTarget, q: activeTarget } }),
-        fetchOSINT({ data: { query: activeTarget, q: activeTarget } })
-      ]);
-
-      // 2. Score the collected corpus with Module 1 so the dossier carries a
-      //    real credibility figure rather than a constant. Default weights, and
-      //    the export says so — a retuned profile would give a different number.
-      const corpus: Article[] = (newsRes?.stories ?? [])
-        .map((s: any, i: number) => ({
-          id: String(s.id ?? s.primaryLink ?? i),
-          title: s.primaryTitle || "",
-          source: s.primarySource || "",
-          url: s.primaryLink || s.url || "",
-          pubDate: s.pubDate || "",
-          body: s.body || "",
-        }))
-        .filter((a: Article) => a.title);
-
-      const scored = corpus.length ? scoreCorpus(corpus, defaultFactors()) : [];
-      const usable = scored.filter((s) => s.score !== null);
-      const meanCredibility = usable.length
-        ? Math.round((usable.reduce((sum, s) => sum + (s.score ?? 0), 0) / usable.length) * 100)
-        : null;
-
-      // 3. Generate the narrative from the ACTUAL collected material. Passing
-      //    only counts, as this did, gives the model nothing to work from and
-      //    invites it to pad an intelligence dossier out of its own priors.
-      const collected =
-        `Target: ${activeTarget}\n` +
-        `Collected ${corpus.length} news item(s), ${socialRes?.mentions?.length ?? 0} social mention(s).\n` +
-        (osintRes?.whois?.Registrar ? `WHOIS registrar: ${osintRes.whois.Registrar}\n` : "") +
-        (meanCredibility !== null
-          ? `Mean source credibility across the collected corpus: ${meanCredibility}% (Module 1, default weights).\n`
-          : "") +
-        `\nHEADLINES COLLECTED:\n` +
-        corpus.slice(0, 25).map((a, i) => `${i + 1}. [${a.source}] ${a.title}`).join("\n");
-
-      const aiReport = await llmReport({
-        data: {
-          type: "Comprehensive OSINT Intelligence Dossier",
-          target: activeTarget,
-          data: collected,
-        }
-      });
-
-      const config = {
-        reportType: "Classified Intelligence Dossier",
-        format: format,
-        sections: {
-          summary: true,
-          threats: true,
-          risk: true,
-          timeline: true,
-          findings: true,
-          entities: true,
-          relationships: true,
-          sentiment: true,
-          media: true,
-          evidence: true,
-          recommendations: true,
-          confidence: true,
-          references: true
-        },
-        query: activeTarget,
-        analyst: "Unassigned (no authenticated user)",
-        data: {
-          profile: {
-            summary: aiReport.text,
-            // NOT a number. `risk: 75` used to be printed into the exported PDF
-            // as "Subject overall risk rating: 75/100" under a classification
-            // header. Nothing in this system computes a subject risk score, so
-            // the dossier now says that in words instead.
-            risk: null,
-            credibility: meanCredibility,
-            credibilityBasis:
-              meanCredibility === null
-                ? ""
-                : `mean of Module 1 scores across ${usable.length} of ${corpus.length} ` +
-                  `collected item(s); ${corpus.length - usable.length} could not be scored`,
-            findings: [
-              `Target "${activeTarget}" appears in ${corpus.length} collected news item(s).`,
-              `Social mentions collected in this run: ${socialRes?.mentions?.length ?? 0}.`,
-              ...(osintRes?.whois?.Registrar
-                ? [`WHOIS registrar: ${osintRes.whois.Registrar}.`]
-                : ["No WHOIS registrar was returned for this target."]),
-              ...(meanCredibility !== null
-                ? [`Mean source credibility ${meanCredibility}% across scored items (Module 1, default weights).`]
-                : ["Source credibility could not be scored — no collected item yielded a usable factor."]),
-            ],
-            // Recommendations are the model's, derived from the collected
-            // material above. The two hardcoded lines that used to sit here
-            // ("Perform continuous C2 subnet scans") were printed as though an
-            // analyst had reached them.
-            recommendations: [],
-          },
-          stories: newsRes?.stories || [],
-          socialMentions: socialRes?.mentions || [],
-          osintCyberThreats: []
-        }
-      };
-
-      let blob: Blob;
-      let filename = `Sentinel_Intel_${activeTarget.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().slice(0, 10)}`;
-
       if (format === "pdf") {
-        blob = await generatePDFBlob(config);
-        filename += ".pdf";
-      } else if (format === "html") {
-        const htmlStr = generateHTML(config);
-        blob = new Blob([htmlStr], { type: "text/html" });
-        filename += ".html";
+        const bytes = await renderProductPdf(product);
+        download(new Blob([bytes as unknown as BlobPart], { type: "application/pdf" }), `${stem}.pdf`);
+      } else if (format === "markdown") {
+        download(new Blob([toMarkdown(product)], { type: "text/markdown" }), `${stem}.md`);
       } else if (format === "json") {
-        const jsonStr = generateJSON(config);
-        blob = new Blob([jsonStr], { type: "application/json" });
-        filename += ".json";
-      } else if (format === "csv") {
-        const csvStr = generateCSV(config);
-        blob = new Blob([csvStr], { type: "text/csv" });
-        filename += ".csv";
+        download(
+          new Blob([JSON.stringify(product, null, 2)], { type: "application/json" }),
+          `${stem}.json`,
+        );
       } else {
-        const textStr = compileReportText(config);
-        blob = new Blob([textStr], { type: "text/plain" });
-        filename += ".md";
+        download(new Blob([toCsv(product)], { type: "text/csv" }), `${stem}_sources.csv`);
       }
-
-      // Trigger browser download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      setLastExport({ format, text: aiReport.text, model: aiReport.model });
-      toast.success(`Successfully exported ${filename}`);
     } catch (err: any) {
-      // The real upstream cause, not "please try again". A truncated model
-      // response and a revoked API key need different actions from the analyst,
-      // and a generic toast makes them indistinguishable.
-      const message = err?.message ?? String(err);
-      setExportError(message);
-      toast.error(`Export failed: ${message.slice(0, 120)}`);
+      // The real cause. "Export failed. Please try again." used to hide whether
+      // the PDF layout threw or the product was malformed.
+      setError(err?.message ?? String(err));
     } finally {
-      setLoadingFormat(null);
+      setBusy(null);
     }
   };
 
   return (
     <AppShell>
       <PageHeader
-        title="Intelligence Export Manager"
-        description="Fetch live intelligence telemetry, run AI analysis, and export ready-to-file PDF, HTML, JSON, CSV, or Markdown reports."
+        title="Export Manager"
+        description="Exports the intelligence products generated on the Report Generator page. One pipeline, so the file matches what you reviewed."
       />
 
-      <div className="p-6 space-y-6 font-mono text-xs">
-        <Card className="bg-[#111827] border-[#263548] p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-xs">
-                ACTIVE EXPORT TARGET: {activeTarget.toUpperCase()}
-              </Badge>
-              <div className="text-sm font-bold text-[#F3F4F6]">
-                Select Export Document Format
-              </div>
-            </div>
-            <span className="text-xs text-[#94A3B8]">Classification: UNCLASSIFIED // DEMONSTRATOR</span>
-          </div>
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        <Card className={CARD}>
+          <CardContent className="p-4">
+            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
+              <Archive className="size-3.5 text-[#3B82F6]" />
+              Products ({products.length})
+            </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {[
-              { id: "pdf", name: "PDF Dossier", icon: FileText, desc: "A4 Printable Executive PDF" },
-              { id: "html", name: "HTML Briefing", icon: FileCode, desc: "Interactive Web Report" },
-              { id: "markdown", name: "Markdown File", icon: FileText, desc: "Formatted Plain Text" },
-              { id: "json", name: "JSON Data", icon: FileCode, desc: "Structured Telemetry JSON" },
-              { id: "csv", name: "CSV Spreadsheet", icon: FileSpreadsheet, desc: "Tabular Data Sheet" }
-            ].map((f) => {
-              const Icon = f.icon;
-              const isWorking = loadingFormat === f.id;
-              return (
-                <Card key={f.id} className="bg-[#0B1220] border-[#263548] p-4 flex flex-col justify-between space-y-3">
-                  <div className="space-y-1.5">
-                    <Icon className="size-5 text-[#10B981]" />
-                    <div className="font-bold text-[#F3F4F6] text-xs">{f.name}</div>
-                    <div className="text-[10px] text-[#94A3B8]">{f.desc}</div>
-                  </div>
-                  <Button
-                    disabled={!!loadingFormat}
-                    onClick={() => handleExport(f.id)}
-                    className="w-full h-8 bg-[#10B981] hover:bg-[#059669] text-black font-bold text-[10px] gap-1.5"
+            {products.length === 0 ? (
+              <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
+                No products yet. Generate one on the{" "}
+                <a href="/reports" className="text-[#3B82F6] hover:underline">
+                  Report Generator
+                </a>{" "}
+                page. This page deliberately does not generate anything of its own — a second
+                pipeline is how the exported PDF ended up carrying invented scores that the
+                on-screen product never showed.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-1.5">
+                {[...products].reverse().map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedId(p.id)}
+                    className={`w-full rounded border p-2 text-left ${
+                      selectedId === p.id
+                        ? "border-[#3B82F6]/60 bg-[#3B82F6]/10"
+                        : "border-[#263548] bg-[#0B1220]/60"
+                    }`}
                   >
-                    {isWorking ? (
-                      <>
-                        <RefreshCw className="size-3 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="size-3" />
-                        Export {f.id.toUpperCase()}
-                      </>
-                    )}
-                  </Button>
-                </Card>
-              );
-            })}
-          </div>
+                    <span className="block truncate text-[11px] font-semibold text-white">
+                      {p.typeLabel}
+                    </span>
+                    <span className="block truncate text-[10px] text-[#94A3B8]">{p.subject}</span>
+                    <span className="block font-mono text-[9px] text-[#64748B]">
+                      {p.provenance.generatedAt.slice(0, 16).replace("T", " ")} ·{" "}
+                      {p.sources.length} sources · {p.provenance.model}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
         </Card>
 
-        {exportError && (
-          <Card className="border-[#EF4444]/40 bg-[#111827] p-4">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-              <div className="text-[10px] leading-relaxed text-[#EF4444]">
-                <span className="font-bold">Export failed. No file was written.</span>
-                <div className="pt-0.5 opacity-80">{exportError}</div>
-              </div>
-            </div>
-          </Card>
-        )}
+        <div className="space-y-4">
+          {product ? (
+            <>
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-white">{product.typeLabel}</span>
+                    <Badge
+                      variant="outline"
+                      className="border-[#F59E0B]/40 bg-[#F59E0B]/10 font-mono text-[9px] font-normal text-[#F59E0B]"
+                    >
+                      {product.classification}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className="border-[#8B5CF6]/40 bg-[#8B5CF6]/10 font-mono text-[9px] font-normal text-[#8B5CF6]"
+                      title="Open-source model — PS-18 §6.5 names this requirement explicitly"
+                    >
+                      {product.provenance.model}
+                    </Badge>
+                  </div>
 
-        {lastExport && (
-          <Card className="bg-[#111827] border-[#263548] p-6 space-y-3">
-            <h3 className="text-sm font-bold text-[#10B981] flex items-center gap-2">
-              <Sparkles className="size-4" />
-              {/* Was hardcoded "GEMINI AI" — a model this project does not and
-                  cannot use, and which would mislabel whatever actually ran. */}
-              AI-GENERATED SUMMARY · {lastExport.model} ({lastExport.format.toUpperCase()})
-            </h3>
-            <pre className="text-xs text-[#CBD5E1] bg-[#0B1220] p-4 rounded border border-[#263548] whitespace-pre-wrap leading-relaxed">
-              {lastExport.text}
-            </pre>
-          </Card>
-        )}
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px] sm:grid-cols-3">
+                    <div>
+                      <dt className="text-[#64748B]">Subject</dt>
+                      <dd className="truncate text-white">{product.subject}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#64748B]">Sources cited</dt>
+                      <dd className="text-white">{product.sources.length}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#64748B]">Mean credibility</dt>
+                      <dd className="text-white">
+                        {meanCredibility === null
+                          ? "not scorable"
+                          : `${(meanCredibility * 100).toFixed(0)}% (${bandFor(meanCredibility).label})`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#64748B]">Key judgements</dt>
+                      <dd className="text-white">{product.keyJudgements.length}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#64748B]">Intelligence gaps</dt>
+                      <dd className="text-white">{product.gaps.length}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#64748B]">Modules</dt>
+                      <dd className="truncate text-white">{product.provenance.modules.length}</dd>
+                    </div>
+                  </dl>
+
+                  <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+                    <Info className="mt-px size-3 shrink-0" />
+                    No subject risk score is exported. Nothing in this system computes one, and a
+                    number printed under a classification header reads as a measurement — which
+                    is exactly how `risk: 75` used to reach a downloadable dossier.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <h3 className="text-xs font-bold uppercase text-white">Export format</h3>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {FORMATS.map((f) => {
+                      const Icon = f.icon;
+                      return (
+                        <Card key={f.id} className="flex flex-col justify-between border-[#263548] bg-[#0B1220] p-3">
+                          <div>
+                            <Icon className="size-5 text-[#10B981]" />
+                            <div className="mt-1.5 text-xs font-bold text-white">{f.name}</div>
+                            <div className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                              {f.desc}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={busy !== null}
+                            onClick={() => doExport(f.id)}
+                            className="mt-2 h-7 w-full gap-1.5 bg-[#10B981] text-[10px] font-bold text-black hover:bg-[#059669]"
+                          >
+                            {busy === f.id ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Download className="size-3" />
+                            )}
+                            Export
+                          </Button>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {error && (
+                    <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
+                      <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                        <span className="font-bold">Export failed. No file was written.</span>
+                        <div className="pt-0.5 opacity-80">{error}</div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <h3 className="text-xs font-bold uppercase text-white">
+                    Sources carried into the export
+                  </h3>
+                  <ol className="mt-2 space-y-1.5">
+                    {product.sources.map((s) => (
+                      <li key={s.n} className="text-[10px] leading-relaxed">
+                        <span className="font-mono text-[#3B82F6]">[{s.n}]</span>{" "}
+                        <span className="text-[#F3F4F6]">{s.title}</span>
+                        <div className="pl-6 text-[9px] text-[#94A3B8]">
+                          {s.outlet} · {s.module} ·{" "}
+                          {s.credibility === null
+                            ? "credibility not scored"
+                            : `credibility ${(s.credibility * 100).toFixed(0)}% (${bandFor(s.credibility).label})`}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            products.length > 0 && (
+              <Card className={CARD}>
+                <CardContent className="p-10 text-center text-[11px] text-[#64748B]">
+                  Select a product to export.
+                </CardContent>
+              </Card>
+            )
+          )}
+        </div>
       </div>
     </AppShell>
   );
