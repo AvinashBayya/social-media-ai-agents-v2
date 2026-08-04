@@ -505,8 +505,14 @@ function cacheSet(store: Map<string, CacheRow<any>>, key: string, value: unknown
   store.set(key, { value, at: Date.now() });
 }
 
-async function appview(path: string, params: Record<string, string>, platform: Platform): Promise<any> {
-  const qs = new URLSearchParams(params).toString();
+// Takes URLSearchParams rather than a plain object because getProfiles passes
+// `actors` REPEATED — a record would collapse 25 actors to whichever was last.
+async function appview(
+  path: string,
+  params: URLSearchParams | Record<string, string>,
+  platform: Platform,
+): Promise<any> {
+  const qs = (params instanceof URLSearchParams ? params : new URLSearchParams(params)).toString();
   let res: Response;
   try {
     res = await fetch(`${APPVIEW}/${path}?${qs}`, {
@@ -568,7 +574,7 @@ export async function fetchProfiles(actors: string[]): Promise<BlueskyProfile[]>
     const batch = missing.slice(i, i + 25);
     const params = new URLSearchParams();
     for (const a of batch) params.append("actors", a);
-    const raw = await appview("app.bsky.actor.getProfiles", Object.fromEntries(params as any), "bluesky")
+    const raw = await appview("app.bsky.actor.getProfiles", params, "bluesky")
       .catch(async () => {
         // getProfiles is all-or-nothing; fall back to individual lookups so one
         // deleted account does not lose the whole batch.
