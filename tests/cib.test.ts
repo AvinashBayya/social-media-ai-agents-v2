@@ -5,6 +5,7 @@ import {
   analyseCib,
   assessCluster,
   clusterPosts,
+  observationWindowOf,
   contentDuplication,
   contentSimilarity,
   handlePatterns,
@@ -42,6 +43,12 @@ import { defaultFactors, scoreCorpus } from "../src/utils/credibility";
 
 /** Fixed epoch so every test is deterministic — no Date.now() in fixtures. */
 const T0 = Date.parse("2026-08-04T09:00:00.000Z");
+/**
+ * Span of the notional collection these fixtures were drawn from. Synchrony is
+ * judged relative to this: without it a fixture spanning four minutes would be
+ * "perfectly synchronised" purely because nothing longer was collected.
+ */
+const WINDOW = 300;
 const at = (offsetSeconds: number) => new Date(T0 + offsetSeconds * 1000).toISOString();
 
 let seq = 0;
@@ -195,15 +202,15 @@ describe("shingles", () => {
 
 describe("temporal synchrony", () => {
   test("scores high for many accounts inside a tight window", () => {
-    const s = temporalSynchrony(COORDINATED);
+    const s = temporalSynchrony(COORDINATED, WINDOW);
     expect(s.score).not.toBeNull();
     expect(s.score!).toBeGreaterThan(0.9);
     expect(s.evidence).toContain("9 accounts");
-    expect(s.evidence).toContain("standard deviation");
+    expect(s.evidence).toContain("uniformly scattered posting would give");
   });
 
   test("scores low for the same content spread over hours", () => {
-    const s = temporalSynchrony(ORGANIC);
+    const s = temporalSynchrony(ORGANIC, WINDOW);
     expect(s.score).not.toBeNull();
     expect(s.score!).toBeLessThan(0.1);
   });
@@ -211,7 +218,7 @@ describe("temporal synchrony", () => {
   test("is SKIPPED, not scored, for a single account posting rapidly", () => {
     // The most important exclusion in the file: a busy wire account posting six
     // times a minute is not coordination and must not be scored as if it were.
-    const s = temporalSynchrony(SINGLE_ACCOUNT_BURST);
+    const s = temporalSynchrony(SINGLE_ACCOUNT_BURST, WINDOW);
     expect(s.score).toBeNull();
     expect(s.skipped).toContain("1 distinct account");
   });
@@ -221,13 +228,43 @@ describe("temporal synchrony", () => {
       post({ authorId: "a", text: "one", createdAt: "" }),
       post({ authorId: "b", text: "two", createdAt: "not-a-date" }),
     ];
-    const s = temporalSynchrony(undated);
+    const s = temporalSynchrony(undated, WINDOW);
     expect(s.score).toBeNull();
     expect(s.skipped).toContain("timestamp");
   });
 
+  test("is SKIPPED when the collection window is too short to mean anything", () => {
+    // Found by running the detector against the live firehose: 400 posts arrive
+    // in ~15 seconds, so every cluster drawn from that buffer scored 1.00. The
+    // signal was measuring the length of the buffer, not the accounts.
+    const s = temporalSynchrony(COORDINATED, 0.25);
+    expect(s.score).toBeNull();
+    expect(s.skipped).toContain("collection window itself");
+  });
+
+  test("the same cluster scores lower when the window it came from is short", () => {
+    const wide = temporalSynchrony(COORDINATED, 600).score!;
+    const narrow = temporalSynchrony(COORDINATED, 15).score!;
+    expect(wide).toBeGreaterThan(narrow);
+  });
+
+  test("analyseCib derives the window from its input rather than assuming one", () => {
+    const burst = Array.from({ length: 6 }, (_, i) =>
+      post({
+        authorId: `did:plc:b${i}`,
+        author: `b${i}.bsky.social`,
+        text: COORDINATED_TEXT,
+        createdAt: at(i),
+      }),
+    );
+    // Six accounts, six seconds — indistinguishable from any other six seconds
+    // of firehose, so synchrony must abstain.
+    const [cluster] = analyseCib(burst, { now: T0 });
+    expect(cluster.signals.find((x) => x.id === "temporal_synchrony")!.score).toBeNull();
+  });
+
   test("evidence names specific accounts and times", () => {
-    const s = temporalSynchrony(COORDINATED);
+    const s = temporalSynchrony(COORDINATED, WINDOW);
     expect(s.evidence).toContain("citizenvoice1200.bsky.social");
     expect(s.evidence).toContain("2026-08-04 09:00:00Z");
   });
@@ -406,7 +443,7 @@ describe("clusterPosts", () => {
 });
 
 describe("assessCluster — coordinated fixture", () => {
-  const cluster = assessCluster(COORDINATED, { profiles: COORDINATED_PROFILES, now: T0 });
+  const cluster = assessCluster(COORDINATED, { profiles: COORDINATED_PROFILES, now: T0, observationWindowMinutes: WINDOW });
 
   test("is flagged for review", () => {
     expect(cluster.compositeScore).not.toBeNull();
@@ -433,7 +470,7 @@ describe("assessCluster — coordinated fixture", () => {
 });
 
 describe("assessCluster — organic fixture (false-positive guard)", () => {
-  const cluster = assessCluster(ORGANIC, { profiles: ORGANIC_PROFILES, now: T0 });
+  const cluster = assessCluster(ORGANIC, { profiles: ORGANIC_PROFILES, now: T0, observationWindowMinutes: WINDOW });
 
   test("is NOT flagged", () => {
     // The single most important assertion in this file. Nine real people
@@ -445,7 +482,7 @@ describe("assessCluster — organic fixture (false-positive guard)", () => {
   test("stays unflagged even with no profile data available", () => {
     // Profiles are the strongest exonerating evidence here, so the fixture has
     // to survive losing them — otherwise the result depends on a lucky fetch.
-    const noProfiles = assessCluster(ORGANIC, { now: T0 });
+    const noProfiles = assessCluster(ORGANIC, { now: T0, observationWindowMinutes: WINDOW });
     expect(noProfiles.flagged).toBe(false);
   });
 
@@ -464,7 +501,7 @@ describe("assessCluster — organic fixture (false-positive guard)", () => {
 });
 
 describe("assessCluster — single account posting rapidly", () => {
-  const cluster = assessCluster(SINGLE_ACCOUNT_BURST, { now: T0 });
+  const cluster = assessCluster(SINGLE_ACCOUNT_BURST, { now: T0, observationWindowMinutes: WINDOW });
 
   test("is NOT flagged", () => {
     expect(cluster.flagged).toBe(false);
@@ -832,5 +869,34 @@ describe("Jetstream instance failover", () => {
     sockets[0].onclose?.({ code: 1000, reason: "" });
     expect(opened.length).toBe(1);
     expect(client.getStatus().state).toBe("closed");
+  });
+});
+
+describe("observation window", () => {
+  const spread = (n: number, stepSeconds: number) =>
+    Array.from({ length: n }, (_, i) =>
+      post({ authorId: `did:plc:w${i}`, text: `post number ${i}`, createdAt: at(i * stepSeconds) }),
+    );
+
+  test("measures the span of a normal set", () => {
+    // 30 posts one minute apart -> ~29 minutes, trimmed to the 5-95 percentile.
+    const w = observationWindowOf(spread(30, 60));
+    expect(w).toBeGreaterThan(20);
+    expect(w).toBeLessThanOrEqual(29);
+  });
+
+  test("one backdated post does not stretch the window to years", () => {
+    // createdAt is declared by the author's client, not observed. Left untrimmed,
+    // a single 2020 timestamp would inflate the expected spread so far that every
+    // cluster in the buffer would read as tightly synchronised.
+    const posts = spread(30, 60);
+    posts[0] = { ...posts[0], createdAt: new Date(T0 - 6 * 365 * 86_400_000).toISOString() };
+    const w = observationWindowOf(posts);
+    expect(w).toBeLessThan(60);
+  });
+
+  test("returns zero for a set with fewer than two dated posts", () => {
+    expect(observationWindowOf([])).toBe(0);
+    expect(observationWindowOf([post({ authorId: "a", text: "x" })])).toBe(0);
   });
 });

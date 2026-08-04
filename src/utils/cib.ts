@@ -99,11 +99,24 @@ export const CLUSTER_THRESHOLD = 0.5;
 /** Shingle overlap at which two posts are near-identical text. */
 export const DUPLICATE_THRESHOLD = 0.8;
 /**
- * Timestamp spread, in minutes, that a cluster's standard deviation is measured
- * against. Organic spread of one message across a network runs to hours; an hour
- * is therefore the point at which synchrony carries no signal at all.
+ * Minimum span of collected data, in minutes, before synchrony means anything.
+ *
+ * Found by running the detector against the live firehose: 400 posts arrive in
+ * about fifteen seconds, so every cluster drawn from that buffer had a timestamp
+ * standard deviation near zero and scored 1.00. The signal was measuring the
+ * length of the collection window, not the behaviour of the accounts. Below this
+ * span the signal is skipped rather than scored.
  */
-export const SYNCHRONY_REFERENCE_MINUTES = 60;
+export const MIN_OBSERVATION_MINUTES = 10;
+
+/**
+ * Standard deviation of N points drawn uniformly across a window of width W is
+ * W/sqrt(12). That is the null hypothesis — what "not coordinated" looks like —
+ * and it is what an observed spread is compared against, so the score means
+ * "concentrated relative to the window we watched" rather than "close together
+ * in absolute minutes".
+ */
+const UNIFORM_SD_FACTOR = 1 / Math.sqrt(12);
 /** Window within which reposts of one URI count as a single amplification push. */
 export const AMPLIFICATION_WINDOW_MINUTES = 30;
 /** Composite at or above which a cluster is surfaced for review. */
@@ -217,7 +230,10 @@ class UnionFind {
  * — the single most important false positive to exclude, since a busy news
  * account trips it constantly.
  */
-export function temporalSynchrony(posts: SocialPost[]): CibSignal {
+export function temporalSynchrony(
+  posts: SocialPost[],
+  observationWindowMinutes?: number,
+): CibSignal {
   const accounts = distinctAccounts(posts);
   const base: CibSignal = {
     id: "temporal_synchrony",
@@ -242,12 +258,29 @@ export function temporalSynchrony(posts: SocialPost[]): CibSignal {
     return { ...base, skipped: "Fewer than two posts in this group carry a usable timestamp." };
   }
 
-  const sd = stdDevMinutes(dated)!;
-  // Tight spread scores high; an hour of spread scores nothing.
-  const score = Math.max(0, Math.min(1, 1 - sd / SYNCHRONY_REFERENCE_MINUTES));
-
   const ordered = [...dated].sort((a, b) => timeOf(a) - timeOf(b));
   const spanMinutes = (timeOf(ordered[ordered.length - 1]) - timeOf(ordered[0])) / 60_000;
+
+  // Without a corpus window supplied, the cluster's own span is all we have —
+  // which is exactly the case the guard below is for.
+  const window = observationWindowMinutes ?? spanMinutes;
+
+  if (window < MIN_OBSERVATION_MINUTES) {
+    return {
+      ...base,
+      skipped:
+        `The collected window spans only ${window.toFixed(1)} minutes. Every post in a window ` +
+        `that short is necessarily close in time, so concentration cannot be distinguished ` +
+        `from the collection window itself. Collect at least ${MIN_OBSERVATION_MINUTES} ` +
+        `minutes before reading synchrony.`,
+    };
+  }
+
+  const sd = stdDevMinutes(dated)!;
+  // Expected spread if these posts were scattered uniformly across the window.
+  const expected = window * UNIFORM_SD_FACTOR;
+  const score = Math.max(0, Math.min(1, 1 - sd / expected));
+
   const sample = ordered
     .slice(0, 5)
     .map((p) => `${nameOf(p)} at ${fmtTime(p.createdAt)}`)
@@ -258,7 +291,8 @@ export function temporalSynchrony(posts: SocialPost[]): CibSignal {
     score,
     evidence:
       `${accounts.length} accounts posted similar content within ${spanMinutes.toFixed(1)} minutes ` +
-      `(standard deviation ${sd.toFixed(1)} min against a ${SYNCHRONY_REFERENCE_MINUTES} min reference). ` +
+      `(standard deviation ${sd.toFixed(1)} min). Across the ${window.toFixed(0)}-minute window ` +
+      `collected, uniformly scattered posting would give about ${expected.toFixed(1)} min. ` +
       `First five: ${sample}.`,
   };
 }
@@ -717,6 +751,33 @@ export interface AnalyseOptions {
   now?: number;
   /** Clusters smaller than this are not assessed; two posts is not a campaign. */
   minClusterSize?: number;
+  /**
+   * Span of the whole collection the cluster was drawn from, in minutes. This is
+   * what a cluster's timestamp concentration is judged against — without it, a
+   * fifteen-second firehose sample makes every cluster look perfectly
+   * synchronised. analyseCib() computes it from its input.
+   */
+  observationWindowMinutes?: number;
+}
+
+/**
+ * Span of a post set in minutes, measured between the 5th and 95th percentile
+ * rather than min to max.
+ *
+ * createdAt is declared by the author's client, not observed by us: one post
+ * backdated to 2020 would stretch a min-to-max window to years, inflate the
+ * expected spread accordingly, and make every cluster in the buffer look
+ * tightly synchronised. Trimming the tails costs a little sensitivity and
+ * removes that whole failure mode — the right trade for a detector whose worst
+ * outcome is a false positive.
+ */
+export function observationWindowOf(posts: SocialPost[]): number {
+  const times = posts.map(timeOf).filter((t) => Number.isFinite(t)).sort((a, b) => a - b);
+  if (times.length < 2) return 0;
+  if (times.length < 20) return (times[times.length - 1] - times[0]) / 60_000;
+  const lo = times[Math.floor(times.length * 0.05)];
+  const hi = times[Math.ceil(times.length * 0.95) - 1];
+  return (hi - lo) / 60_000;
 }
 
 /**
@@ -737,7 +798,7 @@ export function assessCluster(posts: SocialPost[], options: AnalyseOptions = {})
     return ta - tb;
   });
 
-  const synchrony = temporalSynchrony(ordered);
+  const synchrony = temporalSynchrony(ordered, options.observationWindowMinutes);
   const duplication = contentDuplication(ordered);
   const maturity = accountMaturity(ordered, options.profiles ?? [], now);
   const handles = handlePatterns(ordered);
@@ -783,9 +844,15 @@ export function assessCluster(posts: SocialPost[], options: AnalyseOptions = {})
  */
 export function analyseCib(posts: SocialPost[], options: AnalyseOptions = {}): CibCluster[] {
   const minSize = options.minClusterSize ?? 2;
+  // Measured once from the whole input: a cluster's concentration is only
+  // meaningful relative to the window it was drawn from.
+  const withWindow: AnalyseOptions = {
+    ...options,
+    observationWindowMinutes: options.observationWindowMinutes ?? observationWindowOf(posts),
+  };
   return clusterPosts(posts)
     .filter((group) => group.length >= minSize)
-    .map((group) => assessCluster(group, options))
+    .map((group) => assessCluster(group, withWindow))
     .sort(
       (a, b) =>
         (b.compositeScore ?? -1) - (a.compositeScore ?? -1) ||

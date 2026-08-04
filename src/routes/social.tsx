@@ -15,7 +15,10 @@ import {
   type JetstreamStatus, type Monitor, type MonitorReading, type SocialPost,
   type BlueskyProfile,
 } from "@/utils/social";
-import { assessCluster, CIB_CAVEAT, type CibCluster } from "@/utils/cib";
+import {
+  assessCluster, observationWindowOf, CIB_CAVEAT, MIN_OBSERVATION_MINUTES,
+  type CibCluster,
+} from "@/utils/cib";
 import { assessSocialCorpus } from "@/utils/social-credibility";
 
 /**
@@ -199,8 +202,14 @@ function SocialPage() {
         }
       }
 
+      // The window must carry into the re-assessment. Passing only the cluster's
+      // own posts would make every cluster look perfectly synchronised, since a
+      // cluster is by definition a tight group inside a wider collection.
+      const observationWindowMinutes = observationWindowOf(window_);
       const withProfiles = fetched.length
-        ? first.cibClusters.map((c) => assessCluster(c.posts, { profiles: fetched, now: Date.now() }))
+        ? first.cibClusters.map((c) =>
+            assessCluster(c.posts, { profiles: fetched, now: Date.now(), observationWindowMinutes }),
+          )
         : first.cibClusters;
 
       setCibClusters(
@@ -548,10 +557,14 @@ function SocialPage() {
               )}
 
               {cibClusters === null && !cibError && (
-                <p className="mt-3 text-[11px] text-[#64748B]">
+                <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
                   Not yet run. Analysis covers the most recent {CIB_WINDOW} buffered posts —
                   clustering is quadratic, so the whole 2,000-post buffer would lock the tab.
-                  Select a monitor first to analyse only its matches.
+                  Select a monitor first to analyse only its matches. Note the stream delivers
+                  roughly {CIB_WINDOW} posts in well under a minute, so the temporal-synchrony
+                  signal will abstain until at least {MIN_OBSERVATION_MINUTES} minutes have been
+                  collected: in a window that short every post is close in time regardless of who
+                  posted it.
                 </p>
               )}
 
