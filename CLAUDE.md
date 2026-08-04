@@ -104,6 +104,35 @@ Core logic lives in plain exported functions (`summariseText`, `extractEntitiesF
 functions cannot execute outside the Start runtime context, so keeping the logic separate
 is what makes it testable — do not move it back inside the handlers.
 
+## Social collection (Module 3)
+
+Verified against live endpoints 2026-08-04.
+
+- **Bluesky Jetstream** `wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post`
+  — open WebSocket firehose, no auth, emits JSON. The socket runs **in the browser**:
+  the container scales to zero, so a server-side socket would be torn down between
+  requests. Buffer is a bounded 2,000-post ring.
+- **Bluesky public AppView** `https://public.api.bsky.app/xrpc/` — `app.bsky.actor.getProfile`,
+  `getProfiles` (≤25 actors), `app.bsky.feed.getAuthorFeed` all work unauthenticated.
+  `getProfile` returns `createdAt`, `postsCount`, `followersCount` — the basis for the
+  account-maturity signal.
+- **`app.bsky.feed.searchPosts` returns 403** — it needs auth. No historical keyword
+  search without an account, so monitoring runs forward from connection.
+- **Reddit** `https://www.reddit.com/search.json` — unauthenticated, rate limited; a 429
+  is surfaced as a rate limit, not as "no results".
+- **Telegram** `https://t.me/s/{channel}` — public channel previews only.
+
+**Instagram and Facebook are not collected, and this is stated in the UI.** Meta's terms
+prohibit scraping and the Graph API only grants access to Pages/Business accounts the
+caller owns, so broad monitoring is genuinely unavailable rather than unimplemented.
+CrowdTangle shut down August 2024. X/Twitter has had no free tier since 2023. Do not
+re-add scrapers for any of these.
+
+CIB signals (`src/utils/cib.ts`) are presented as **signals warranting review, never a
+verdict** — organised legitimate campaigns produce identical patterns. Every signal
+carries an evidence string naming the accounts and timings; a signal that cannot be
+computed returns `null` with a reason, never 0.
+
 ## GPU quota request — NOT YET RAISED
 
 Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the

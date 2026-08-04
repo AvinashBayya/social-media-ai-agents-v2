@@ -211,15 +211,11 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     
     allPosts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
-    if (allPosts.length === 0) {
-      allPosts = [
-        { id: "1", channel: "BNONews", text: "BREAKING: Severe GPS jamming reported across the Baltic region, affecting aviation telemetry.", date: new Date().toISOString() },
-        { id: "2", channel: "OSINTdefender", text: "Conflict update: Satellite imagery reveals increased armored divisions near the border crossings.", date: new Date(Date.now() - 3600000).toISOString() },
-        { id: "3", channel: "vxunderground", text: "Threat Alert: A new ransomware group 'AlphaC2' has published proof-of-compromise for a major energy grid provider.", date: new Date(Date.now() - 7200000).toISOString() },
-        { id: "4", channel: "abualiexpress", text: "Home Front Command rocket alert triggered in northern communities; interception reports active.", date: new Date(Date.now() - 10800000).toISOString() }
-      ];
-    }
-    
+    // An empty result is returned as empty. This used to fall back to four
+    // hardcoded "BREAKING" messages — GPS jamming in the Baltic, armour massing
+    // at a border, a named ransomware group — each attributed to a REAL channel
+    // that had not said any of it. Fabricated intelligence carrying a genuine
+    // source name is the worst failure mode this system has.
     return allPosts;
   });
 

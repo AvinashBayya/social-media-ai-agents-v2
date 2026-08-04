@@ -68,6 +68,35 @@ export interface FactorOptions {
    * feed O(n^3). Optional so scoreArticle still works standalone.
    */
   clusters?: StoryCluster[];
+  /**
+   * Module 3 context, keyed by article id, for corpus members that are social
+   * posts rather than published articles. Presence of an entry is what marks an
+   * article as social: it bypasses domain_tier and enables the two social
+   * factors. Absent for a news corpus, which therefore behaves exactly as before.
+   */
+  social?: Record<string, SocialSignalContext>;
+}
+
+/**
+ * What Module 3 knows about one social post, as Module 1 consumes it.
+ *
+ * Every field is nullable and every null means "not measured", never "measured
+ * as zero". A post whose author's profile could not be fetched must not score
+ * the same as one whose author is demonstrably established.
+ */
+export interface SocialSignalContext {
+  platform: string;
+  /** Account handle or id, for evidence strings. */
+  account: string;
+  /** 0-1 concern from account age, output rate and audience. Null when no profile. */
+  maturityConcern: number | null;
+  /** The real numbers behind maturityConcern. */
+  maturityEvidence: string;
+  /** Composite CIB score for the cluster this post sits in. Null when unassessed. */
+  cibScore: number | null;
+  cibEvidence: string;
+  /** How many CIB signals could actually be computed for that cluster. */
+  cibSignalsComputed: number;
 }
 
 // ─── Domain reputation table ───────────────────────────────────────────────
@@ -203,7 +232,14 @@ const listOf = (items: string[], max = 4): string => {
 
 // ─── Factor implementations (pure) ─────────────────────────────────────────
 
-function computeDomainTier(article: Article): FactorResult | null {
+function computeDomainTier(article: Article, options?: FactorOptions): FactorResult | null {
+  // BYPASSED FOR SOCIAL SOURCES (Module 3). bsky.app and reddit.com are the
+  // hosting platform, not the publisher: rating a post by the domain it sits on
+  // would give every account on Bluesky an identical score and would make that
+  // score the single largest term for a post carrying no editorial model at all.
+  // Account maturity and CIB signals take its place for these sources.
+  if (options?.social?.[article.id]) return null;
+
   const domain = domainOf(article.url) || domainOf(article.source);
   if (!domain) {
     return null; // no resolvable domain — cannot rate the publisher
@@ -413,7 +449,7 @@ export function defaultFactors(): CredibilityFactor[] {
       weight: 0.2,
       enabled: true,
       requiresLlm: false,
-      compute: (a) => computeDomainTier(a),
+      compute: (a, _c, o) => computeDomainTier(a, o),
     },
     {
       id: "corroboration",
@@ -513,9 +549,34 @@ export interface CredibilityScore {
   explanation: string;
 }
 
-function skipReason(factor: CredibilityFactor, article: Article, corpus: Article[]): string {
+function skipReason(
+  factor: CredibilityFactor,
+  article: Article,
+  corpus: Article[],
+  options?: FactorOptions,
+): string {
   if (!factor.enabled) return "Disabled by the analyst.";
   if (factor.requiresLlm) return "Requires an LLM provider — not implemented in this pass.";
+
+  const social = options?.social?.[article.id];
+  if (social) {
+    if (factor.id === "domain_tier") {
+      return (
+        `Bypassed for social sources: ${social.platform} is the hosting platform, not the ` +
+        `publisher, so a domain rating would say the same thing about every account on it. ` +
+        `Account maturity and CIB signals carry this weight instead.`
+      );
+    }
+    if (factor.id === "account_maturity") {
+      return "No profile was retrieved for this account, so its age and output are unknown.";
+    }
+    if (factor.id === "cib_signals") {
+      return "This post was not part of an assessed cluster, so no CIB signal applies to it.";
+    }
+  }
+  if (factor.id === "account_maturity" || factor.id === "cib_signals") {
+    return "Applies only to social posts; this is a published article.";
+  }
   if (factor.id === "citation_depth" && !article.body?.trim()) return "Feed supplied no body text to scan.";
   if (factor.id === "corroboration" && corpus.length <= 1) return "Corpus has no other articles to compare against.";
   if (factor.id === "source_diversity") return "No corroborating sources to measure diversity across.";
@@ -565,13 +626,13 @@ export function scoreArticle(
       skipped.push({
         id: factor.id,
         name: factor.name,
-        reason: factor.weight <= 0 && factor.enabled ? "Weight set to zero." : skipReason(factor, article, corpus),
+        reason: factor.weight <= 0 && factor.enabled ? "Weight set to zero." : skipReason(factor, article, corpus, options),
       });
       continue;
     }
     const result = factor.compute(article, corpus, options);
     if (result === null) {
-      skipped.push({ id: factor.id, name: factor.name, reason: skipReason(factor, article, corpus) });
+      skipped.push({ id: factor.id, name: factor.name, reason: skipReason(factor, article, corpus, options) });
       continue;
     }
     computed.push({ factor, result });
