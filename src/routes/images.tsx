@@ -10,7 +10,7 @@ import {
   Camera, MapPin, Type, Copy, Fingerprint, ChevronDown, ChevronRight, Info, Tags,
 } from "lucide-react";
 import {
-  assessProvenance, findNearDuplicates, interpretExif,
+  assessProvenance, findNearDuplicates,
   C2PA_ABSENCE_NOTE, OCR_LANGUAGES, OCR_LOW_CONFIDENCE,
   type C2paReport, type DuplicateReport, type ExifReport, type HashedImage, type OcrReport,
 } from "@/utils/imaging";
@@ -129,19 +129,32 @@ function Page() {
       setBusy("Reading EXIF");
       let exif: ExifReport | null = null;
       let exifError: string | null = null;
-      if (typeof source !== "string") {
-        try {
+      try {
+        if (typeof source !== "string") {
           exif = await readExif(source);
-        } catch (err: any) {
-          // A parse failure is reported as a failure, never converted into
-          // "no metadata" — those are different findings.
-          exifError = err?.message ?? String(err);
+        } else {
+          // Fetch the original bytes so EXIF can be read from a URL too. This
+          // used to skip the attempt entirely and hand the assessment
+          // interpretExif(null), which renders as "No EXIF metadata" — reporting
+          // "we never looked" as "there is nothing there", the exact confusion
+          // the rest of this module is built to avoid. A CORS refusal is now
+          // surfaced as a failed read, and exif stays null so no absence is
+          // claimed.
+          const res = await fetch(source, { mode: "cors" });
+          if (!res.ok) throw new Error(`HTTP ${res.status} fetching the image bytes.`);
+          exif = await readExif(await res.blob());
         }
-      } else {
-        exif = interpretExif(null);
+      } catch (err: any) {
+        // A parse or fetch failure is reported as a failure, never converted
+        // into "no metadata" — those are different findings.
+        exif = null;
         exifError =
-          "EXIF is read from file bytes. For a remote URL, download the file and upload it " +
-          "directly — the browser cannot hand us the original bytes of a cross-origin image.";
+          typeof source === "string"
+            ? `EXIF could not be read from this URL: ${err?.message ?? String(err)}. ` +
+              `Cross-origin images are usually blocked by CORS. Download the file and upload ` +
+              `it directly. NOTE: this is a failed read, not an absence of metadata — nothing ` +
+              `is being claimed about this image either way.`
+            : (err?.message ?? String(err));
       }
 
       setBusy("Verifying Content Credentials");

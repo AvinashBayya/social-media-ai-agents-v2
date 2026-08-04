@@ -1,3 +1,5 @@
+import { localId } from "./local-id";
+
 export interface WatchlistFilters {
   keywords: string[];
   organizations: string[];
@@ -96,7 +98,7 @@ export function createWatchlist(
 ): Watchlist {
   const list = getWatchlists();
   const newWatch: Watchlist = {
-    id: `wl-${Math.random().toString(36).substr(2, 9)}`,
+    id: localId("wl"),
     name: name || "New Watchlist",
     description: description || "Intel monitoring filter.",
     filters: filters,
@@ -131,7 +133,7 @@ export function getWatchlistMatches(watchlist: Watchlist, searchData: {
     for (const val of list) {
       if (val && txt.includes(val.toLowerCase())) {
         matches.push({
-          id: `match-${Math.random().toString(36).substr(2, 9)}`,
+          id: localId("match"),
           source: src,
           title: text.length > 80 ? `${text.substring(0, 80)}...` : text,
           matchValue: val,

@@ -367,31 +367,46 @@ function InvestigationsPage() {
 // Dynamic Real-Time AI Case Triage Component
 function AICaseAnalysisCard({ activeCase }: { activeCase: Investigation }) {
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
+  const [model, setModel] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleRunAnalysis = async () => {
     if (!activeCase) return;
     setLoading(true);
+    setError("");
     try {
       const res = await llmCaseSummary({
         data: {
           title: activeCase.title,
           target: activeCase.target,
-          description: activeCase.description || "Active surveillance dossier.",
-          risk: activeCase.risk || 70
+          description:
+            activeCase.description ||
+            "No description has been recorded for this case. Say so rather than inferring one.",
+          // The analyst's own score. `|| 70` used to substitute a number nobody
+          // assigned and then fed it to the model as "Analyst-assigned Risk
+          // Score", which the brief would then reason from as if it were real.
+          risk: typeof activeCase.risk === "number" ? activeCase.risk : -1,
         }
       });
       setAiAnalysis(res.text);
-      toast.success("Real-time AI Case Analysis generated.");
-    } catch {
-      toast.error("Failed to generate AI analysis.");
+      setModel(res.model);
+    } catch (err: any) {
+      // The real upstream cause. A bare `catch {}` discarded it entirely, so a
+      // revoked key and a truncated response looked identical.
+      setError(err?.message ?? String(err));
     } finally {
       setLoading(false);
     }
   };
 
+  // Deliberately NOT run on mount. This used to fire a model call every time the
+  // analyst selected a case — clicking through eight cases spent eight calls of
+  // a request-limited free tier without anyone asking for analysis.
   useEffect(() => {
-    handleRunAnalysis();
+    setAiAnalysis("");
+    setError("");
+    setModel("");
   }, [activeCase.id]);
 
   return (
@@ -407,7 +422,7 @@ function AICaseAnalysisCard({ activeCase }: { activeCase: Investigation }) {
           className="h-6 px-2 text-[9px] font-mono text-[#10B981] hover:bg-[#10B981]/10 gap-1"
         >
           <RefreshCw className={`size-3 ${loading ? "animate-spin" : ""}`} />
-          Re-Analyze
+          {aiAnalysis ? "Re-Analyze" : "Analyze"}
         </Button>
       </CardHeader>
       <CardContent className="p-3 space-y-2">
@@ -416,9 +431,25 @@ function AICaseAnalysisCard({ activeCase }: { activeCase: Investigation }) {
             <RefreshCw className="size-4 animate-spin mx-auto text-[#10B981] mb-1" />
             Analysing case evidence with the configured LLM...
           </div>
+        ) : error ? (
+          <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
+            <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
+            <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+              <span className="font-bold">AI unavailable.</span> No analysis was produced.
+              <div className="pt-0.5 opacity-80">{error}</div>
+            </div>
+          </div>
+        ) : aiAnalysis ? (
+          <>
+            <div className="rounded border border-[#10B981]/20 bg-[#10B981]/5 p-3 text-[10px] text-[#CBD5E1] font-mono leading-relaxed whitespace-pre-wrap">
+              {aiAnalysis}
+            </div>
+            <div className="font-mono text-[9px] text-[#64748B]">AI-generated · {model}</div>
+          </>
         ) : (
-          <div className="rounded border border-[#10B981]/20 bg-[#10B981]/5 p-3 text-[10px] text-[#CBD5E1] font-mono leading-relaxed whitespace-pre-wrap">
-            {aiAnalysis || `No analysis run yet for target "${activeCase.target}".`}
+          <div className="rounded border border-[#263548] bg-[#0B1220]/60 p-3 font-mono text-[10px] leading-relaxed text-[#94A3B8]">
+            No analysis run for "{activeCase.target}". Press Analyze — this is a model call, so
+            it runs only when asked rather than on every case you click.
           </div>
         )}
       </CardContent>

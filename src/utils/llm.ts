@@ -513,7 +513,14 @@ Under 300 words. If a section lacks supporting information, state that plainly.
 
 Case Title: ${data.title}
 Target Subject: ${data.target}
-Analyst-assigned Risk Score: ${data.risk}/100
+Analyst-assigned Risk Score: ${
+      // A negative value means the analyst never assigned one. Saying so keeps
+      // the model from reasoning off a number nobody set — callers used to
+      // substitute a default of 70, which the brief then treated as a finding.
+      typeof data.risk === "number" && data.risk >= 0
+        ? `${data.risk}/100`
+        : "not assigned by the analyst — do not infer or estimate one"
+    }
 Description: ${data.description}`;
 
     const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2200 });

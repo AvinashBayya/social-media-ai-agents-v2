@@ -18,9 +18,26 @@ export interface ExportConfig {
 }
 
 // Generate the printable text representation of the selected report data
+/**
+ * Render a score that may not have been computed.
+ *
+ * An exported dossier is the artefact that LEAVES the system — it gets read
+ * detached from the UI that would have carried a caveat. A default of 50/100
+ * looks exactly like a measurement once it is printed on an A4 page with a
+ * classification header above it, so an uncomputed value says so in words.
+ */
+function scoreOrAbsent(value: number | null | undefined, unit: string): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${value}${unit}`
+    : "not computed — no factor in this system produces this value";
+}
+
+// Generate the printable text representation of the selected report data
 export function compileReportText(config: ExportConfig): string {
   const { query, analyst, reportType, sections, data } = config;
-  const p = data.profile || { risk: 50, credibility: 80, summary: "", findings: [], recommendations: [], whois: {} };
+  // No numeric defaults. `risk: 50, credibility: 80` used to stand in here and
+  // were printed as findings whenever a caller omitted them.
+  const p = data.profile || { risk: null, credibility: null, summary: "", findings: [], recommendations: [], whois: {} };
 
   let text = `==================================================\n`;
   text += `SENTINEL AI INTEL BRIEF · CONFIDENTIAL\n`;
@@ -36,8 +53,12 @@ export function compileReportText(config: ExportConfig): string {
 
   if (sections.risk) {
     text += `### RISK ASSESSMENT\n`;
-    text += `Subject overall risk rating: ${p.risk}/100\n`;
-    text += `Confidence attribution factor: ${p.credibility}%\n\n`;
+    text += `Subject overall risk rating: ${scoreOrAbsent(p.risk, "/100")}\n`;
+    text += `Mean source credibility (Module 1, default weights): ${scoreOrAbsent(p.credibility, "%")}\n`;
+    if (typeof p.credibility === "number" && p.credibilityBasis) {
+      text += `Basis: ${p.credibilityBasis}\n`;
+    }
+    text += `\n`;
   }
 
   if (sections.findings && p.findings?.length > 0) {

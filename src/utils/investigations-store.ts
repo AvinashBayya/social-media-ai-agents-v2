@@ -1,3 +1,5 @@
+import { localId } from "./local-id";
+
 export interface PinnedEvidence {
   id: string;
   t: string;
@@ -161,7 +163,7 @@ export function pinToInvestigation(
   const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
 
   const item: PinnedEvidence = {
-    id: `ev-${Math.random().toString(36).substr(2, 9)}`,
+    id: localId("ev"),
     t: timeStr,
     type: type,
     src: src,

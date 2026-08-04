@@ -25,8 +25,29 @@ function ThreatsPage() {
             <ShieldAlert className="size-4" />
             Active Threat Target: {activeTarget}
           </div>
-          <p className="text-[#94A3B8]">
-            Threat intelligence collectors indicate low-to-moderate C2 activity. Domain and DNS records are monitored continuously via Cloudflare DoH and Feodo IP blocklists.
+          {/*
+            This read: "Threat intelligence collectors indicate low-to-moderate
+            C2 activity. Domain and DNS records are monitored continuously via
+            Cloudflare DoH and Feodo IP blocklists." Nothing computed that
+            assessment and nothing monitors continuously — it was a finding with
+            no measurement behind it, stated in the voice of one.
+
+            The collectors it names are real and live on /recon (Cloudflare DoH,
+            Shodan InternetDB) and /osint (Feodo). What does not exist is a
+            correlation layer producing a per-target threat index, so this page
+            points at the tools rather than asserting a conclusion.
+          */}
+          <p className="text-[#94A3B8] leading-relaxed">
+            No threat index is computed for this target. Nothing in this system correlates
+            blocklist hits, DNS records and actor infrastructure into a single rating, so none
+            is shown — a number here would be an assertion, not a measurement.
+          </p>
+          <p className="mt-2 text-[#94A3B8] leading-relaxed">
+            The collectors that do run are reachable directly:{" "}
+            <a href="/recon" className="text-[#3B82F6] hover:underline">Recon</a> resolves DNS via
+            Cloudflare DoH and queries Shodan InternetDB for exposed services, and{" "}
+            <a href="/osint" className="text-[#3B82F6] hover:underline">OSINT</a> pulls the Feodo
+            C2 blocklist. Both report what they actually find, including nothing.
           </p>
         </Card>
       </div>

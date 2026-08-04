@@ -3,10 +3,11 @@ import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, FileText, Sparkles, RefreshCw, CheckCircle2, FileCode, FileSpreadsheet } from "lucide-react";
+import { Download, FileText, Sparkles, RefreshCw, CheckCircle2, FileCode, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { getActiveTarget } from "@/utils/active-target";
 import { fetchNews, fetchSocialIntelligence, fetchOSINT } from "./news";
 import { llmReport } from "@/utils/llm";
+import { defaultFactors, scoreCorpus, type Article } from "@/utils/credibility";
 import { compileReportText, generatePDFBlob, generateHTML, generateCSV, generateJSON } from "@/utils/export-helpers";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -19,10 +20,12 @@ export const Route = createFileRoute("/exports")({
 function ExportsPage() {
   const activeTarget = getActiveTarget();
   const [loadingFormat, setLoadingFormat] = useState<string | null>(null);
-  const [lastExport, setLastExport] = useState<{ format: string; text: string } | null>(null);
+  const [lastExport, setLastExport] = useState<{ format: string; text: string; model: string } | null>(null);
+  const [exportError, setExportError] = useState("");
 
   const handleExport = async (format: string) => {
     setLoadingFormat(format);
+    setExportError("");
     toast.info(`Gathering live intelligence & generating AI analysis for "${activeTarget}"...`);
 
     try {
@@ -33,12 +36,44 @@ function ExportsPage() {
         fetchOSINT({ data: { query: activeTarget, q: activeTarget } })
       ]);
 
-      // 2. Generate report summary via the configured LLM provider
+      // 2. Score the collected corpus with Module 1 so the dossier carries a
+      //    real credibility figure rather than a constant. Default weights, and
+      //    the export says so — a retuned profile would give a different number.
+      const corpus: Article[] = (newsRes?.stories ?? [])
+        .map((s: any, i: number) => ({
+          id: String(s.id ?? s.primaryLink ?? i),
+          title: s.primaryTitle || "",
+          source: s.primarySource || "",
+          url: s.primaryLink || s.url || "",
+          pubDate: s.pubDate || "",
+          body: s.body || "",
+        }))
+        .filter((a: Article) => a.title);
+
+      const scored = corpus.length ? scoreCorpus(corpus, defaultFactors()) : [];
+      const usable = scored.filter((s) => s.score !== null);
+      const meanCredibility = usable.length
+        ? Math.round((usable.reduce((sum, s) => sum + (s.score ?? 0), 0) / usable.length) * 100)
+        : null;
+
+      // 3. Generate the narrative from the ACTUAL collected material. Passing
+      //    only counts, as this did, gives the model nothing to work from and
+      //    invites it to pad an intelligence dossier out of its own priors.
+      const collected =
+        `Target: ${activeTarget}\n` +
+        `Collected ${corpus.length} news item(s), ${socialRes?.mentions?.length ?? 0} social mention(s).\n` +
+        (osintRes?.whois?.Registrar ? `WHOIS registrar: ${osintRes.whois.Registrar}\n` : "") +
+        (meanCredibility !== null
+          ? `Mean source credibility across the collected corpus: ${meanCredibility}% (Module 1, default weights).\n`
+          : "") +
+        `\nHEADLINES COLLECTED:\n` +
+        corpus.slice(0, 25).map((a, i) => `${i + 1}. [${a.source}] ${a.title}`).join("\n");
+
       const aiReport = await llmReport({
         data: {
           type: "Comprehensive OSINT Intelligence Dossier",
           target: activeTarget,
-          data: `Target: ${activeTarget}. News stories count: ${newsRes?.stories?.length || 0}. Social mentions: ${socialRes?.mentions?.length || 0}. WHOIS registrar: ${osintRes?.whois?.Registrar || "N/A"}.`
+          data: collected,
         }
       });
 
@@ -65,17 +100,32 @@ function ExportsPage() {
         data: {
           profile: {
             summary: aiReport.text,
-            risk: 75,
-            credibility: 88,
+            // NOT a number. `risk: 75` used to be printed into the exported PDF
+            // as "Subject overall risk rating: 75/100" under a classification
+            // header. Nothing in this system computes a subject risk score, so
+            // the dossier now says that in words instead.
+            risk: null,
+            credibility: meanCredibility,
+            credibilityBasis:
+              meanCredibility === null
+                ? ""
+                : `mean of Module 1 scores across ${usable.length} of ${corpus.length} ` +
+                  `collected item(s); ${corpus.length - usable.length} could not be scored`,
             findings: [
-              `Target "${activeTarget}" indexed across ${newsRes?.stories?.length || 0} news sources.`,
-              `Active social mention volume recorded: ${socialRes?.mentions?.length || 0} posts.`,
-              `WHOIS records mapped to ${osintRes?.whois?.Registrar || "Public Registrar"}.`
+              `Target "${activeTarget}" appears in ${corpus.length} collected news item(s).`,
+              `Social mentions collected in this run: ${socialRes?.mentions?.length ?? 0}.`,
+              ...(osintRes?.whois?.Registrar
+                ? [`WHOIS registrar: ${osintRes.whois.Registrar}.`]
+                : ["No WHOIS registrar was returned for this target."]),
+              ...(meanCredibility !== null
+                ? [`Mean source credibility ${meanCredibility}% across scored items (Module 1, default weights).`]
+                : ["Source credibility could not be scored — no collected item yielded a usable factor."]),
             ],
-            recommendations: [
-              `Maintain active keyword tracking for ${activeTarget}.`,
-              `Perform continuous C2 subnet scans.`
-            ]
+            // Recommendations are the model's, derived from the collected
+            // material above. The two hardcoded lines that used to sit here
+            // ("Perform continuous C2 subnet scans") were printed as though an
+            // analyst had reached them.
+            recommendations: [],
           },
           stories: newsRes?.stories || [],
           socialMentions: socialRes?.mentions || [],
@@ -117,11 +167,15 @@ function ExportsPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      setLastExport({ format, text: aiReport.text });
+      setLastExport({ format, text: aiReport.text, model: aiReport.model });
       toast.success(`Successfully exported ${filename}`);
     } catch (err: any) {
-      console.error(err);
-      toast.error("Export failed. Please try again.");
+      // The real upstream cause, not "please try again". A truncated model
+      // response and a revoked API key need different actions from the analyst,
+      // and a generic toast makes them indistinguishable.
+      const message = err?.message ?? String(err);
+      setExportError(message);
+      toast.error(`Export failed: ${message.slice(0, 120)}`);
     } finally {
       setLoadingFormat(null);
     }
@@ -188,11 +242,25 @@ function ExportsPage() {
           </div>
         </Card>
 
+        {exportError && (
+          <Card className="border-[#EF4444]/40 bg-[#111827] p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
+              <div className="text-[10px] leading-relaxed text-[#EF4444]">
+                <span className="font-bold">Export failed. No file was written.</span>
+                <div className="pt-0.5 opacity-80">{exportError}</div>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {lastExport && (
           <Card className="bg-[#111827] border-[#263548] p-6 space-y-3">
             <h3 className="text-sm font-bold text-[#10B981] flex items-center gap-2">
               <Sparkles className="size-4" />
-              LAST GENERATED GEMINI AI REPORT SUMMARY ({lastExport.format.toUpperCase()})
+              {/* Was hardcoded "GEMINI AI" — a model this project does not and
+                  cannot use, and which would mislabel whatever actually ran. */}
+              AI-GENERATED SUMMARY · {lastExport.model} ({lastExport.format.toUpperCase()})
             </h3>
             <pre className="text-xs text-[#CBD5E1] bg-[#0B1220] p-4 rounded border border-[#263548] whitespace-pre-wrap leading-relaxed">
               {lastExport.text}
