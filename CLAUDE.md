@@ -133,6 +133,36 @@ verdict** — organised legitimate campaigns produce identical patterns. Every s
 carries an evidence string naming the accounts and timings; a signal that cannot be
 computed returns `null` with a reason, never 0.
 
+## Image / video analysis (Module 4)
+
+**We do not build or claim a deepfake classifier.** Detectors trained on GAN-era fakes
+generalise poorly to diffusion models and collapse under the recompression social
+redistribution applies. With no GPU that would be a fabricated confidence value — the one
+thing the hard constraints forbid.
+
+Position taken instead: **provenance beats classification**. A C2PA Content Credential is a
+signature (verifies or does not, no false positives); a deepfake score is a guess. The only
+high-confidence AI finding the system makes is a *signed C2PA manifest declaring* generative
+provenance.
+
+Dependencies (all free, all in-browser WASM, no server, no GPU):
+- `exifr` (MIT) — EXIF/TIFF/XMP
+- `c2pa` (MIT, contentauth) — Content Credentials. WASM + worker emitted as **first-party
+  assets** via Vite `?url`, deliberately not a CDN.
+- `tesseract.js` (Apache 2.0) — OCR incl. nine Indic scripts; traineddata fetched per
+  language on first use.
+- pHash is hand-written DCT in `src/utils/imaging.ts` — no library.
+
+`imaging.ts` is pure/testable; `imaging-client.ts` holds everything touching DOM or WASM and
+imports it one-way. Uploaded media never leaves the browser.
+
+**⚠️ Licence trap if object detection is ever added: use Grounding DINO (Apache 2.0).
+Do NOT use Ultralytics YOLO — AGPL-3.0, which would force open-sourcing the whole system.**
+Recorded in `NOT_IMPLEMENTED` in `imaging.ts` and asserted by a test.
+
+EXIF absence is reported as absence — every major platform strips it on upload, so a missing
+block is the normal case for redistributed media, not evidence of tampering.
+
 ## GPU quota request — NOT YET RAISED
 
 Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the
