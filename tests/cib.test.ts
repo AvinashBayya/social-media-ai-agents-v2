@@ -25,6 +25,8 @@ import {
   BUCKET_MS,
   MIN_BASELINE_BUCKETS,
   PLATFORM_NOTES,
+  JETSTREAM_INSTANCES,
+  JetstreamClient,
   type BlueskyProfile,
   type SocialPost,
 } from "../src/utils/social";
@@ -762,5 +764,73 @@ describe("cross-modal clustering", () => {
   test("a news-only story says so rather than implying absent social traffic was measured", () => {
     const newsOnly = clusterAcrossModes(NEWS, []).find((c) => c.newsMembers.length === 1)!;
     expect(newsOnly.summary).toContain("Published reporting only");
+  });
+});
+
+describe("Jetstream instance failover", () => {
+  /** Minimal fake socket: records the URL, lets the test drive open/close. */
+  class FakeSocket {
+    onopen: (() => void) | null = null;
+    onclose: ((e: any) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onmessage: ((e: any) => void) | null = null;
+    closed = false;
+    constructor(readonly url: string) {}
+    close() { this.closed = true; }
+  }
+
+  test("rotates to a different instance after a failed connection", () => {
+    // Not hypothetical: verified 2026-08-04, both us-east hosts refused TCP
+    // while both us-west hosts served the firehose. A pinned instance means a
+    // dead host costs all collection rather than one backoff interval.
+    const opened: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const client = new JetstreamClient({
+      socketFactory: (url) => {
+        opened.push(url);
+        const s = new FakeSocket(url);
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+    });
+
+    client.connect();
+    expect(opened.length).toBe(1);
+    expect(opened[0]).toContain(JETSTREAM_INSTANCES[0]);
+    expect(opened[0]).toContain("wantedCollections=app.bsky.feed.post");
+
+    // Drop the connection; the client should target a different host next.
+    sockets[0].onclose?.({ code: 1006, reason: "" });
+    const status = client.getStatus();
+    expect(status.state).toBe("reconnecting");
+    expect(status.endpoint).not.toBe(JETSTREAM_INSTANCES[0]);
+    expect(JETSTREAM_INSTANCES).toContain(status.endpoint);
+    expect(status.retryInMs).toBeGreaterThan(0);
+
+    client.disconnect();
+    expect(client.getStatus().state).toBe("closed");
+  });
+
+  test("more than one instance is configured", () => {
+    expect(JETSTREAM_INSTANCES.length).toBeGreaterThan(1);
+    expect(new Set(JETSTREAM_INSTANCES).size).toBe(JETSTREAM_INSTANCES.length);
+  });
+
+  test("disconnect stops reconnection rather than looping", () => {
+    const opened: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const client = new JetstreamClient({
+      socketFactory: (url) => {
+        opened.push(url);
+        const s = new FakeSocket(url);
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+    });
+    client.connect();
+    client.disconnect();
+    sockets[0].onclose?.({ code: 1000, reason: "" });
+    expect(opened.length).toBe(1);
+    expect(client.getStatus().state).toBe("closed");
   });
 });

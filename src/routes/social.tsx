@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import {
   JetstreamClient, readMonitor, socialReddit, socialTelegram, socialProfiles,
-  JETSTREAM_ENDPOINT, PLATFORM_NOTES,
+  JETSTREAM_ENDPOINT, JETSTREAM_INSTANCES, PLATFORM_NOTES,
   type JetstreamStatus, type Monitor, type MonitorReading, type SocialPost,
   type BlueskyProfile,
 } from "@/utils/social";
@@ -278,9 +278,10 @@ function SocialPage() {
                 <dd className="tabular-nums text-white">{status?.dropped.toLocaleString() ?? 0}</dd>
               </div>
             </dl>
-            <p className="text-[9px] leading-relaxed text-[#64748B]">
-              {JETSTREAM_ENDPOINT} · unauthenticated · socket held by this tab, so collection
-              stops when you close it.
+            <p className="break-all text-[9px] leading-relaxed text-[#64748B]">
+              {status?.endpoint ?? JETSTREAM_ENDPOINT} · unauthenticated · one of{" "}
+              {JETSTREAM_INSTANCES.length} public instances, rotated on reconnect · socket held
+              by this tab, so collection stops when you close it.
             </p>
           </CardContent>
         </Card>

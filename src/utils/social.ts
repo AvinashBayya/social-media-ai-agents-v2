@@ -70,7 +70,22 @@ export interface SocialPost {
 
 // ─── 1. Jetstream consumer (browser) ───────────────────────────────────────
 
-export const JETSTREAM_ENDPOINT = "wss://jetstream2.us-east.bsky.network/subscribe";
+/**
+ * Bluesky runs four public Jetstream instances. Pinning one is a single point of
+ * failure, and not a theoretical one: verified 2026-08-04, both us-east hosts
+ * were unreachable (TCP refused) while both us-west hosts served the firehose
+ * normally. The client rotates on each reconnect attempt, so an instance going
+ * down costs one backoff interval rather than all collection.
+ */
+export const JETSTREAM_INSTANCES = [
+  "wss://jetstream2.us-east.bsky.network/subscribe",
+  "wss://jetstream1.us-west.bsky.network/subscribe",
+  "wss://jetstream2.us-west.bsky.network/subscribe",
+  "wss://jetstream1.us-east.bsky.network/subscribe",
+];
+
+/** First-choice instance. Retained as a named export for display and tests. */
+export const JETSTREAM_ENDPOINT = JETSTREAM_INSTANCES[0];
 export const POST_COLLECTION = "app.bsky.feed.post";
 
 export type ConnectionState = "idle" | "connecting" | "open" | "reconnecting" | "closed" | "error";
@@ -88,6 +103,8 @@ export interface JetstreamStatus {
   /** ms until the next reconnect, when reconnecting. */
   retryInMs: number | null;
   connectedAt: string | null;
+  /** Which Jetstream instance the current or last attempt used. */
+  endpoint: string;
 }
 
 /**
@@ -194,6 +211,8 @@ export class JetstreamClient {
   private buffer: RingBuffer<SocialPost>;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** Index into JETSTREAM_INSTANCES; advanced on each failed attempt. */
+  private instance = 0;
   private status: JetstreamStatus = {
     state: "idle",
     detail: "Not connected.",
@@ -202,6 +221,7 @@ export class JetstreamClient {
     dropped: 0,
     retryInMs: null,
     connectedAt: null,
+    endpoint: JETSTREAM_INSTANCES[0],
   };
 
   constructor(private readonly opts: JetstreamOptions = {}) {
@@ -227,8 +247,14 @@ export class JetstreamClient {
 
   private open(): void {
     if (this.stopped) return;
-    const url = `${JETSTREAM_ENDPOINT}?wantedCollections=${encodeURIComponent(POST_COLLECTION)}`;
-    this.emit({ state: this.status.attempts === 0 ? "connecting" : "reconnecting", detail: `Opening ${JETSTREAM_ENDPOINT}`, retryInMs: null });
+    const endpoint = JETSTREAM_INSTANCES[this.instance % JETSTREAM_INSTANCES.length];
+    const url = `${endpoint}?wantedCollections=${encodeURIComponent(POST_COLLECTION)}`;
+    this.emit({
+      state: this.status.attempts === 0 ? "connecting" : "reconnecting",
+      detail: `Opening ${endpoint}`,
+      retryInMs: null,
+      endpoint,
+    });
 
     let socket: WebSocket;
     try {
@@ -243,7 +269,7 @@ export class JetstreamClient {
     socket.onopen = () => {
       this.emit({
         state: "open",
-        detail: "Connected to Bluesky Jetstream.",
+        detail: `Connected to ${endpoint}`,
         attempts: 0,
         retryInMs: null,
         connectedAt: new Date().toISOString(),
@@ -288,7 +314,17 @@ export class JetstreamClient {
     if (this.stopped) return;
     const attempts = this.status.attempts + 1;
     const delay = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
-    this.emit({ state: "reconnecting", attempts, retryInMs: delay });
+    // Move to the next instance before retrying. Hammering a host that is down
+    // for the full backoff sequence wastes six attempts on a dead endpoint.
+    this.instance += 1;
+    const next = JETSTREAM_INSTANCES[this.instance % JETSTREAM_INSTANCES.length];
+    this.emit({
+      state: "reconnecting",
+      attempts,
+      retryInMs: delay,
+      detail: `${this.status.detail} Retrying against ${next}.`,
+      endpoint: next,
+    });
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.open(), delay);
   }
