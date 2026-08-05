@@ -341,7 +341,7 @@ function CommandHub() {
                 <div key={c.id} className="p-3 rounded bg-[#0B1220] border border-[#263548] flex items-center justify-between text-xs font-mono">
                   <div>
                     <div className="text-[#10B981] font-bold">{c.id}: {c.title}</div>
-                    <div className="text-[#94A3B8] text-[10px] mt-0.5">Target: {c.target} · Risk: {c.risk}%</div>
+                    <div className="text-[#94A3B8] text-[10px] mt-0.5">Target: {c.target} · {c.evidence?.length ?? 0} evidence item(s)</div>
                   </div>
                   <Badge className="bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30 text-[10px]">
                     {c.status || "OPEN"}

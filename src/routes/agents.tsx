@@ -106,21 +106,24 @@ function AgentsPage() {
     try {
       let title = "";
       let blocks: { heading: string; text: string; monospace?: boolean }[] = [];
-      let riskScore = activeCaseObj?.risk || 65;
+      // No risk score. This was `activeCaseObj?.risk || 65`, defaulting to a
+      // number nobody assigned, then fed to the model as "Risk Score: 65/100"
+      // and rendered as "RISK 65%". Nothing in this system computes one.
 
       if (cap === "SUMMARIZE_CASE") {
         title = `INVESTIGATION DOSSIER: ${activeCaseObj?.title || "GENERAL"}`;
         const res = await llmCaseSummary({ data: {
           title: activeCaseObj?.title || "General Investigation",
           target: activeTarget,
-          description: activeCaseObj?.description || "Monitoring for threat indicators.",
-          risk: riskScore
+          description: activeCaseObj?.description || "No description recorded for this case.",
+          // Negative means unassigned; llm.ts renders that as "not assigned by
+          // the analyst - do not infer or estimate one".
+          risk: -1,
         }});
         blocks = [{ heading: `AI-Generated Intelligence Summary (${res.model})`, text: res.text }];
 
       } else if (cap === "EXEC_SUMMARY") {
         title = `EXECUTIVE BRIEF: ${activeTarget}`;
-        riskScore = 80;
         const res = await llmExecutiveBrief({ data: {
           target: activeTarget,
           context: activeCaseObj?.description || `Senior command brief for subject ${activeTarget}.`
@@ -129,7 +132,6 @@ function AgentsPage() {
 
       } else if (cap === "EXPLAIN_ENTITY") {
         title = `ENTITY DEEP DIVE: "${selectedEntityA}"`;
-        riskScore = 75;
         const res = await llmExtractEntities({ data: {
           text: `Provide a detailed intelligence analysis of entity: ${selectedEntityA}. Associated with case: ${activeTarget}. Include aliases, threat classification, network footprint, and recommended action.`
         }});
@@ -140,7 +142,6 @@ function AgentsPage() {
 
       } else if (cap === "COMPARE_ENTITIES") {
         title = `CORRELATION INDEX: "${selectedEntityA}" vs "${selectedEntityB}"`;
-        riskScore = 60;
         const res = await llmExecutiveBrief({ data: {
           target: `${selectedEntityA} compared to ${selectedEntityB}`,
           context: `Perform an intelligence correlation analysis between ${selectedEntityA} and ${selectedEntityB}. Include shared infrastructure, coordinated behaviors, hashtag overlaps, and interaction strength.`
@@ -160,7 +161,7 @@ function AgentsPage() {
         const res = await llmReport({ data: {
           type: capLabels[cap] || cap,
           target: activeTarget,
-          data: `Case: ${activeCaseObj?.title || "General"}. Description: ${activeCaseObj?.description || "Threat monitoring active."}. Risk Score: ${riskScore}/100. Entities: ${activeCaseObj?.entities?.join(", ") || selectedEntityA}.`
+          data: `Case: ${activeCaseObj?.title || "General"}. Description: ${activeCaseObj?.description || "No description recorded."}. Evidence pinned to this case: ${activeCaseObj?.evidence?.length ?? 0} item(s). Keywords: ${activeCaseObj?.keywords?.join(", ") || "none"}.`
         }});
         blocks = [{ heading: `${capLabels[cap] || cap} (${res.model})`, text: res.text }];
       }
@@ -168,7 +169,6 @@ function AgentsPage() {
       setOutputResult({
         title,
         classification: "UNCLASSIFIED // DEMONSTRATOR",
-        risk: riskScore,
         blocks
       });
       setTerminalLog(prev => [...prev,
@@ -188,14 +188,20 @@ function AgentsPage() {
   const handlePinReport = () => {
     if (!outputResult || !selectedCaseId) return;
     
-    const success = pinToInvestigation(
-      selectedCaseId,
-      "AI Briefing",
-      "Sentinel AI Analyst Workspace",
-      `AI Report: ${outputResult.title}. Risk: ${outputResult.risk}%`,
-      outputResult.risk > 70 ? "high" : "medium",
-      outputResult
-    );
+    const success = pinToInvestigation(selectedCaseId, {
+      kind: "note",
+      title: outputResult.title,
+      source: `AI briefing — ${outputResult.model ?? "configured model"}`,
+      publishedAt: new Date().toISOString(),
+      excerpt: outputResult.blocks
+        .map((b: any) => [b.heading, b.text].join("\n"))
+        .join("\n\n"),
+      credibility: null,
+      credibilityRationale:
+        "AI-generated briefing, not a collected source. Requires analyst review before it is " +
+        "treated as evidence.",
+      data: outputResult,
+    });
 
     if (success) {
       toast.success(`Report pinned to case ${selectedCaseId}`);
@@ -352,7 +358,6 @@ function AgentsPage() {
                       </div>
                       <div className="text-right">
                         <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">THREAT INDEX</span>
-                        <div className="text-sm font-bold text-[#EF4444] mt-0.5">{outputResult.risk}%</div>
                       </div>
                     </div>
 

@@ -4,64 +4,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect } from "react";
 import { getInvestigations } from "@/utils/investigations-store";
+import { bandFor } from "@/utils/credibility";
 import { Clock } from "lucide-react";
-import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/timeline")({
   head: () => ({ meta: [{ title: "Timeline Explorer — Sentinel AI" }] }),
   component: TimelinePage,
 });
 
-const DEFAULT_EVENTS = [
-  {
-    d: "2026-07-24 09:42",
-    k: "Alert",
-    t: "Face-match hit · Vector-17 in Damascus feed",
-    tone: "critical" as const,
-  },
-  {
-    d: "2026-07-24 08:14",
-    k: "Note",
-    t: "M. Ortega: EXIF metadata authentic. Requesting chain-of-custody review.",
-    tone: "medium" as const,
-  },
-  {
-    d: "2026-07-24 07:04",
-    k: "Corroboration",
-    t: "Analyst commentary on r/netsec corroborates fintech IOC.",
-    tone: "medium" as const,
-  },
-  {
-    d: "2026-07-23 22:11",
-    k: "Publication",
-    t: "BBC covers coordinated behavior around #ElectionIntegrity.",
-    tone: "verified" as const,
-  },
-  {
-    d: "2026-07-23 17:42",
-    k: "Capture",
-    t: "Image posted to channel_9821 with EXIF placing it within restricted zone.",
-    tone: "high" as const,
-  },
-  {
-    d: "2026-07-22 12:00",
-    k: "Signal",
-    t: "Sentiment shift to negative in retail investor communities post rate hike.",
-    tone: "negative" as const,
-  },
-  {
-    d: "2026-07-20 09:00",
-    k: "Case",
-    t: "Investigation INV-2038 opened: #ElectionIntegrity CIB cluster.",
-    tone: "high" as const,
-  },
-  {
-    d: "2026-07-20 15:20",
-    k: "Case",
-    t: "Investigation INV-2041 opened: Vector-17 · surveillance leak.",
-    tone: "critical" as const,
-  },
-];
+/**
+ * The seeded event list is gone. It carried five invented entries — "Image
+ * posted to channel_9821 with EXIF placing it within restricted zone",
+ * "Sentiment shift to negative in retail investor communities" — and two case
+ * openings for the demonstration dossiers that no longer exist. The timeline now
+ * shows only what actually happened in the analyst's own cases.
+ */
 
 function TimelinePage() {
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
@@ -75,22 +32,35 @@ function TimelinePage() {
         d: new Date(c.createdAt).toISOString().replace("T", " ").substring(0, 16),
         k: "Case",
         t: `Investigation ${c.id} initialized: ${c.title}`,
-        tone: c.risk > 70 ? "critical" : "high"
+        // Tone was driven by an invented per-case risk score. A case opening
+        // is a neutral fact about the workspace, not a threat level.
+        tone: "neutral"
       });
 
       // Add pinned evidence events
-      c.evidence?.forEach((ev: any) => {
+      c.evidence?.forEach((ev) => {
         list.push({
-          d: `${new Date(c.createdAt).toISOString().substring(0, 10)} ${ev.t || "12:00"}`,
-          k: ev.type,
-          t: `[${c.id}] Pinned evidence: ${ev.note} (Source: ${ev.src})`,
-          tone: ev.tone || "medium"
+          // Evidence now carries a real ISO pinnedAt. `ev.t` was "09:42" with
+          // no date, so every item fell back to a "12:00" placeholder.
+          d: new Date(ev.pinnedAt ?? c.createdAt).toISOString().replace("T", " ").substring(0, 16),
+          k: ev.kind,
+          t: `[${c.id}] ${ev.title} — ${ev.source}`,
+          // Tone reflects the item's Module 1 credibility where it has one,
+          // rather than a `tone` field the analyst never set.
+          tone:
+            ev.credibility === null
+              ? "neutral"
+              : bandFor(ev.credibility).tone === "high"
+                ? "verified"
+                : bandFor(ev.credibility).tone === "low"
+                  ? "unverified"
+                  : "medium",
         });
       });
     });
 
     // Merge and sort descending
-    const merged = [...list, ...DEFAULT_EVENTS].sort((a, b) => b.d.localeCompare(a.d));
+    const merged = [...list].sort((a, b) => b.d.localeCompare(a.d));
     setTimelineEvents(merged);
   }, []);
 
@@ -100,9 +70,23 @@ function TimelinePage() {
         title="Timeline Explorer"
         description="A chronological view of alerts, dynamic evidence compilation, and case history logs."
       />
-      <SampleDataBanner detail="Timeline events are seeded examples." />
       <Card className="bg-[#111827] border-[#263548] rounded">
         <CardContent className="p-6 font-mono text-xs text-[#94A3B8]">
+          {timelineEvents.length === 0 ? (
+            <div className="py-10 text-center">
+              <Clock className="mx-auto size-8 text-[#263548]" />
+              <p className="mt-3 text-[11px] text-[#94A3B8]">No case activity yet.</p>
+              <p className="mx-auto mt-1 max-w-md text-[10px] leading-relaxed text-[#64748B]">
+                This timeline is built from your own cases and the evidence pinned to them. It
+                previously merged in five seeded events describing analysis that never ran.
+                Create a case on{" "}
+                <a href="/investigations" className="text-[#3B82F6] hover:underline">
+                  Investigations
+                </a>{" "}
+                and pin something to it.
+              </p>
+            </div>
+          ) : (
           <div className="relative pl-6">
             <span className="absolute left-2.5 top-2 bottom-2 w-px bg-[#22332B]" />
             {timelineEvents.map((e, i) => (
@@ -119,6 +103,7 @@ function TimelinePage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
     </AppShell>

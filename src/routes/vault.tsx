@@ -225,14 +225,18 @@ function VaultPage() {
     
     // Automatically pin evidence to related investigation if assigned
     if (uploadCaseId) {
-      pinToInvestigation(
-        uploadCaseId,
-        type,
-        "Evidence Vault Upload",
-        `Evidence node attached: ${name} (${size})`,
-        "medium",
-        newItem
-      );
+      pinToInvestigation(uploadCaseId, {
+        kind: "note",
+        title: name,
+        source: "Evidence vault upload",
+        publishedAt: new Date().toISOString(),
+        excerpt: `${type} attached to the evidence vault (${size}).`,
+        credibility: null,
+        credibilityRationale:
+          "Analyst-supplied file. Its SHA-256 is recorded in the vault; nothing about its " +
+          "contents has been assessed.",
+        data: newItem,
+      });
     }
     
     toast.success(`Evidence node ${newId} initialized and linked to case ${uploadCaseId}`);

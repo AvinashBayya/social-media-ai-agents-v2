@@ -20,6 +20,7 @@ import {
   type CibCluster,
 } from "@/utils/cib";
 import { assessSocialCorpus } from "@/utils/social-credibility";
+import { PinButton } from "@/components/pin-button";
 
 /**
  * Social Intelligence — Module 3 (PS-18 §6.3).
@@ -515,6 +516,22 @@ function SocialPage() {
                         <span className="ml-auto shrink-0 text-[#64748B]">
                           {p.createdAt ? new Date(p.createdAt).toLocaleTimeString() : "undated"}
                         </span>
+                        <PinButton
+                          payload={{
+                            kind: "social",
+                            title: p.text.slice(0, 140),
+                            source: `${p.author} (${p.platform})`,
+                            url: p.url,
+                            publishedAt: p.createdAt,
+                            excerpt: p.text,
+                            credibility: null,
+                            credibilityRationale:
+                              "Social post. Module 1 bypasses domain reputation for social " +
+                              "sources — the platform is a host, not a publisher. Run the CIB " +
+                              "panel to assess the account and its cluster.",
+                            data: { platform: p.platform, langs: p.langs, links: p.links },
+                          }}
+                        />
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[#F3F4F6]">
                         {p.text}

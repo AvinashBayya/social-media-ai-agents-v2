@@ -21,6 +21,7 @@ import {
 import { hashRgba } from "@/utils/imaging";
 import { ExifMap } from "@/components/exif-map";
 import { NotImplementedPanel } from "@/components/not-implemented";
+import { PinButton } from "@/components/pin-button";
 import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
 
 /**
@@ -358,6 +359,41 @@ function Page() {
                     >
                       <Copy className="size-3" />
                     </button>
+                    <PinButton
+                      payload={{
+                        kind: "image",
+                        title: analysis.name,
+                        source: analysis.exif?.camera.model
+                          ? [analysis.exif.camera.make, analysis.exif.camera.model].filter(Boolean).join(" ")
+                          : "uploaded image",
+                        url: typeof analysis.previewUrl === "string" && analysis.previewUrl.startsWith("http")
+                          ? analysis.previewUrl
+                          : "",
+                        publishedAt: analysis.exif?.captureTime ?? "",
+                        // The forensic findings ARE the evidence — a filename on
+                        // its own tells a case nothing.
+                        excerpt: [
+                          `pHash ${analysis.hash} (${analysis.width}x${analysis.height})`,
+                          analysis.c2pa ? `C2PA: ${analysis.c2pa.summary}` : "",
+                          analysis.exif
+                            ? analysis.exif.findings.map((f) => `${f.label}: ${f.value}`).join("; ")
+                            : "EXIF was not read for this item.",
+                          analysis.duplicates?.matches.length
+                            ? analysis.duplicates.summary
+                            : "",
+                        ].filter(Boolean).join("\n"),
+                        credibility: null,
+                        credibilityRationale:
+                          "Forensic findings from the image itself. C2PA results are " +
+                          "cryptographically verified; EXIF is self-reported by the writing " +
+                          "device and editable. No deepfake assessment is made.",
+                        data: {
+                          hash: analysis.hash,
+                          gps: analysis.exif?.gps ?? null,
+                          c2paStatus: analysis.c2pa?.status ?? null,
+                        },
+                      }}
+                    />
                   </span>
                 </div>
               </CardContent>

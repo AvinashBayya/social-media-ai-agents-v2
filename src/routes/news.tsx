@@ -23,6 +23,7 @@ import {
 } from "@/utils/analysis";
 import { reputationOf, TIER_SCORES } from "@/utils/credibility";
 import { ArticleAiPanel } from "@/components/article-ai";
+import { PinButton } from "@/components/pin-button";
 import { ClusterPanel } from "@/components/cluster-panel";
 import { LlmQuotaCard } from "@/components/llm-quota";
 
@@ -1527,6 +1528,26 @@ function Page() {
                           </a>
                         </Button>
                       )}
+                      {/* Full provenance travels with the pin, so the case can
+                          later become a citable source list for Module 5. */}
+                      <PinButton
+                        label="Pin"
+                        payload={{
+                          kind: "news",
+                          title: lead.primaryTitle,
+                          source: lead.primarySource,
+                          url: lead.url ?? "",
+                          publishedAt: lead.pubDate,
+                          excerpt: lead.body || lead.primaryTitle,
+                          credibility: null,
+                          credibilityRationale:
+                            `Collected from ${lead.primarySource}. ` +
+                            (g.cluster
+                              ? `Carried by ${g.cluster.independentDomains.length} independent source(s) in this collection.`
+                              : "Not clustered in this collection."),
+                          data: { category: lead.category, language: lead.language },
+                        }}
+                      />
                     </div>
 
                     {/* On-demand only — 35 automatic model calls per page load would
