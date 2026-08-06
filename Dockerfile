@@ -8,7 +8,16 @@ WORKDIR /app
 
 # Copy manifests first so the install layer is cached across source changes.
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+
+# --ignore-scripts is load-bearing. `better-sqlite3` is a devDependency kept
+# only because the Prisma CLI declares it as a peer (see src/server/db.ts) — it
+# is never loaded at runtime, the driver is @prisma/adapter-libsql. But its
+# install script is a node-gyp build, and Bun trusts it by default, so a plain
+# install dies here with "Could not find any Python installation to use".
+#
+# Nothing in this image needs a lifecycle script: the Prisma client is
+# generated explicitly below, and the libSQL driver ships prebuilt.
+RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY . .
 
