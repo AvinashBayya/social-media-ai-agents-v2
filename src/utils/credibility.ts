@@ -7,8 +7,13 @@
  * every score returns a per-factor breakdown with human-readable evidence. An
  * unexplained score is unauditable, which in a defence context makes it useless.
  *
- * This pass is entirely deterministic: no LLM calls, no API keys, no cost. The
- * one model-backed factor is registered but disabled and unimplemented.
+ * Six of the seven factors are deterministic: no LLM calls, no API keys, no
+ * cost. The seventh (linguistic markers) is model-backed and ships DISABLED —
+ * it is opt-in per article, because assessing a whole feed is one model call
+ * per item against a free tier. Its input arrives pre-computed through
+ * `FactorOptions.language`; the call itself lives in credibility-llm.ts, so
+ * this file has no runtime dependency on the model and keeps scoring when the
+ * provider is unreachable.
  *
  * Rules that must not regress:
  *   - No Math.random(). Every number derives from a real article property.
@@ -27,6 +32,13 @@ import {
   clusterFor, clusterStories, domainOf, sourceKeyOf,
   type Article, type StoryCluster,
 } from "./analysis";
+
+// TYPE-ONLY, and deliberately so. This import is erased at compile time, so the
+// deterministic layer keeps the property that it works with the model
+// unreachable — there is no runtime edge from this file to llm.ts. The call
+// itself lives in credibility-llm.ts, which imports this file and not the
+// reverse, mirroring how analysis-llm.ts sits above analysis.ts.
+import type { LanguageAssessment } from "./llm";
 
 export type { Article, StoryCluster };
 export {
@@ -75,6 +87,20 @@ export interface FactorOptions {
    * factors. Absent for a news corpus, which therefore behaves exactly as before.
    */
   social?: Record<string, SocialSignalContext>;
+  /**
+   * Language assessments keyed by article id, pre-computed by
+   * `assessLanguageFor()` in credibility-llm.ts.
+   *
+   * Pre-computed rather than fetched inside `compute` because the factor
+   * interface is SYNCHRONOUS and must stay that way: making it async would make
+   * scoreArticle, scoreCorpus and the scoring useMemo in sources.tsx all async,
+   * for one of seven factors. This mirrors how `clusters` and `social` are
+   * threaded in above.
+   *
+   * An absent entry means NOT ASSESSED, and the factor skips. It never means
+   * the language was assessed and found clean.
+   */
+  language?: Record<string, LanguageAssessment>;
 }
 
 /**
@@ -437,6 +463,51 @@ function computeCustomKeyword(
   };
 }
 
+/**
+ * The one model-backed factor (PS-18 §6.1 requires exactly one).
+ *
+ * SCORING DECISION — three of the four dimensions are scored, one is not.
+ *
+ * `emotiveLoad`, `absolutism` and `sensationalism` all point the same way: more
+ * of each is weaker sourcing, so the score is one minus their mean.
+ *
+ * `hedging` is deliberately EXCLUDED from the arithmetic and reported as
+ * evidence instead, because its direction is genuinely ambiguous. "Officials
+ * said" and "according to two people familiar" are careful attribution and a
+ * mark of good practice; "reportedly", "sources suggest" and "it is understood"
+ * throughout are a piece with no sourcing at all. The assessment returns a
+ * single number that cannot distinguish those, and a factor that cannot tell
+ * which direction a signal points must not move the score. The analyst sees the
+ * figure and judges it.
+ *
+ * Confidence is 0.55 — materially below every deterministic factor. This is a
+ * model's reading of tone, not a measurement of a document property, and the
+ * confidence value is where that difference is recorded.
+ */
+function computeLinguisticMarkers(article: Article, options?: FactorOptions): FactorResult | null {
+  const a = options?.language?.[article.id];
+  // Not assessed. Assessment is on request per article — sending the whole feed
+  // would burn free-tier quota — so absence is the DEFAULT state, not a fault.
+  if (!a) return null;
+
+  const scored = [a.emotiveLoad, a.absolutism, a.sensationalism];
+  const concern = scored.reduce((s, x) => s + x, 0) / scored.length;
+  const score = Math.max(0, Math.min(1, 1 - concern));
+
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+  return {
+    score,
+    evidence:
+      `Model assessment of tone — emotive load ${pct(a.emotiveLoad)}, absolutism ` +
+      `${pct(a.absolutism)}, sensationalism ${pct(a.sensationalism)}; these three set the ` +
+      `score. Hedging ${pct(a.hedging)} is reported but NOT scored, because careful ` +
+      `attribution and vagueness both raise it and this assessment cannot tell them apart. ` +
+      `${a.rationale}`,
+    confidence: 0.55,
+  };
+}
+
 // ─── Factor registry ───────────────────────────────────────────────────────
 
 export function defaultFactors(): CredibilityFactor[] {
@@ -505,15 +576,11 @@ export function defaultFactors(): CredibilityFactor[] {
       id: "linguistic_markers",
       name: "Linguistic markers",
       description:
-        "Emotive load, hedging, absolutism and sensationalism, assessed by the LLM. Requires a configured model provider.",
+        "Emotive load, absolutism and sensationalism, assessed by the LLM, scored as one minus their mean. Hedging is reported alongside but not scored — attribution and vagueness both raise it. Assessed per article on request, never across the whole feed.",
       weight: 0.15,
       enabled: false,
       requiresLlm: true,
-      // TODO(module-1-llm): implement via llmAssessLanguage() from src/utils/llm.ts.
-      // Must stay opt-in per article — scoring a whole feed would burn free-tier
-      // quota. Returns null until then so the engine records it as skipped
-      // rather than contributing a fabricated value.
-      compute: () => null,
+      compute: (a, _c, o) => computeLinguisticMarkers(a, o),
     },
   ];
 }
@@ -556,7 +623,13 @@ function skipReason(
   options?: FactorOptions,
 ): string {
   if (!factor.enabled) return "Disabled by the analyst.";
-  if (factor.requiresLlm) return "Requires an LLM provider — not implemented in this pass.";
+  if (factor.requiresLlm && !options?.language?.[article.id]) {
+    return (
+      "Language not yet assessed for this article. Assessment is requested per article " +
+      "rather than run across the feed, so this reads as not-yet-measured — not as an " +
+      "article whose language was checked and found unremarkable."
+    );
+  }
 
   const social = options?.social?.[article.id];
   if (social) {

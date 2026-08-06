@@ -16,6 +16,11 @@ import {
   type Article,
   type CredibilityFactor,
 } from "../src/utils/credibility";
+import {
+  assessmentSummary,
+  type LanguageAssessmentBatch,
+} from "../src/utils/credibility-llm";
+import type { LanguageAssessment } from "../src/utils/llm";
 
 const iso = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
 
@@ -325,5 +330,150 @@ describe("bands", () => {
     expect(bandFor(0.85).label).toBe("High");
     expect(bandFor(0.5).label).toBe("Moderate");
     expect(bandFor(0.2).label).toBe("Low");
+  });
+});
+
+// ─── Linguistic markers — the one model-backed factor ──────────────────────
+
+describe("linguistic markers factor", () => {
+  const assessment = (over: Partial<LanguageAssessment> = {}): LanguageAssessment => ({
+    emotiveLoad: 0.2,
+    absolutism: 0.1,
+    sensationalism: 0.3,
+    hedging: 0.4,
+    rationale: "Measured wording throughout.",
+    ...over,
+  });
+
+  /** Only the linguistic factor enabled, so its raw score IS the overall score. */
+  const linguisticOnly = (): CredibilityFactor[] =>
+    defaultFactors()
+      .filter((f) => f.id === "linguistic_markers")
+      .map((f) => ({ ...f, enabled: true }));
+
+  const scoreWith = (a: LanguageAssessment) =>
+    scoreArticle(CORPUS[0], CORPUS, linguisticOnly(), {
+      language: { [CORPUS[0].id]: a },
+    });
+
+  test("skips when the article has not been assessed", () => {
+    const result = scoreArticle(CORPUS[0], CORPUS, linguisticOnly(), {});
+    expect(result.score).toBeNull();
+    expect(result.breakdown).toHaveLength(0);
+
+    const skip = result.skipped.find((s) => s.id === "linguistic_markers")!;
+    expect(skip).toBeDefined();
+    // The distinction that matters: not-yet-measured, not measured-and-clean.
+    expect(skip.reason).toContain("not-yet-measured");
+  });
+
+  test("an assessment for a DIFFERENT article does not leak across", () => {
+    const result = scoreArticle(CORPUS[0], CORPUS, linguisticOnly(), {
+      language: { [CORPUS[1].id]: assessment() },
+    });
+    expect(result.score).toBeNull();
+  });
+
+  test("scores one minus the mean of the three concern dimensions", () => {
+    // (0.2 + 0.1 + 0.3) / 3 = 0.2 → 0.8
+    expect(scoreWith(assessment()).score).toBeCloseTo(0.8, 5);
+  });
+
+  test("loaded language scores below measured language", () => {
+    const clean = scoreWith(assessment({ emotiveLoad: 0.05, absolutism: 0.05, sensationalism: 0.05 }));
+    const loaded = scoreWith(assessment({ emotiveLoad: 0.9, absolutism: 0.85, sensationalism: 0.95 }));
+    expect(clean.score!).toBeGreaterThan(loaded.score!);
+    expect(loaded.score!).toBeLessThan(0.2);
+  });
+
+  test("hedging does NOT move the score — its direction is ambiguous", () => {
+    const noHedging = scoreWith(assessment({ hedging: 0 }));
+    const allHedging = scoreWith(assessment({ hedging: 1 }));
+    expect(noHedging.score).toBeCloseTo(allHedging.score!, 10);
+  });
+
+  test("hedging is still reported to the analyst as evidence", () => {
+    const evidence = scoreWith(assessment({ hedging: 0.73 })).breakdown[0].evidence;
+    expect(evidence).toContain("73%");
+    expect(evidence.toLowerCase()).toContain("hedging");
+    // The evidence must say why it is excluded, or the omission looks like a bug.
+    expect(evidence).toContain("NOT scored");
+  });
+
+  test("evidence carries the model's own rationale", () => {
+    const evidence = scoreWith(assessment({ rationale: "Uses 'catastrophic' twice." })).breakdown[0]
+      .evidence;
+    expect(evidence).toContain("Uses 'catastrophic' twice.");
+  });
+
+  test("is less confident than the factors that measure a document property", () => {
+    const linguistic = scoreWith(assessment()).breakdown[0].confidence;
+    const deterministic = scoreArticle(
+      CORPUS[0],
+      CORPUS,
+      defaultFactors().filter((f) => !f.requiresLlm && f.enabled),
+    ).breakdown;
+
+    // Corroboration and diversity are excluded on purpose: their confidence
+    // scales with corpus size (0.4 + n/50), so on a four-article fixture
+    // corroboration sits at 0.48 — correctly, because four articles prove
+    // little. The comparison that means something is against the factors whose
+    // confidence is fixed, since those read a property of the document itself
+    // rather than of the corpus around it.
+    const fixed = deterministic.filter(
+      (b) => b.id !== "corroboration" && b.id !== "source_diversity",
+    );
+
+    expect(fixed.length).toBeGreaterThan(0);
+    for (const b of fixed) {
+      expect(b.confidence).toBeGreaterThan(linguistic);
+    }
+  });
+
+  test("stays disabled by default — it costs a model call", () => {
+    const factor = defaultFactors().find((f) => f.id === "linguistic_markers")!;
+    expect(factor.enabled).toBe(false);
+    expect(factor.requiresLlm).toBe(true);
+  });
+
+  test("scores are clamped to 0-1 at the extremes", () => {
+    const worst = scoreWith(assessment({ emotiveLoad: 1, absolutism: 1, sensationalism: 1 }));
+    const best = scoreWith(assessment({ emotiveLoad: 0, absolutism: 0, sensationalism: 0 }));
+    expect(worst.score).toBe(0);
+    expect(best.score).toBe(1);
+  });
+});
+
+describe("language assessment batch reporting", () => {
+  const batch = (over: Partial<LanguageAssessmentBatch> = {}): LanguageAssessmentBatch => ({
+    assessments: {},
+    failures: [],
+    ...over,
+  });
+
+  test("reports coverage as a proportion, not a bare count", () => {
+    const summary = assessmentSummary(
+      batch({ assessments: { a1: {} as any, a2: {} as any } }),
+      12,
+    );
+    // "2 assessed" would hide that ten articles carry no linguistic factor.
+    expect(summary).toContain("2 of 12");
+  });
+
+  test("names every failure with its real cause", () => {
+    const summary = assessmentSummary(
+      batch({
+        assessments: { a1: {} as any },
+        failures: [{ articleId: "a2", title: "Second article", reason: "HTTP 429: rate limited" }],
+      }),
+      2,
+    );
+    expect(summary).toContain("Second article");
+    expect(summary).toContain("429");
+    expect(summary).toContain("carry no linguistic factor");
+  });
+
+  test("says so plainly when nothing was submitted", () => {
+    expect(assessmentSummary(batch(), 0)).toContain("No articles");
   });
 });
