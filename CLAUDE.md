@@ -10,10 +10,8 @@ now composes the plugin list explicitly (order matters — see the comment in th
 
 - TanStack Start 1.168 (SSR), React 19, TypeScript, Vite 8, Bun
 - Tailwind 4, shadcn/ui
-- 30 routes under `src/routes/` (flat file-based routing, plus `__root.tsx`)
+- 27 routes under `src/routes/` (flat file-based routing, plus `__root.tsx`)
 - i18n covering 15 Indian languages under `src/i18n/locales/`
-- Prisma 7 + SQLite via the **libSQL** driver adapter for auth — deliberately not
-  `better-sqlite3`, which Bun cannot load at all (see `AUTH.md`)
 
 ## PS-18 required modules
 
@@ -27,19 +25,15 @@ Plus real-time monitoring of user-defined subjects, and data mining at scale.
 
 ## Current state
 
-The frontend is good and worth keeping. Roughly 15–20% of PS-18 is covered.
+The frontend is good and worth keeping. Everything behind it needs building: no database (all state is localStorage), no auth, no backend. Roughly 15–20% of PS-18 is covered.
 
-**Authentication now exists** — SQLite + Prisma 7, server-side sessions, Argon2id,
-RBAC and an audit log. See `AUTH.md`. The whole app sits behind a
-login; sign in as `admin` / `Admin@123` (forced password change on first use) after
-`bun run auth:setup`. Note the caveats in that document's "Not implemented"
-section — in particular, **the ~30 pre-existing server functions still do not call
-a guard**, so they remain callable by a crafted request even though the UI is gated.
-
-Everything else behind the frontend still needs building. Domain state (12
-`sentinel_*` keys: investigations, watchlists, evidence, …) is **still localStorage
-and still not scoped per user** — two accounts on the same browser see each
-other's work.
+**Deployment drift — the live app is ahead of this repo.** The Azure container app
+`sentinel-web` runs image `v10`, which was built from an authentication system that is **not
+in this repository**: it was committed, deployed, then reverted out of `main`. The running app
+therefore gates every route behind a login that no source here produces, and it **cannot be
+rebuilt from this tree**. The discarded work is recoverable at `1f3259f` in the reflog.
+Resolve this before the next deploy — either restore the auth commits or roll Azure back to
+`v9`, which matches this source.
 
 `src/utils/gemini.ts` has been **deleted**. It is replaced by `src/utils/llm.ts` — see the LLM section below.
 
