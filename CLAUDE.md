@@ -10,8 +10,10 @@ now composes the plugin list explicitly (order matters — see the comment in th
 
 - TanStack Start 1.168 (SSR), React 19, TypeScript, Vite 8, Bun
 - Tailwind 4, shadcn/ui
-- 27 routes under `src/routes/` (flat file-based routing, plus `__root.tsx`)
+- 30 routes under `src/routes/` (flat file-based routing, plus `__root.tsx`)
 - i18n covering 15 Indian languages under `src/i18n/locales/`
+- Prisma 7 + SQLite via the **libSQL** driver adapter for auth — deliberately not
+  `better-sqlite3`, which Bun cannot load at all (see `AUTH.md`)
 
 ## PS-18 required modules
 
@@ -25,9 +27,55 @@ Plus real-time monitoring of user-defined subjects, and data mining at scale.
 
 ## Current state
 
-The frontend is good and worth keeping. Everything behind it needs building: no database (all state is localStorage), no auth, no backend. Roughly 15–20% of PS-18 is covered.
+The frontend is good and worth keeping. Roughly 15–20% of PS-18 is covered.
+
+**Authentication now exists** — SQLite + Prisma 7, server-side sessions, Argon2id,
+RBAC and an audit log. See `AUTH.md`. The whole app sits behind a
+login; sign in as `admin` / `Admin@123` (forced password change on first use) after
+`bun run auth:setup`. Note the caveats in that document's "Not implemented"
+section — in particular, **the ~30 pre-existing server functions still do not call
+a guard**, so they remain callable by a crafted request even though the UI is gated.
+
+Everything else behind the frontend still needs building. Domain state (12
+`sentinel_*` keys: investigations, watchlists, evidence, …) is **still localStorage
+and still not scoped per user** — two accounts on the same browser see each
+other's work.
 
 `src/utils/gemini.ts` has been **deleted**. It is replaced by `src/utils/llm.ts` — see the LLM section below.
+
+## Frozen data contracts — FROZEN 2026-08-06
+
+`src/types/core.ts` holds the six inter-developer shapes (Article, Post, Entity, Finding,
+MediaAsset, VideoAsset). Dev 1 produces the media assets, Dev 2 the articles/posts/findings,
+Dev 3 owns the file. **Additive changes only** — new optional fields are fine, renames and
+removals need a joint re-freeze.
+
+These are **boundary** types, deliberately not the internal working types. `analysis.ts` keeps
+its own richer `Article` (note `pubDate`, not `publishedAt`), `social.ts` its `SocialPost`,
+`imaging.ts` its report family. `src/types/core-adapters.ts` is the *only* place the two
+worlds convert — one function per direction per type. Retyping the existing modules onto the
+contract would have rewritten Modules 1–5 to fix an integration seam.
+
+Rules that must not regress:
+- Anything that can genuinely fail to be measured is `| null`, deviating from the brief's bare
+  fields. `null` means **not measured**, never zero — an unfetchable account age must stay
+  distinguishable from an account created today.
+- Every contract carries a zod schema and is parsed at the boundary. Mismatch throws
+  `ContractViolationError` naming the contract, the producer and the field path; it is never
+  coerced. `parseMany` keeps good records and reports rejects by index, so one malformed item
+  neither drops the batch nor vanishes silently.
+- `toGeoPoint` enforces coordinate honesty at the seam — `0,0` and out-of-range return null.
+- **Dev-3 additive extension:** Appendix B's `Post` carries no stable account id and no links.
+  Module 3's handle-family and amplification signals need both, so `authorId`, `langs` and
+  `links` were added as optional fields. `toSocialPost` returns a `degraded[]` list naming
+  every CIB input a contract-sourced post could not supply, rather than silently returning a
+  cleaner picture than the evidence supports. **Raise these with Dev 2** — they are optional
+  so the freeze holds, but the signals stay uncomputed until populated.
+
+Fixtures live in `tests/helpers/core-fixtures.ts` and are enforced by
+`tests/core-contracts.test.ts` (37 tests). They are in `tests/` on purpose: synthetic records
+importable from `src/` are one refactor away from rendering as real findings. **Nothing under
+`src/` may import them.**
 
 ## Hard constraints
 
@@ -103,6 +151,35 @@ Core logic lives in plain exported functions (`summariseText`, `extractEntitiesF
 `assessLanguageOf`, `llmStatsSnapshot`, …) with `createServerFn` as thin wrappers. Server
 functions cannot execute outside the Start runtime context, so keeping the logic separate
 is what makes it testable — do not move it back inside the handlers.
+
+## Source credibility (Module 1)
+
+All seven PS-18 §6.1 factors are implemented. Six are deterministic and free; the seventh
+(`linguistic_markers`) is model-backed, ships **disabled**, and is **opt-in per article** —
+assessing a whole feed is one call per item against a free tier.
+
+- `compute()` is **synchronous and must stay that way**. The assessment is pre-computed and
+  threaded in via `FactorOptions.language`, the same way `clusters` and `social` are. Making
+  it async would push `async` through `scoreArticle`, `scoreCorpus` and the scoring `useMemo`
+  in sources.tsx for one factor in seven.
+- `credibility.ts` imports `LanguageAssessment` **type-only**, so there is no runtime edge to
+  `llm.ts`. The call lives in `credibility-llm.ts`, which imports the deterministic layer and
+  not the reverse — mirroring `analysis-llm.ts` over `analysis.ts`. The five deterministic
+  factors keep scoring with the model unreachable.
+- **Hedging is deliberately NOT scored.** The score is `1 - mean(emotiveLoad, absolutism,
+  sensationalism)`. Hedging's direction is genuinely ambiguous — "officials said" is careful
+  attribution, "reportedly" throughout is vagueness — and one number cannot separate them. It
+  is reported as evidence, with the reason for its exclusion, and the analyst judges it.
+- Confidence is **0.55**, below the fixed-confidence deterministic factors. Note corroboration
+  and source diversity scale confidence with corpus size (`0.4 + n/50`), so on a small corpus
+  they sit *below* the linguistic factor — correctly, and a test asserts only against the
+  fixed ones.
+- A missing entry in the language map means **not yet assessed**, never "assessed and clean".
+  Failures are collected per article with the real upstream cause; `assessmentSummary` reports
+  coverage as a proportion, because "12 assessed" hides whether that was 12 of 12 or 12 of 200.
+
+Still outstanding for M1: weight profiles are localStorage (`sentinel_credibility_profiles`),
+so they are not per-user and not audited.
 
 ## Social collection (Module 3)
 
