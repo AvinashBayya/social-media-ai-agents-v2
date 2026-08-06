@@ -4,3 +4,17 @@ node_modules
 dist
 *.log
 .env*
+
+# Local runtime data. NEVER ship this into an image:
+#   sentinel.db        — password hashes, live session tokens, the audit trail
+#   credentials.json   — local credentials
+#   social_cache.json  — collected posts naming real, identifiable private
+#                        individuals (DPDP Act 2023)
+# The container creates an empty ./data and the entrypoint migrates and seeds
+# it, so nothing here is needed to build or run.
+data/
+
+# Not needed at runtime, and keeps the build context small.
+tests/
+.tanstack/
+.wrangler/

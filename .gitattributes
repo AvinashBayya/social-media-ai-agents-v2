@@ -1,0 +1,13 @@
+# Line endings.
+#
+# The repo is developed on Windows with core.autocrlf=true, so the working tree
+# is CRLF. That is harmless for TypeScript, but a shell script checked out with
+# CRLF fails inside a Linux container with the notoriously unhelpful
+# "bad interpreter: No such file or directory" — the \r becomes part of the
+# interpreter path. Anything executed by a Linux image is pinned to LF.
+
+* text=auto
+
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
