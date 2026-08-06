@@ -36,5 +36,21 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    // Server-only code. `src/server/**` never runs in a browser, so the React
+    // rules do not apply — and one of them actively misfires: TanStack Start's
+    // request-scoped session helper is called `useSession`, which the
+    // rules-of-hooks check mistakes for a React hook and rejects for being
+    // called outside a component. It is an h3 helper imported from
+    // `@tanstack/react-start/server`, not a hook.
+    files: ["src/server/**/*.ts", "prisma/**/*.ts"],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "react-refresh/only-export-components": "off",
+    },
+  },
   eslintPluginPrettier,
 );

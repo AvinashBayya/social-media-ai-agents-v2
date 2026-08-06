@@ -1,16 +1,24 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
   Link,
   createRootRouteWithContext,
+  redirect,
   useRouter,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
+import { AuthProvider } from "../components/auth-provider";
+import { Toaster } from "../components/ui/sonner";
 import appCss from "../styles.css?url";
 import { I18nProvider } from "../i18n/i18n-context";
+import { ensureAuth, isPasswordChangePath, isPublicPath } from "../lib/auth-client";
+import type { RouterContext } from "../router";
+
+/** Where an account with `mustChangePassword` is confined until it complies. */
+const CHANGE_PASSWORD_PATH = "/change-password";
 
 function NotFoundComponent() {
   return (
@@ -69,7 +77,50 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRouteWithContext<RouterContext>()({
+  /**
+   * The single gate every navigation passes through.
+   *
+   * Placed on the root rather than duplicated across the 27 route files, and
+   * placed in `beforeLoad` rather than in a component so an unauthenticated
+   * visitor never renders the shell at all. This is a redirect for the user's
+   * benefit — the actual protection is that every server function calls a
+   * guard, so bypassing this changes nothing about what data can be read.
+   */
+  beforeLoad: async ({
+    context,
+    location,
+  }): Promise<{ auth: Awaited<ReturnType<typeof ensureAuth>> }> => {
+    const auth = await ensureAuth(context.queryClient);
+    const pathname = location.pathname;
+
+    if (!auth.user) {
+      if (isPublicPath(pathname)) return { auth };
+
+      throw redirect({
+        to: "/login",
+        // Carried so the user lands back where they were aiming once they
+        // sign in, instead of always being dropped on the dashboard.
+        search: { redirect: pathname === "/" ? undefined : pathname },
+        replace: true,
+      });
+    }
+
+    // Signed in: the login page has nothing left to offer.
+    if (isPublicPath(pathname)) {
+      throw redirect({ to: "/", replace: true });
+    }
+
+    // A forced password change is a wall, not a suggestion. The seeded admin
+    // account ships with a documented password; without this it could keep
+    // using it indefinitely by never visiting the change screen.
+    if (auth.user.mustChangePassword && !isPasswordChangePath(pathname)) {
+      throw redirect({ to: CHANGE_PASSWORD_PATH, replace: true });
+    }
+
+    return { auth };
+  },
+
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -123,14 +174,22 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
+  const { queryClient, auth } = Route.useRouteContext();
 
   return (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <Outlet />
-      </I18nProvider>
+      {/* `auth` is already resolved by beforeLoad, so the provider starts with
+          the real session and there is no signed-out flash on hydration. */}
+      <AuthProvider initialState={auth}>
+        <I18nProvider>
+          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+          <Outlet />
+          {/* Mounted here for the first time. The codebase already had ~25
+              toast() calls across agents.tsx, vault.tsx, subjects.tsx and
+              others that silently rendered nothing without it. */}
+          <Toaster />
+        </I18nProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

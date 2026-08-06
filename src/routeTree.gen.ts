@@ -26,14 +26,17 @@ import { Route as ReconRouteImport } from './routes/recon'
 import { Route as OsintRouteImport } from './routes/osint'
 import { Route as NewsRouteImport } from './routes/news'
 import { Route as NetworkRouteImport } from './routes/network'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as InvestigationsRouteImport } from './routes/investigations'
 import { Route as ImagesRouteImport } from './routes/images'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as GisRouteImport } from './routes/gis'
+import { Route as ForbiddenRouteImport } from './routes/forbidden'
 import { Route as ExportsRouteImport } from './routes/exports'
 import { Route as EntitiesRouteImport } from './routes/entities'
 import { Route as CrawlersRouteImport } from './routes/crawlers'
+import { Route as ChangePasswordRouteImport } from './routes/change-password'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
@@ -123,6 +126,11 @@ const NetworkRoute = NetworkRouteImport.update({
   path: '/network',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LiveRoute = LiveRouteImport.update({
   id: '/live',
   path: '/live',
@@ -148,6 +156,11 @@ const GisRoute = GisRouteImport.update({
   path: '/gis',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForbiddenRoute = ForbiddenRouteImport.update({
+  id: '/forbidden',
+  path: '/forbidden',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExportsRoute = ExportsRouteImport.update({
   id: '/exports',
   path: '/exports',
@@ -161,6 +174,11 @@ const EntitiesRoute = EntitiesRouteImport.update({
 const CrawlersRoute = CrawlersRouteImport.update({
   id: '/crawlers',
   path: '/crawlers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangePasswordRoute = ChangePasswordRouteImport.update({
+  id: '/change-password',
+  path: '/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsRoute = AlertsRouteImport.update({
@@ -183,14 +201,17 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/alerts': typeof AlertsRoute
+  '/change-password': typeof ChangePasswordRoute
   '/crawlers': typeof CrawlersRoute
   '/entities': typeof EntitiesRoute
   '/exports': typeof ExportsRoute
+  '/forbidden': typeof ForbiddenRoute
   '/gis': typeof GisRoute
   '/graph': typeof GraphRoute
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
@@ -213,14 +234,17 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/alerts': typeof AlertsRoute
+  '/change-password': typeof ChangePasswordRoute
   '/crawlers': typeof CrawlersRoute
   '/entities': typeof EntitiesRoute
   '/exports': typeof ExportsRoute
+  '/forbidden': typeof ForbiddenRoute
   '/gis': typeof GisRoute
   '/graph': typeof GraphRoute
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
@@ -244,14 +268,17 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/alerts': typeof AlertsRoute
+  '/change-password': typeof ChangePasswordRoute
   '/crawlers': typeof CrawlersRoute
   '/entities': typeof EntitiesRoute
   '/exports': typeof ExportsRoute
+  '/forbidden': typeof ForbiddenRoute
   '/gis': typeof GisRoute
   '/graph': typeof GraphRoute
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
@@ -276,14 +303,17 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/alerts'
+    | '/change-password'
     | '/crawlers'
     | '/entities'
     | '/exports'
+    | '/forbidden'
     | '/gis'
     | '/graph'
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
@@ -306,14 +336,17 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/alerts'
+    | '/change-password'
     | '/crawlers'
     | '/entities'
     | '/exports'
+    | '/forbidden'
     | '/gis'
     | '/graph'
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
@@ -336,14 +369,17 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/alerts'
+    | '/change-password'
     | '/crawlers'
     | '/entities'
     | '/exports'
+    | '/forbidden'
     | '/gis'
     | '/graph'
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
@@ -367,14 +403,17 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRoute
   AlertsRoute: typeof AlertsRoute
+  ChangePasswordRoute: typeof ChangePasswordRoute
   CrawlersRoute: typeof CrawlersRoute
   EntitiesRoute: typeof EntitiesRoute
   ExportsRoute: typeof ExportsRoute
+  ForbiddenRoute: typeof ForbiddenRoute
   GisRoute: typeof GisRoute
   GraphRoute: typeof GraphRoute
   ImagesRoute: typeof ImagesRoute
   InvestigationsRoute: typeof InvestigationsRoute
   LiveRoute: typeof LiveRoute
+  LoginRoute: typeof LoginRoute
   NetworkRoute: typeof NetworkRoute
   NewsRoute: typeof NewsRoute
   OsintRoute: typeof OsintRoute
@@ -515,6 +554,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NetworkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/live': {
       id: '/live'
       path: '/live'
@@ -550,6 +596,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GisRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forbidden': {
+      id: '/forbidden'
+      path: '/forbidden'
+      fullPath: '/forbidden'
+      preLoaderRoute: typeof ForbiddenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/exports': {
       id: '/exports'
       path: '/exports'
@@ -569,6 +622,13 @@ declare module '@tanstack/react-router' {
       path: '/crawlers'
       fullPath: '/crawlers'
       preLoaderRoute: typeof CrawlersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/change-password': {
+      id: '/change-password'
+      path: '/change-password'
+      fullPath: '/change-password'
+      preLoaderRoute: typeof ChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alerts': {
@@ -599,14 +659,17 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRoute,
   AlertsRoute: AlertsRoute,
+  ChangePasswordRoute: ChangePasswordRoute,
   CrawlersRoute: CrawlersRoute,
   EntitiesRoute: EntitiesRoute,
   ExportsRoute: ExportsRoute,
+  ForbiddenRoute: ForbiddenRoute,
   GisRoute: GisRoute,
   GraphRoute: GraphRoute,
   ImagesRoute: ImagesRoute,
   InvestigationsRoute: InvestigationsRoute,
   LiveRoute: LiveRoute,
+  LoginRoute: LoginRoute,
   NetworkRoute: NetworkRoute,
   NewsRoute: NewsRoute,
   OsintRoute: OsintRoute,

@@ -1,0 +1,118 @@
+// Sentinel AI — authentication and authorisation schema.
+//
+// Provider is SQLite: the deployment target for this module is an offline /
+// intranet install where the database is a single file on the host. The
+// datasource URL is supplied by prisma.config.ts (from DATABASE_URL) rather
+// than being hardcoded here, so the same schema can be pointed at a different
+// file per environment without editing the schema.
+//
+// NOTE ON `role`: SQLite has no native enum type, and Prisma therefore does not
+// support `enum` blocks on a sqlite datasource. `User.role` is a plain String
+// whose permitted values are defined once in src/lib/roles.ts and enforced by
+// zod on every write path. Do not widen this to free text — read it back
+// through `parseRole()`.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String @id @default(cuid())
+  // Stored lowercased. SQLite unique indexes are case-sensitive, so
+  // normalisation happens in the service layer to make "Admin" and "admin"
+  // collide as the same account rather than becoming two.
+  username     String @unique
+  email        String @unique
+  passwordHash String
+  // One of the values in src/server/auth/roles.ts. See the note above.
+  role         String @default("Guest")
+
+  isActive Boolean @default(true)
+  // Set on seeded and admin-reset accounts. While true every authenticated
+  // request is redirected to the change-password screen.
+  mustChangePassword Boolean @default(false)
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+// Server-side session store. This is the authority on whether a session is
+// live — the cookie only carries a bearer token. Deleting a row here logs the
+// holder out immediately, which is what makes "disable user" and "log out all
+// devices" actually work; a self-contained signed cookie cannot be revoked.
+model Session {
+  // sha256 of the token held in the cookie, never the token itself. A dump of
+  // this table therefore does not yield usable credentials.
+  id String @id
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  ipAddress String?
+  userAgent String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Append-only security log. `userId` is nullable and set to null rather than
+// cascading on user delete, so removing an account never erases the record of
+// what it did. `actorLabel` preserves the username for that case.
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // A value from AUDIT_ACTIONS in src/server/auth/audit.ts.
+  action     String
+  actorLabel String?
+  // The user or entity the action was performed on, when different from actor.
+  targetId    String?
+  targetLabel String?
+  // JSON blob of non-sensitive context. Never contains passwords or hashes.
+  detail    String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// Backs login throttling and account lockout. Kept in the database rather than
+// in process memory so the limit still holds when more than one instance is
+// running and survives a restart — an in-memory counter is trivially defeated
+// by forcing a crash or waiting for a scale-to-zero.
+model LoginAttempt {
+  id String @id @default(cuid())
+
+  // Normalised username or email as submitted. Not a foreign key: attempts
+  // against accounts that do not exist must be recorded too.
+  identifier String
+  ipAddress  String?
+  successful Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, createdAt])
+  @@index([ipAddress, createdAt])
+}

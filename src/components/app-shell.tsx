@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Radio,
@@ -44,6 +44,7 @@ import {
   SidebarInset,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/components/auth-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SidebarNav, type NavGroup } from "@/components/sidebar-nav";
 import { useT } from "@/i18n/i18n-context";
@@ -59,7 +60,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
-
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -139,9 +139,7 @@ function AppSidebar() {
             </span>
           </div>
         </div>
-        <div
-          className="mx-2 mt-1.5 flex items-center justify-between rounded border border-[#263548] bg-[#111827] px-2 py-1 text-[10px] text-[#94A3B8] font-mono group-data-[collapsible=icon]:hidden"
-        >
+        <div className="mx-2 mt-1.5 flex items-center justify-between rounded border border-[#263548] bg-[#111827] px-2 py-1 text-[10px] text-[#94A3B8] font-mono group-data-[collapsible=icon]:hidden">
           <span className="flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-[#22C55E] animate-pulse" />
             {t("Global Ops · Tier 1")}
@@ -156,6 +154,97 @@ function AppSidebar() {
         <LanguageSwitcher />
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+/**
+ * Signed-in user menu.
+ *
+ * Replaces a hardcoded stub that displayed "Not signed in" alongside the
+ * invented address a.chen@sentinel.io and four menu items with no handlers.
+ * Everything shown here now comes from the resolved session, and Sign out
+ * actually ends it.
+ */
+function UserMenu() {
+  const t = useT();
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+
+  // The root guard redirects unauthenticated visitors before the shell
+  // renders, so this is defensive rather than a state users reach.
+  if (!user) return null;
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-2 pr-2 border border-[#263548] bg-[#111827] hover:bg-[#1A2332] text-[#F3F4F6] rounded"
+        >
+          <span className="grid size-5 place-items-center rounded bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20">
+            <CircleUser className="size-3" />
+          </span>
+          <span className="hidden text-left leading-none sm:block" data-no-translate>
+            <span className="block text-[10px] font-bold uppercase tracking-wider">
+              {user.username}
+            </span>
+          </span>
+          <ChevronDown className="size-3 text-[#94A3B8]" />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        className="w-56 bg-[#111827] border-[#263548] text-[#F3F4F6] rounded"
+      >
+        <DropdownMenuLabel className="text-[10px] font-bold text-[#94A3B8] uppercase font-mono">
+          {t("Signed in as")}
+        </DropdownMenuLabel>
+
+        <div className="px-2 pb-1.5" data-no-translate>
+          <p className="font-mono text-xs text-[#F3F4F6]">{user.username}</p>
+          <p className="mt-0.5 font-mono text-[10px] text-[#64748B]">{user.email}</p>
+        </div>
+
+        <div className="px-2 pb-2">
+          <span className="inline-flex items-center rounded border border-[#3B82F6]/25 bg-[#3B82F6]/10 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-[#3B82F6]">
+            <span data-no-translate>{user.role}</span>
+          </span>
+        </div>
+
+        <DropdownMenuSeparator className="bg-[#263548]" />
+
+        <DropdownMenuItem asChild className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">
+          <Link to="/change-password">{t("Change password")}</Link>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator className="bg-[#263548]" />
+
+        <DropdownMenuItem
+          onSelect={(event) => {
+            // Keep the menu mounted while the request is in flight so the
+            // disabled state is visible rather than flashing shut.
+            event.preventDefault();
+            void handleSignOut();
+          }}
+          disabled={signingOut}
+          className="text-xs text-[#EF4444] hover:bg-[#EF4444]/10 focus:bg-[#EF4444]/10"
+        >
+          {signingOut ? t("Signing out…") : t("Sign out")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -245,8 +334,7 @@ function TopBar() {
         {activeTarget && (
           <Badge className="hidden md:flex items-center gap-1.5 bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 font-mono text-[10px] shrink-0 h-7 px-2">
             <span className="size-1.5 rounded-full bg-[#10B981] animate-ping" />
-            {t("Target").toUpperCase()}:{" "}
-            <span data-no-translate>{activeTarget.toUpperCase()}</span>
+            {t("Target").toUpperCase()}: <span data-no-translate>{activeTarget.toUpperCase()}</span>
           </Badge>
         )}
       </div>
@@ -257,36 +345,16 @@ function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="relative size-8 text-[#94A3B8] hover:text-[#F3F4F6] border border-[#263548] bg-[#111827] rounded">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative size-8 text-[#94A3B8] hover:text-[#F3F4F6] border border-[#263548] bg-[#111827] rounded"
+        >
           <Bell className="size-3.5" />
           <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#EF4444] animate-pulse" />
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 gap-2 pr-2 border border-[#263548] bg-[#111827] hover:bg-[#1A2332] text-[#F3F4F6] rounded">
-              <span className="grid size-5 place-items-center rounded bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20">
-                <CircleUser className="size-3" />
-              </span>
-              <span className="hidden text-left leading-none sm:block" data-no-translate>
-                <span className="block text-[10px] font-bold uppercase tracking-wider">Not signed in</span>
-              </span>
-              <ChevronDown className="size-3 text-[#94A3B8]" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48 bg-[#111827] border-[#263548] text-[#F3F4F6] rounded">
-            <DropdownMenuLabel className="text-[10px] font-bold text-[#94A3B8] uppercase font-mono">{t("Operations Command")}</DropdownMenuLabel>
-            <DropdownMenuItem className="text-xs font-mono text-[#94A3B8]" data-no-translate>
-              a.chen@sentinel.io
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-[#263548]" />
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Profile")}</DropdownMenuItem>
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Preferences")}</DropdownMenuItem>
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Security Keys")}</DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-[#263548]" />
-            <DropdownMenuItem className="text-xs text-[#EF4444] hover:bg-[#EF4444]/10 focus:bg-[#EF4444]/10">{t("Log Out")}</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <UserMenu />
       </div>
     </header>
   );
@@ -369,8 +437,7 @@ export function toneBadge(
 } {
   const map = {
     positive: {
-      className:
-        "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
+      className: "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
       label: "Positive",
     },
     negative: {
@@ -383,23 +450,19 @@ export function toneBadge(
       label: "Critical",
     },
     high: {
-      className:
-        "bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/25",
+      className: "bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/25",
       label: "High",
     },
     medium: {
-      className:
-        "bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/25",
+      className: "bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/25",
       label: "Medium",
     },
     low: {
-      className:
-        "bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/25",
+      className: "bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/25",
       label: "Low",
     },
     verified: {
-      className:
-        "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
+      className: "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
       label: "Verified",
     },
     unverified: { className: "bg-[#1A2332] text-[#94A3B8] border-[#263548]", label: "Unverified" },
