@@ -316,6 +316,54 @@ alert (`sentinel-monthly-30usd`) is about 40–60 GPU-hours for the month, befor
 else. Keep the GPU app scaled to zero when idle and treat it as demo-only. Decide the
 funding source before committing to a self-hosted inference architecture.
 
+## Deployment — live 2026-08-06
+
+`sentinel-web` in `rg-sentinel-demo`, Central India, on `sentinel-env`:
+<https://sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io>
+
+Note the **container app is `sentinel-web`, not `sentinel`** — `azure-env.sh` had the wrong
+`APP` name and every `az containerapp` call against it returned ResourceNotFound.
+
+Image is built with **`az acr build`** (remote), because there is no Docker locally.
+`bun run build` must pass first — the ACR build repeats it and fails the same way.
+
+**The image runs migrations and the seed before serving** (`docker-entrypoint.sh`). Missing
+`DATABASE_URL` or `SESSION_SECRET` is fatal there, not a warning: an app that starts without
+them is silently insecure or unusable, and looks healthy to the platform either way.
+
+Two traps, both hit and both fixed:
+
+- **`bun install` fails in the build with "Could not find any Python installation to use".**
+  `better-sqlite3` is a devDependency kept only for a Prisma CLI peer declaration, never
+  loaded at runtime, but its install script is a node-gyp build and Bun trusts it by default.
+  The install uses `--ignore-scripts`. Nothing in the image needs a lifecycle script.
+- **SQLite on Azure Files fails with `database is locked`.** SQLite's byte-range locking does
+  not work over SMB/CIFS; Prisma's migration engine dies outright. The volume therefore sets
+  `mountOptions: "nobrl,…"`, which disables those locks.
+  **`nobrl` is only safe because `maxReplicas` is 1.** Two replicas writing one SQLite file
+  over SMB with locking disabled will corrupt it. **Do not raise `maxReplicas` while the store
+  is SQLite** — moving to Postgres (the platform target in the Dev-3 brief) is what lifts this.
+
+Persistence is Azure Files share `sentinel-data` on storage account `sentineldata4821`,
+mounted at `/app/data`. Verified across a restart: the seed reports the existing admin
+untouched rather than recreating it, so accounts, sessions and the audit log survive.
+
+Secrets are Key Vault references via the app's system-assigned identity — `sarvam-key`,
+`groq-key`, `session-secret`, `seed-admin-password`. **The seed refuses the documented
+`Admin@123` under `NODE_ENV=production`**, so the bootstrap password is generated and held in
+the vault. Retrieve it with:
+
+```sh
+az keyvault secret show --vault-name sentinel-kv-4821 -n seed-admin-password --query value -o tsv
+```
+
+The account is created with `mustChangePassword`, so that credential cannot survive first
+sign-in.
+
+**Deployment-target conflict, unresolved.** The Dev-3 brief says "Local Linux · no Azure";
+this deployment and everything else in this document are Azure. They contradict. Decide which
+governs before the 2 Sep release, because it changes what the demo runs on.
+
 ## Environment
 
 Windows 11, Git Bash (MINGW64), repo at `D:\social_media_research`, Node 24, Bun, no Docker.
