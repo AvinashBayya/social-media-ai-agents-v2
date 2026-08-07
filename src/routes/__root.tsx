@@ -3,7 +3,9 @@ import {
   Outlet,
   Link,
   createRootRouteWithContext,
+  useNavigate,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -11,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { I18nProvider } from "../i18n/i18n-context";
+import { DemoSessionProvider, useDemoSession } from "../components/demo-session";
 
 function NotFoundComponent() {
   return (
@@ -122,14 +125,60 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Reachable without a demo session. */
+const PUBLIC_PATHS = new Set(["/login"]);
+
+/**
+ * Redirects to /login when there is no demo session.
+ *
+ * ⚠️ This is a UX flow, NOT a security boundary. The check runs in the browser
+ * against localStorage, so it is bypassed by anyone who sets the key by hand or
+ * simply disables JavaScript. Nothing behind it is protected — every route
+ * still renders its own data, and the ~30 server functions remain callable by
+ * a crafted request regardless of what this component decides. Do not add a
+ * route here and consider it restricted.
+ *
+ * It waits for `ready` because the session lives in localStorage, which the
+ * server cannot read: acting on the first render would bounce every signed-in
+ * operator straight back to /login on a hard refresh.
+ */
+function DemoGate({ children }: { children: ReactNode }) {
+  const { session, ready } = useDemoSession();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  const blocked = ready && !session && !PUBLIC_PATHS.has(pathname);
+
+  useEffect(() => {
+    if (!blocked) return;
+    navigate({ to: "/login", search: { redirect: pathname }, replace: true });
+  }, [blocked, pathname, navigate]);
+
+  if (blocked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0a1220] px-4">
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#61748f]">
+          Redirecting to sign-in…
+        </p>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   return (
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <Outlet />
+        <DemoSessionProvider>
+          <DemoGate>
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <Outlet />
+          </DemoGate>
+        </DemoSessionProvider>
       </I18nProvider>
     </QueryClientProvider>
   );

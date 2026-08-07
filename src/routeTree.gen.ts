@@ -23,9 +23,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SentimentRouteImport } from './routes/sentiment'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ReconRouteImport } from './routes/recon'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as OsintRouteImport } from './routes/osint'
 import { Route as NewsRouteImport } from './routes/news'
 import { Route as NetworkRouteImport } from './routes/network'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as InvestigationsRouteImport } from './routes/investigations'
 import { Route as ImagesRouteImport } from './routes/images'
@@ -108,6 +110,11 @@ const ReconRoute = ReconRouteImport.update({
   path: '/recon',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OsintRoute = OsintRouteImport.update({
   id: '/osint',
   path: '/osint',
@@ -121,6 +128,11 @@ const NewsRoute = NewsRouteImport.update({
 const NetworkRoute = NetworkRouteImport.update({
   id: '/network',
   path: '/network',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveRoute = LiveRouteImport.update({
@@ -191,9 +203,11 @@ export interface FileRoutesByFullPath {
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
   '/sentiment': typeof SentimentRoute
@@ -221,9 +235,11 @@ export interface FileRoutesByTo {
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
   '/sentiment': typeof SentimentRoute
@@ -252,9 +268,11 @@ export interface FileRoutesById {
   '/images': typeof ImagesRoute
   '/investigations': typeof InvestigationsRoute
   '/live': typeof LiveRoute
+  '/login': typeof LoginRoute
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
   '/sentiment': typeof SentimentRoute
@@ -284,9 +302,11 @@ export interface FileRouteTypes {
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
+    | '/profile'
     | '/recon'
     | '/reports'
     | '/sentiment'
@@ -314,9 +334,11 @@ export interface FileRouteTypes {
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
+    | '/profile'
     | '/recon'
     | '/reports'
     | '/sentiment'
@@ -344,9 +366,11 @@ export interface FileRouteTypes {
     | '/images'
     | '/investigations'
     | '/live'
+    | '/login'
     | '/network'
     | '/news'
     | '/osint'
+    | '/profile'
     | '/recon'
     | '/reports'
     | '/sentiment'
@@ -375,9 +399,11 @@ export interface RootRouteChildren {
   ImagesRoute: typeof ImagesRoute
   InvestigationsRoute: typeof InvestigationsRoute
   LiveRoute: typeof LiveRoute
+  LoginRoute: typeof LoginRoute
   NetworkRoute: typeof NetworkRoute
   NewsRoute: typeof NewsRoute
   OsintRoute: typeof OsintRoute
+  ProfileRoute: typeof ProfileRoute
   ReconRoute: typeof ReconRoute
   ReportsRoute: typeof ReportsRoute
   SentimentRoute: typeof SentimentRoute
@@ -494,6 +520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReconRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/osint': {
       id: '/osint'
       path: '/osint'
@@ -513,6 +546,13 @@ declare module '@tanstack/react-router' {
       path: '/network'
       fullPath: '/network'
       preLoaderRoute: typeof NetworkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live': {
@@ -607,9 +647,11 @@ const rootRouteChildren: RootRouteChildren = {
   ImagesRoute: ImagesRoute,
   InvestigationsRoute: InvestigationsRoute,
   LiveRoute: LiveRoute,
+  LoginRoute: LoginRoute,
   NetworkRoute: NetworkRoute,
   NewsRoute: NewsRoute,
   OsintRoute: OsintRoute,
+  ProfileRoute: ProfileRoute,
   ReconRoute: ReconRoute,
   ReportsRoute: ReportsRoute,
   SentimentRoute: SentimentRoute,

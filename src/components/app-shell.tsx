@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState, Link } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Radio,
@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SidebarNav, type NavGroup } from "@/components/sidebar-nav";
+import { useDemoSession } from "@/components/demo-session";
 import { useT } from "@/i18n/i18n-context";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
-
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -139,9 +139,7 @@ function AppSidebar() {
             </span>
           </div>
         </div>
-        <div
-          className="mx-2 mt-1.5 flex items-center justify-between rounded border border-[#263548] bg-[#111827] px-2 py-1 text-[10px] text-[#94A3B8] font-mono group-data-[collapsible=icon]:hidden"
-        >
+        <div className="mx-2 mt-1.5 flex items-center justify-between rounded border border-[#263548] bg-[#111827] px-2 py-1 text-[10px] text-[#94A3B8] font-mono group-data-[collapsible=icon]:hidden">
           <span className="flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-[#22C55E] animate-pulse" />
             {t("Global Ops · Tier 1")}
@@ -165,6 +163,13 @@ function TopBar() {
   const [activeTarget, setActiveTargetState] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const t = useT();
+  const navigate = useNavigate();
+  const { session, signOut } = useDemoSession();
+
+  const handleSignOut = () => {
+    signOut();
+    navigate({ to: "/login", replace: true });
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -245,8 +250,7 @@ function TopBar() {
         {activeTarget && (
           <Badge className="hidden md:flex items-center gap-1.5 bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 font-mono text-[10px] shrink-0 h-7 px-2">
             <span className="size-1.5 rounded-full bg-[#10B981] animate-ping" />
-            {t("Target").toUpperCase()}:{" "}
-            <span data-no-translate>{activeTarget.toUpperCase()}</span>
+            {t("Target").toUpperCase()}: <span data-no-translate>{activeTarget.toUpperCase()}</span>
           </Badge>
         )}
       </div>
@@ -257,34 +261,85 @@ function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="relative size-8 text-[#94A3B8] hover:text-[#F3F4F6] border border-[#263548] bg-[#111827] rounded">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative size-8 text-[#94A3B8] hover:text-[#F3F4F6] border border-[#263548] bg-[#111827] rounded"
+        >
           <Bell className="size-3.5" />
           <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#EF4444] animate-pulse" />
         </Button>
 
+        {/* Operator chip. Reflects the DEMO session (see utils/demo-session.ts)
+            — it is a localStorage record, not an authenticated identity. Items
+            that lead nowhere are rendered disabled rather than as live menu
+            entries that silently do nothing. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 gap-2 pr-2 border border-[#263548] bg-[#111827] hover:bg-[#1A2332] text-[#F3F4F6] rounded">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-2 pr-2 border border-[#263548] bg-[#111827] hover:bg-[#1A2332] text-[#F3F4F6] rounded"
+            >
               <span className="grid size-5 place-items-center rounded bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20">
                 <CircleUser className="size-3" />
               </span>
               <span className="hidden text-left leading-none sm:block" data-no-translate>
-                <span className="block text-[10px] font-bold uppercase tracking-wider">Not signed in</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wider">
+                  {session ? session.operator : "Not signed in"}
+                </span>
               </span>
               <ChevronDown className="size-3 text-[#94A3B8]" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48 bg-[#111827] border-[#263548] text-[#F3F4F6] rounded">
-            <DropdownMenuLabel className="text-[10px] font-bold text-[#94A3B8] uppercase font-mono">{t("Operations Command")}</DropdownMenuLabel>
-            <DropdownMenuItem className="text-xs font-mono text-[#94A3B8]" data-no-translate>
-              a.chen@sentinel.io
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-[#263548]" />
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Profile")}</DropdownMenuItem>
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Preferences")}</DropdownMenuItem>
-            <DropdownMenuItem className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">{t("Security Keys")}</DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-[#263548]" />
-            <DropdownMenuItem className="text-xs text-[#EF4444] hover:bg-[#EF4444]/10 focus:bg-[#EF4444]/10">{t("Log Out")}</DropdownMenuItem>
+          <DropdownMenuContent
+            align="end"
+            className="w-56 bg-[#111827] border-[#263548] text-[#F3F4F6] rounded"
+          >
+            <DropdownMenuLabel className="text-[10px] font-bold text-[#94A3B8] uppercase font-mono">
+              {t("Operations Command")}
+            </DropdownMenuLabel>
+
+            {session ? (
+              <>
+                <DropdownMenuItem
+                  className="text-xs font-mono text-[#94A3B8] focus:bg-transparent"
+                  data-no-translate
+                >
+                  {session.email}
+                </DropdownMenuItem>
+                <div className="px-2 pb-1.5 text-[9px] font-mono uppercase tracking-wider text-[#C79A3A]">
+                  {t("Demo session — not authenticated")}
+                </div>
+                <DropdownMenuSeparator className="bg-[#263548]" />
+                <DropdownMenuItem asChild className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">
+                  <Link to="/profile">{t("Profile")}</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">
+                  <Link to="/settings">{t("Preferences")}</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled className="text-xs opacity-50">
+                  {t("Security Keys")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-[#263548]" />
+                <DropdownMenuItem
+                  onSelect={handleSignOut}
+                  className="text-xs text-[#EF4444] hover:bg-[#EF4444]/10 focus:bg-[#EF4444]/10"
+                >
+                  {t("Log Out")}
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <div className="px-2 pb-1.5 text-[10px] font-mono text-[#64748B]">
+                  {t("No demo session")}
+                </div>
+                <DropdownMenuSeparator className="bg-[#263548]" />
+                <DropdownMenuItem asChild className="text-xs hover:bg-[#1A2332] focus:bg-[#1A2332]">
+                  <Link to="/login">{t("Sign in")}</Link>
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -369,8 +424,7 @@ export function toneBadge(
 } {
   const map = {
     positive: {
-      className:
-        "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
+      className: "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
       label: "Positive",
     },
     negative: {
@@ -383,23 +437,19 @@ export function toneBadge(
       label: "Critical",
     },
     high: {
-      className:
-        "bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/25",
+      className: "bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/25",
       label: "High",
     },
     medium: {
-      className:
-        "bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/25",
+      className: "bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/25",
       label: "Medium",
     },
     low: {
-      className:
-        "bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/25",
+      className: "bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/25",
       label: "Low",
     },
     verified: {
-      className:
-        "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
+      className: "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20",
       label: "Verified",
     },
     unverified: { className: "bg-[#1A2332] text-[#94A3B8] border-[#263548]", label: "Unverified" },

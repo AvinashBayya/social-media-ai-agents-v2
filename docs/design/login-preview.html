@@ -1,0 +1,220 @@
+<!--
+  DESIGN REFERENCE ONLY — not part of the application, not served.
+
+  This is the standalone comp the /login screen was built from. It is kept
+  under docs/ deliberately: anything in public/ is served, and this file's
+  fake submit handler must never be reachable as a page.
+
+  The shipped implementation is src/routes/login.tsx. That route is likewise
+  non-functional by design — there is no authentication anywhere in this tree.
+  Open this file directly in a browser to view the comp.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel AI — Secure Access</title>
+<style>
+  :root{
+    --bg:#0a1220; --bg2:#0f1a2c; --panel:#111c30; --panel2:#0d1728;
+    --border:#22324a; --line:#1b2942;
+    --text:#eef2f8; --muted:#8ea0b8; --dim:#61748f; --blue:#3b82f6; --emerald:#10b981; --emerald-d:#0f7a52;
+    --amber:#c79a3a; --red:#ef6a6a;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--text);}
+  body{
+    background:
+      radial-gradient(900px 500px at 78% -8%, rgba(59,130,246,.10), transparent 60%),
+      radial-gradient(700px 500px at 10% 110%, rgba(16,185,129,.08), transparent 60%),
+      linear-gradient(160deg,#0a1220 0%,#0c1626 55%,#0a1220 100%);
+    min-height:100vh; display:flex; flex-direction:column;
+  }
+  /* faint grid overlay */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; opacity:.35;
+    background-image:linear-gradient(rgba(120,150,190,.05) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(120,150,190,.05) 1px,transparent 1px);
+    background-size:44px 44px;
+  }
+  .clsbar{
+    text-align:center; font-size:11px; letter-spacing:.18em; font-weight:600;
+    padding:6px; color:#cdd7e6; background:rgba(199,154,58,.10);
+    border-bottom:1px solid rgba(199,154,58,.28); position:relative; z-index:2;
+  }
+  .wrap{flex:1; display:flex; align-items:center; justify-content:center; padding:24px; position:relative; z-index:2;}
+  .card{
+    width:100%; max-width:412px; background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line); border-radius:14px; padding:34px 32px 26px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .brand{display:flex; align-items:center; gap:12px; margin-bottom:6px;}
+  .badge{
+    width:44px;height:44px;border-radius:11px;display:grid;place-items:center;
+    background:linear-gradient(150deg,#12304f,#0d2138); border:1px solid #27436a; box-shadow:inset 0 0 14px rgba(16,185,129,.12);
+  }
+  .badge svg{width:24px;height:24px;}
+  .brand h1{font-size:21px;margin:0;font-weight:800;letter-spacing:.4px;}
+  .brand .tag{font-size:11px;color:var(--emerald);letter-spacing:.16em;font-weight:600;text-transform:uppercase;margin-top:2px;}
+  .subtitle{font-size:12.5px;color:var(--muted);margin:14px 0 16px;line-height:1.5;}
+  .disclosure{
+    display:flex;gap:9px;font-size:11.5px;line-height:1.55;color:#e2cf9f;
+    background:rgba(199,154,58,.10);border:1px solid rgba(199,154,58,.35);
+    border-radius:9px;padding:10px 12px;margin-bottom:16px;
+  }
+  .disclosure svg{width:15px;height:15px;flex-shrink:0;margin-top:2px;color:var(--amber);}
+  .creds{display:block;margin-top:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#f0e2bd;}
+  .creds{letter-spacing:.03em;}
+  form{display:flex;flex-direction:column;gap:16px;}
+  .field label{display:block;font-size:11.5px;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase;font-weight:600;margin-bottom:7px;}
+  .inputwrap{position:relative;display:flex;align-items:center;}
+  .inputwrap svg.lead{position:absolute;left:12px;width:16px;height:16px;color:var(--dim);}
+  input[type=text],input[type=password]{
+    width:100%;padding:11px 12px 11px 38px;background:#0b1524;color:var(--text);
+    border:1px solid #22324a;border-radius:9px;
+    font-size:14px;outline:none;transition:border-color .15s, box-shadow .15s;
+  }
+  input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.18);}
+  input::placeholder{color:#4d607d;}
+  .toggle{position:absolute;right:10px;background:none;border:none;color:var(--dim);cursor:pointer;
+    font-size:11px;letter-spacing:.05em;padding:4px 6px;}
+  .toggle:hover{color:var(--muted);}
+  .row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;margin-top:-4px;}
+  .remember{display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer;}
+  .remember input{accent-color:var(--emerald);width:15px;height:15px;}
+  .linkbtn{background:none;border:none;cursor:pointer;font-size:12.5px;padding:0;}
+  .mfa-note{font-size:11.5px;color:var(--dim);text-align:center;margin-top:2px;}
+  .btn{
+    margin-top:4px;padding:12px;border:none;border-radius:9px;cursor:pointer;
+    background:linear-gradient(180deg,#12b981,var(--emerald-d));color:#04140d;
+    font-size:14.5px;font-weight:700;letter-spacing:.03em;
+    box-shadow:0 6px 18px rgba(16,185,129,.28);transition:filter .15s,transform .05s;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .btn:hover{filter:brightness(1.06);}
+  .btn:active{transform:translateY(1px);}
+  .err{display:none;font-size:12.5px;color:#ffd7d7;background:rgba(239,106,106,.10);
+    border:1px solid rgba(239,106,106,.32);border-radius:8px;padding:9px 12px;align-items:center;gap:8px;}
+  .err.show{display:flex;}
+  .note{display:none;font-size:12.5px;color:var(--muted);background:#0b1524;
+    border:1px solid #2a3b56;border-radius:8px;padding:9px 12px;align-items:center;gap:8px;margin-bottom:16px;}
+  .note.show{display:flex;}
+  .footer{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);}
+  .notice{display:flex;gap:9px;font-size:11px;color:var(--dim);line-height:1.55;}
+  .notice svg{width:14px;height:14px;flex-shrink:0;margin-top:1px;color:var(--amber);}
+  .meta{display:flex;justify-content:space-between;font-size:10.5px;color:#455873;margin-top:12px;letter-spacing:.04em;}
+  .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:5px;
+    box-shadow:0 0 8px var(--amber);vertical-align:middle;}
+</style>
+</head>
+<body>
+  <div class="clsbar">UNCLASSIFIED // DEMONSTRATOR</div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="brand">
+        <div class="badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 4 5v6c0 5 3.5 8 8 11 4.5-3 8-6 8-11V5l-8-3Z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <h1>SENTINEL&nbsp;AI</h1>
+          <div class="tag">OSINT Intelligence Platform</div>
+        </div>
+      </div>
+
+      <p class="subtitle">Secure access terminal. Sign in with your operator credentials to continue.</p>
+
+      <!-- Permanent disclosure. Mirrors src/routes/login.tsx. -->
+      <div class="disclosure">
+        <span><strong>Demo sign-in — not real authentication.</strong> Credentials are checked in the browser and no pages are restricted.
+          <span class="creds">ID admin@ &nbsp; PW admin@123</span>
+        </span>
+      </div>
+
+      <div class="err" id="err">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ef6a6a" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+        <span id="errmsg">Operator ID and password are required.</span>
+      </div>
+
+      <div class="note" id="note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <span>Demo credentials accepted. In the app this navigates to the dashboard — nothing was unlocked, and no request was sent.</span>
+      </div>
+
+      <form id="loginForm" autocomplete="off" novalidate>
+        <div class="field">
+          <label for="operator">Operator ID</label>
+          <div class="inputwrap">
+            <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+            <input id="operator" name="operator" type="text" placeholder="e.g. analyst.rsharma" required>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <div class="inputwrap">
+            <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <input id="password" name="password" type="password" placeholder="••••••••••" required>
+            <button type="button" class="toggle" id="toggle">SHOW</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="remember"><input type="checkbox" id="remember"> Remember this device</label>
+          <button type="button" class="link linkbtn" id="forgot">Forgot password?</button>
+        </div>
+
+        <button type="submit" class="btn" id="submit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#04140d" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          Sign in
+        </button>
+        <div class="mfa-note">Multi-factor verification is not part of this demonstrator.</div>
+      </form>
+
+      <div class="footer">
+        <div class="notice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 5v6c0 5 3.5 8 8 11 4.5-3 8-6 8-11V5l-8-3Z"/></svg>
+          <span>Authorised personnel only. All access attempts and activity are monitored and logged. Unauthorised use is prohibited.</span>
+        </div>
+        <div class="meta">
+          <span><span class="dot"></span>DEMO MODE · NO AUTH SERVICE</span>
+          <span>v1.0 · iDEX PS-18</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const pw=document.getElementById('password'), tg=document.getElementById('toggle');
+  tg.onclick=()=>{const s=pw.type==='password';pw.type=s?'text':'password';tg.textContent=s?'HIDE':'SHOW';};
+  const form=document.getElementById('loginForm'), err=document.getElementById('err'),
+        errmsg=document.getElementById('errmsg'), note=document.getElementById('note');
+  document.getElementById('forgot').onclick=()=>{
+    note.classList.remove('show');
+    errmsg.textContent='Password recovery is not available in this demo.';
+    err.classList.add('show');
+  };
+  // Demo credentials, compared in the browser. Public by design — this is a
+  // flow demonstration, not a security control. Mirrors src/routes/login.tsx.
+  const DEMO_OPERATOR='admin@', DEMO_PASSWORD='admin@123';
+  form.onsubmit=(e)=>{
+    e.preventDefault();
+    err.classList.remove('show');
+    note.classList.remove('show');
+    const op=document.getElementById('operator').value.trim();
+    if(!op || !pw.value){ errmsg.textContent='Operator ID and password are required.'; err.classList.add('show'); return; }
+    if(op!==DEMO_OPERATOR || pw.value!==DEMO_PASSWORD){
+      errmsg.textContent='Invalid operator ID or password.'; err.classList.add('show'); pw.value=''; return;
+    }
+    // In the app this navigates to the dashboard. Nothing is unlocked — no
+    // route was ever gated.
+    note.classList.add('show');
+  };
+</script>
+</body>
+</html>
