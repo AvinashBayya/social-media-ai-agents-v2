@@ -713,33 +713,60 @@ function Page() {
                   <ShieldCheck className="size-4 text-[#10B981]" /> Subdomain Discovery & Certificate Logs (crt.sh)
                 </CardTitle>
                 <Badge variant="outline" className="text-[10px] font-mono border-[#10B981]/30 text-[#10B981] bg-[#10B981]/10">
-                  {osintProfile?.certificates?.length || 4} Discovered Subdomains
+                  {osintProfile?.certificates?.length ?? 0} Discovered Subdomains
                 </Badge>
               </CardHeader>
               <CardContent className="p-3 font-mono text-xs text-[#94A3B8]">
-                <Table className="w-full">
-                  <TableHeader>
-                    <TableRow className="border-[#263548]">
-                      <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">Subdomain / Asset</TableHead>
-                      <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">CA Issuer</TableHead>
-                      <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase text-right">Log Timestamp</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(osintProfile?.certificates || [
-                      { subdomain: `api.${searchQuery || "google.com"}`, issuer: "Let's Encrypt Authority X3", loggedAt: "2026-07-20" },
-                      { subdomain: `vpn.${searchQuery || "google.com"}`, issuer: "DigiCert Global Root CA", loggedAt: "2026-06-12" },
-                      { subdomain: `auth.${searchQuery || "google.com"}`, issuer: "Sectigo RSA Domain Validation", loggedAt: "2026-05-28" },
-                      { subdomain: `c2-dev.${searchQuery || "google.com"}`, issuer: "Let's Encrypt Authority X3", loggedAt: "2026-07-02" }
-                    ]).slice(0, 8).map((cert: any, idx: number) => (
-                      <TableRow key={idx} className="border-[#263548]/50">
-                        <TableCell className="text-[#F3F4F6] font-mono py-1.5 font-bold">{cert.subdomain}</TableCell>
-                        <TableCell className="text-[#94A3B8] py-1.5">{cert.issuer}</TableCell>
-                        <TableCell className="text-[#06B6D4] text-right font-mono py-1.5">{cert.loggedAt}</TableCell>
+                {/*
+                  Three states, and they must stay distinct. This panel used to
+                  fall back to four invented subdomains (api., vpn., auth. and
+                  c2-dev.) with invented CA issuers and dates whenever the lookup
+                  returned nothing, under a badge reading "4 Discovered
+                  Subdomains" — so a failed lookup reported fabricated
+                  infrastructure, including one host named like a C2 server.
+                */}
+                {osintProfile?.certificatesError ? (
+                  <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
+                    <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
+                    <span className="font-mono text-[11px] leading-relaxed text-[#EF4444]">
+                      Certificate-transparency lookup failed: {osintProfile.certificatesError}
+                    </span>
+                  </div>
+                ) : (osintProfile?.certificates?.length ?? 0) === 0 ? (
+                  <div className="rounded border border-[#263548] bg-[#0B1220]/40 p-3 text-[11px] leading-relaxed text-[#94A3B8]">
+                    No certificates for this target in the public Certificate Transparency logs.
+                    That is a result, not a failure: the target may not be a domain, or it may use
+                    no publicly logged certificate.
+                  </div>
+                ) : (
+                  <Table className="w-full">
+                    <TableHeader>
+                      <TableRow className="border-[#263548]">
+                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">Subdomain / Asset</TableHead>
+                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">CA Issuer</TableHead>
+                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase text-right">First Seen</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {osintProfile.certificates.slice(0, 8).map((cert: any, idx: number) => (
+                        <TableRow key={cert.hostname ?? idx} className="border-[#263548]/50">
+                          <TableCell className="text-[#F3F4F6] font-mono py-1.5 font-bold">{cert.hostname}</TableCell>
+                          {/* null = the log record carried no issuer. Never a guessed CA. */}
+                          <TableCell className="text-[#94A3B8] py-1.5">{cert.issuer ?? "Not reported"}</TableCell>
+                          <TableCell className="text-[#06B6D4] text-right font-mono py-1.5">{cert.firstSeen ?? "Not reported"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+
+                {/* Never cap silently: the badge counts all of them, the table shows 8. */}
+                {(osintProfile?.certificates?.length ?? 0) > 8 && (
+                  <p className="pt-2 text-[10px] text-[#64748B]">
+                    Showing the first 8 of {osintProfile.certificates.length}. The full set is
+                    available on the Recon page.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>

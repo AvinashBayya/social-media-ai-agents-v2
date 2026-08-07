@@ -161,6 +161,46 @@ export const DORK_TEMPLATES: DorkTemplate[] = [
     purpose: "Contract and tender documents naming the target.",
     pattern: `"{target}" (tender OR procurement OR "request for proposal") filetype:pdf`,
   },
+  {
+    id: "web-email",
+    label: "Corporate email exposure",
+    category: "Exposure",
+    scope: "web",
+    purpose:
+      "Indexed pages publishing addresses at the target's domain — the identity surface behind " +
+      "phishing and credential-stuffing, and an input to the entity module.",
+    pattern: `site:{domain} intext:"@{domain}"`,
+  },
+  {
+    id: "web-backups",
+    label: "Backups and database dumps",
+    category: "Exposure",
+    scope: "web",
+    purpose:
+      "Archived copies reachable over HTTP. Distinct from the configuration dork: an old dump " +
+      "often survives a config fix and still carries the credentials that fix rotated.",
+    pattern: `site:{domain} (ext:sql OR ext:bak OR ext:dump OR ext:old OR ext:backup)`,
+  },
+  {
+    id: "web-apidocs",
+    label: "API and interface documentation",
+    category: "Infrastructure",
+    scope: "web",
+    purpose:
+      "Published API surface — swagger and OpenAPI definitions enumerate endpoints and " +
+      "parameters, extending the attack-surface picture beyond the ports InternetDB observed.",
+    pattern: `site:{domain} (inurl:swagger OR inurl:openapi OR inurl:api-docs OR intitle:"api documentation")`,
+  },
+  {
+    id: "web-buckets",
+    label: "Public cloud storage",
+    category: "Exposure",
+    scope: "web",
+    purpose:
+      "Object-storage buckets naming the target. Misconfigured buckets sit outside the target's " +
+      "own domain, so no site:-scoped dork and no subdomain enumeration will surface them.",
+    pattern: `"{target}" (site:s3.amazonaws.com OR site:blob.core.windows.net OR site:storage.googleapis.com)`,
+  },
 ];
 
 /** Strip scheme, credentials, port, path and leading www. from a target. */

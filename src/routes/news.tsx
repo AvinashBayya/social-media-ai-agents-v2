@@ -22,6 +22,7 @@ import {
   type StoryCluster,
 } from "@/utils/analysis";
 import { reputationOf, TIER_SCORES } from "@/utils/credibility";
+import { collectCrtShSubdomains, type SubdomainFinding } from "@/utils/recon-sources";
 import { ArticleAiPanel } from "@/components/article-ai";
 import { PinButton } from "@/components/pin-button";
 import { ClusterPanel } from "@/components/cluster-panel";
@@ -540,7 +541,8 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         dns: { a: "No records found", mx: "No records found" },
         github: [],
         corporate: { status: "Inactive", jurisdiction: "N/A", fileNo: "N/A", hq: "N/A" },
-        certificates: []
+        certificates: [],
+        certificatesError: null
       };
     }
 
@@ -577,7 +579,11 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       NS: "N/A"
     };
 
-    let certLogs: any[] = [];
+    let certLogs: SubdomainFinding[] = [];
+    // null = the lookup succeeded, so an empty certLogs genuinely means "no
+    // certificates logged". A message here means the lookup failed and the
+    // caller must say so rather than render an empty or invented table.
+    let certificatesError: string | null = null;
 
     if (domainCandidate) {
       ipAddress = "Resolution failed";
@@ -654,28 +660,9 @@ export const fetchOSINT = createServerFn({ method: "GET" })
 
       // 5. Certificate Transparency Logs (crt.sh)
       try {
-        const crtRes = await fetch(`https://crt.sh/?q=%.${encodeURIComponent(domainCandidate)}&output=json`, {
-          signal: AbortSignal.timeout(8000)
-        });
-        if (crtRes.ok) {
-          const crtData = await crtRes.json();
-          if (Array.isArray(crtData)) {
-            const uniqueDomains = new Set<string>();
-            for (const item of crtData.slice(0, 30)) {
-              const name = item.name_value?.toLowerCase() || item.common_name?.toLowerCase();
-              if (name && !uniqueDomains.has(name)) {
-                uniqueDomains.add(name);
-                certLogs.push({
-                  subdomain: name,
-                  issuer: item.issuer_name ? item.issuer_name.split("O=")[1]?.split(",")[0] || "Let's Encrypt" : "DigiCert",
-                  loggedAt: item.entry_timestamp ? item.entry_timestamp.substring(0, 10) : new Date().toISOString().substring(0, 10)
-                });
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error("crt.sh fetch failed:", err);
+        certLogs = await collectCrtShSubdomains(domainCandidate);
+      } catch (err: any) {
+        certificatesError = err?.message ?? String(err);
       }
     }
 
@@ -825,7 +812,8 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       },
       github: repos,
       corporate: corporateData,
-      certificates: certLogs
+      certificates: certLogs,
+      certificatesError
     };
   });
 

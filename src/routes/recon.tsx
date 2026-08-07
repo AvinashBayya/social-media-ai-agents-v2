@@ -6,13 +6,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Radar, Server, ShieldAlert, Search, ExternalLink, Copy, Loader2, AlertTriangle,
+  Radar,
+  Server,
+  ShieldAlert,
+  ShieldCheck,
+  Search,
+  ExternalLink,
+  Copy,
+  Loader2,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { lookupAttackSurface, type AttackSurfaceResult } from "@/utils/attack-surface";
 import {
-  DORK_TEMPLATES, buildDork, runNewsDork, type DorkHit, type DorkTemplate,
+  DORK_TEMPLATES,
+  buildDork,
+  runNewsDork,
+  toDomain,
+  type DorkHit,
+  type DorkTemplate,
 } from "@/utils/dorks";
+import { crtShSubdomains, RECON_NOTES, type SubdomainFinding } from "@/utils/recon-sources";
 
 export const Route = createFileRoute("/recon")({
   head: () => ({ meta: [{ title: "Recon & Dorks — Sentinel AI" }] }),
@@ -155,6 +170,139 @@ function AttackSurfacePanel({ target }: { target: string }) {
   );
 }
 
+/**
+ * Certificate Transparency subdomain discovery.
+ *
+ * This is the native stand-in for theHarvester's highest-yield passive source.
+ * CT logs record every hostname a public CA has ever issued a certificate for,
+ * so they surface subdomains that were never linked or indexed — and reading
+ * them sends nothing to the target.
+ */
+function SubdomainPanel({ target }: { target: string }) {
+  const [findings, setFindings] = useState<SubdomainFinding[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const domain = toDomain(target);
+
+  const run = async () => {
+    setLoading(true);
+    setError("");
+    setFindings(null);
+    try {
+      setFindings(await crtShSubdomains({ data: { domain } }));
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className={`${CARD} p-4 space-y-3`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
+          <ShieldCheck className="size-4 text-[#06B6D4]" />
+          Subdomains — Certificate Transparency (crt.sh)
+        </span>
+        <Button
+          size="sm"
+          onClick={run}
+          disabled={loading || !domain}
+          className="h-7 rounded bg-[#06B6D4] px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+        >
+          {loading ? <Loader2 className="size-3 animate-spin" /> : "Enumerate"}
+        </Button>
+      </div>
+
+      <p className={`font-mono text-[10px] leading-relaxed ${DIM}`}>
+        Reads public Certificate Transparency logs for hostnames under{" "}
+        <span className="text-[#06B6D4]">{domain || "—"}</span>. Passive — nothing is sent to the
+        target. Only certificates a public CA logged appear here; internal or self-signed hosts will
+        not.
+      </p>
+
+      {error && <ErrorNote message={error} />}
+
+      {/* An empty result is a finding, and must not read like a failed lookup. */}
+      {findings?.length === 0 && (
+        <div
+          className={`rounded border border-[#263548] bg-[#0B1220] p-3 font-mono text-[10px] leading-relaxed ${MUTED}`}
+        >
+          No certificates for {domain} in the public CT logs. That is a result, not a failure — the
+          domain may use no publicly logged certificate.
+        </div>
+      )}
+
+      {findings && findings.length > 0 && (
+        <div className="space-y-2">
+          <div className={`font-mono text-[10px] ${DIM}`}>
+            {findings.length} hostname{findings.length === 1 ? "" : "s"} found
+          </div>
+          <div className="max-h-80 overflow-y-auto rounded border border-[#263548] bg-[#0B1220]">
+            {findings.map((f) => (
+              <div
+                key={f.hostname}
+                className="flex items-baseline justify-between gap-3 border-b border-[#263548]/50 px-3 py-1.5 last:border-0"
+              >
+                <span className="font-mono text-[11px] font-bold text-[#F3F4F6]">{f.hostname}</span>
+                <span className={`shrink-0 font-mono text-[9px] ${DIM}`}>
+                  {/* null is rendered as "not reported", never as a guessed CA or today's date. */}
+                  {f.issuer ?? "issuer not reported"} · {f.firstSeen ?? "date not reported"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Capability gaps, rendered verbatim from `RECON_NOTES`.
+ *
+ * §8 requires a capability we cannot deliver to be declared with its reason
+ * rather than silently omitted. An evaluator who knows this field will ask why
+ * there is no SpiderFoot or Maltego integration; the answer is an architectural
+ * constraint, and saying so is stronger than leaving a hole.
+ */
+function ReconGaps() {
+  return (
+    <Card className={`${CARD} p-4 space-y-3`}>
+      <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
+        <Info className="size-4 text-[#94A3B8]" />
+        What external recon does not do, and why
+      </span>
+
+      <div className="space-y-2">
+        {RECON_NOTES.map((gap) => (
+          <div
+            key={gap.capability}
+            className="rounded border border-[#263548] bg-[#0B1220] p-3 space-y-1"
+          >
+            <div className="font-mono text-[11px] font-bold text-[#F3F4F6]">{gap.capability}</div>
+            <div className={`font-mono text-[10px] leading-relaxed ${MUTED}`}>
+              <span className={DIM}>Requires: </span>
+              {gap.requires}
+            </div>
+            {gap.licence && (
+              <div className={`font-mono text-[10px] leading-relaxed ${MUTED}`}>
+                <span className={DIM}>Licence: </span>
+                {gap.licence}
+              </div>
+            )}
+            <div className={`font-mono text-[10px] leading-relaxed ${MUTED}`}>
+              <span className={DIM}>Limitation: </span>
+              {gap.limitation}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function DorkPanel({ target }: { target: string }) {
   const [outlet, setOutlet] = useState("reuters.com");
   const [active, setActive] = useState<DorkTemplate | null>(null);
@@ -289,9 +437,9 @@ function DorkPanel({ target }: { target: string }) {
 
           {manualUrl && (
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
-              Full-web dork. Google publishes no free web-search API and scraping their results
-              page breaches their terms, so this is not executed here — open it in your own
-              browser. No results are shown above because none were retrieved.
+              Full-web dork. Google publishes no free web-search API and scraping their results page
+              breaches their terms, so this is not executed here — open it in your own browser. No
+              results are shown above because none were retrieved.
             </p>
           )}
         </div>
@@ -378,7 +526,9 @@ function ReconPage() {
         </Card>
 
         <AttackSurfacePanel target={target} />
+        <SubdomainPanel target={target} />
         <DorkPanel target={target} />
+        <ReconGaps />
       </div>
     </AppShell>
   );

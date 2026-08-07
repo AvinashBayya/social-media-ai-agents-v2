@@ -128,6 +128,15 @@ async function internetDb(ip: string): Promise<HostSurface> {
     return { ip, scanned: false, ports: [], cpes: [], hostnames: [], tags: [], vulns: [] };
   }
 
+  // A rate limit is temporary and retryable. Collapsing it into the generic
+  // error below would tell the analyst the lookup broke when the correct
+  // advice is to wait — and it must never be read as "nothing exposed".
+  if (res.status === 429) {
+    throw new Error(
+      `Shodan InternetDB rate-limited the request for ${ip} (HTTP 429). Wait and retry.`,
+    );
+  }
+
   if (!res.ok) {
     throw new Error(`Shodan InternetDB returned HTTP ${res.status} for ${ip}.`);
   }
