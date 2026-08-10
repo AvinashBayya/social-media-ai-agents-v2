@@ -477,3 +477,22 @@ describe("language assessment batch reporting", () => {
     expect(assessmentSummary(batch(), 0)).toContain("No articles");
   });
 });
+
+describe("domain reputation overrides", () => {
+  test("reputationOf prioritises custom domain overrides over static table", () => {
+    const overrides = {
+      "custom-defense.in": { tier: "SPECIALIST" as const, type: "specialist" as const },
+      "reuters.com": { tier: "TIER_3" as const, type: "blog" as const },
+    };
+
+    const custom = reputationOf("custom-defense.in", overrides);
+    expect(custom).not.toBeNull();
+    expect(custom?.tier).toBe("SPECIALIST");
+
+    const overriddenReuters = reputationOf("reuters.com", overrides);
+    expect(overriddenReuters?.tier).toBe("TIER_3");
+
+    const defaultHindu = reputationOf("thehindu.com", overrides);
+    expect(defaultHindu?.tier).toBe("TIER_1");
+  });
+});

@@ -207,11 +207,46 @@ export const DOMAIN_REPUTATION: Record<string, DomainEntry> = {
   "substack.com": { tier: "LOW", type: "blog" },
 };
 
-/** Longest-suffix lookup, so news.bbc.co.uk resolves to bbc.co.uk. */
-export function reputationOf(domain: string): DomainEntry | null {
+const DOMAIN_OVERRIDES_KEY = "sentinel_domain_overrides";
+
+export function loadCustomDomainOverrides(): Record<string, DomainEntry> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(DOMAIN_OVERRIDES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveCustomDomainOverrides(overrides: Record<string, DomainEntry>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DOMAIN_OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Longest-suffix lookup, checking custom domain overrides first, then DOMAIN_REPUTATION. */
+export function reputationOf(domain: string, overrides?: Record<string, DomainEntry>): DomainEntry | null {
   if (!domain) return null;
+  const cleanDomain = domain.toLowerCase().trim();
+  const activeOverrides = overrides ?? loadCustomDomainOverrides();
+
+  // Custom user domain overrides take precedence
+  const overrideKey = Object.keys(activeOverrides)
+    .filter((d) => cleanDomain === d || cleanDomain.endsWith(`.${d}`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (overrideKey && activeOverrides[overrideKey]) {
+    return activeOverrides[overrideKey];
+  }
+
+  // Built-in static reputation table
   const key = Object.keys(DOMAIN_REPUTATION)
-    .filter((d) => domain === d || domain.endsWith(`.${d}`))
+    .filter((d) => cleanDomain === d || cleanDomain.endsWith(`.${d}`))
     .sort((a, b) => b.length - a.length)[0];
   return key ? DOMAIN_REPUTATION[key] : null;
 }
@@ -849,4 +884,36 @@ export function loadCustomProfiles(): WeightProfile[] {
 export function saveCustomProfiles(profiles: WeightProfile[]): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profiles.filter((p) => !p.builtin)));
+}
+
+const ACTIVE_CONFIG_KEY = "sentinel_active_credibility_config";
+
+export interface ActiveCredibilityConfig {
+  activeProfileId: string;
+  settings: Record<string, FactorSetting>;
+  customKeywords: { raise: string[]; lower: string[] };
+}
+
+export function loadActiveFactorConfig(): ActiveCredibilityConfig | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ACTIVE_CONFIG_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.settings) {
+      return parsed as ActiveCredibilityConfig;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveFactorConfig(config: ActiveCredibilityConfig): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ACTIVE_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    /* storage unavailable */
+  }
 }

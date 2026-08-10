@@ -125,28 +125,32 @@ function TasksPage() {
     const domain = domainOf(mod1Source) || mod1Source.trim().toLowerCase();
     const entry = reputationOf(domain);
 
-    if (!entry) {
-      setMod1Result({
-        unrated: true,
-        domain,
-        note: `"${mod1Source}" is not in the reputation table. It is unrated, not penalised — add it to DOMAIN_REPUTATION to score it.`,
-      });
-      toast.message("Source not in reputation list — reported as unrated.");
-      return;
-    }
+    const probeArticle: Article = {
+      id: "task-eval",
+      title: `Source evaluation for ${mod1Source}`,
+      source: mod1Source,
+      url: domain.includes(".") ? `https://${domain}` : `https://${domain}.com`,
+      pubDate: new Date().toISOString(),
+      body: `Sample text for ${mod1Source} evaluation. Outbound primary citation link: https://cisa.gov/resources.`,
+    };
 
-    const reputation = TIER_SCORES[entry.tier];
-    const score = Math.round(((reputation * 100) + mod1Transparency + mod1Citations) / 3);
+    const factors = defaultFactors();
+    const result = scoreArticle(probeArticle, [probeArticle], factors);
+    const band = bandFor(result.score);
+
     setMod1Result({
-      unrated: false,
-      domain,
-      tier: entry.tier,
-      reputation,
-      score,
-      declared: true,
-      rating: score > 75 ? "A — High trust" : score > 50 ? "B — Medium trust" : "C — Low trust",
+      unrated: !entry,
+      domain: domain || mod1Source,
+      tier: entry?.tier ?? "UNRATED",
+      reputation: entry ? TIER_SCORES[entry.tier] : 0.5,
+      score: result.score !== null ? Math.round(result.score * 100) : 50,
+      confidence: result.confidence,
+      breakdown: result.breakdown,
+      skipped: result.skipped,
+      explanation: result.explanation,
+      rating: band.label,
     });
-    toast.success("Source evaluated against the reputation list.");
+    toast.success("Source evaluated using full Module 1 credibility engine.");
   };
 
   // Module 2 — content analysis via the configured LLM
@@ -328,28 +332,31 @@ function TasksPage() {
 
                 {mod1Result && (
                   <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2 text-[10px]">
-                    {mod1Result.unrated ? (
-                      <p className="text-[#F59E0B] leading-relaxed">{mod1Result.note}</p>
-                    ) : (
-                      <>
-                        <div className="flex justify-between">
-                          <span>Composite score:</span>
-                          <strong className="text-white font-bold">{mod1Result.score}/100</strong>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Domain reputation ({mod1Result.domain}):</span>
-                          <span className="text-[#06B6D4] font-bold">{mod1Result.reputation.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Rating:</span>
-                          <strong className="text-white">{mod1Result.rating}</strong>
-                        </div>
-                        <p className="border-t border-[#263548]/30 pt-1.5 text-[9px] leading-relaxed text-[#94A3B8]">
-                          Reputation is from the editable domain list. Transparency and citation
-                          depth are analyst-declared slider values, not measurements. Cross-source
-                          verification is computed per article on the Source Credibility page, not here.
-                        </p>
-                      </>
+                    <div className="flex justify-between items-center border-b border-[#263548]/40 pb-1.5">
+                      <span>Composite trust score ({mod1Result.domain}):</span>
+                      <strong className="text-white font-bold text-xs">{mod1Result.score}/100 ({mod1Result.rating})</strong>
+                    </div>
+                    <div className="flex justify-between text-[9px] text-[#94A3B8]">
+                      <span>Domain reputation ({mod1Result.tier}):</span>
+                      <span className="text-[#06B6D4] font-bold">{mod1Result.reputation.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-[9px] text-[#94A3B8]">
+                      <span>Engine confidence:</span>
+                      <span className="text-white">{((mod1Result.confidence || 0) * 100).toFixed(0)}%</span>
+                    </div>
+                    <p className="pt-1 text-[9px] leading-relaxed text-[#94A3B8]">
+                      {mod1Result.explanation}
+                    </p>
+                    {mod1Result.breakdown && mod1Result.breakdown.length > 0 && (
+                      <div className="space-y-1 border-t border-[#263548]/30 pt-1.5">
+                        <span className="text-[9px] font-bold text-[#F3F4F6] uppercase">Factor Breakdown:</span>
+                        {mod1Result.breakdown.map((b: any) => (
+                          <div key={b.id} className="flex justify-between text-[9px] text-[#94A3B8]">
+                            <span>{b.name}:</span>
+                            <span className="text-[#06B6D4]">score {b.rawScore.toFixed(2)} (w {b.weight.toFixed(2)})</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,15 +10,21 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
   Gauge, ChevronDown, ChevronRight, Loader2, AlertTriangle, RotateCcw,
-  Save, Sparkles, Trash2, Info, X,
+  Save, Sparkles, Trash2, Info, X, Shield, Plus, Globe,
 } from "lucide-react";
 import { fetchNews } from "./news";
 import { getActiveTarget } from "@/utils/active-target";
 import {
   applyProfile, bandFor, builtinProfiles, defaultFactors, domainOf,
   loadCustomProfiles, saveCustomProfiles, scoreCorpus,
+  loadActiveFactorConfig, saveActiveFactorConfig,
+  loadCustomDomainOverrides, saveCustomDomainOverrides, reputationOf,
   type Article, type CredibilityFactor, type CredibilityScore, type WeightProfile,
+  type DomainEntry, type SourceTier, type SourceType, TIER_SCORES,
 } from "@/utils/credibility";
+import {
+  assessLanguageFor, assessmentSummary, type LanguageAssessment,
+} from "@/utils/credibility-llm";
 
 export const Route = createFileRoute("/sources")({
   head: () => ({ meta: [{ title: "Source Credibility — Sentinel AI" }] }),
@@ -55,9 +62,44 @@ function SourcesPage() {
   const [kwSide, setKwSide] = useState<"raise" | "lower">("lower");
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // LLM tone assessment state
+  const [languageAssessments, setLanguageAssessments] = useState<Record<string, LanguageAssessment>>({});
+  const [assessingTone, setAssessingTone] = useState(false);
+  const [toneSummaryText, setToneSummaryText] = useState("");
+
+  // Domain overrides state
+  const [domainOverrides, setDomainOverrides] = useState<Record<string, DomainEntry>>({});
+  const [newDomain, setNewDomain] = useState("");
+  const [newDomainTier, setNewDomainTier] = useState<SourceTier>("SPECIALIST");
+  const [newDomainType, setNewDomainType] = useState<SourceType>("specialist");
+
+  // Load persistent storage on mount
   useEffect(() => {
     setProfiles([...builtinProfiles(), ...loadCustomProfiles()]);
+    setDomainOverrides(loadCustomDomainOverrides());
+
+    const savedConfig = loadActiveFactorConfig();
+    if (savedConfig) {
+      setActiveProfileId(savedConfig.activeProfileId);
+      setKeywordsRaise(savedConfig.customKeywords.raise || []);
+      setKeywordsLower(savedConfig.customKeywords.lower || []);
+      setFactors((prev) =>
+        prev.map((f) => {
+          const s = savedConfig.settings[f.id];
+          return s ? { ...f, weight: s.weight, enabled: s.enabled } : f;
+        }),
+      );
+    }
   }, []);
+
+  // Save active factor configuration whenever it changes
+  useEffect(() => {
+    saveActiveFactorConfig({
+      activeProfileId,
+      settings: Object.fromEntries(factors.map((f) => [f.id, { weight: f.weight, enabled: f.enabled }])),
+      customKeywords: { raise: keywordsRaise, lower: keywordsLower },
+    });
+  }, [factors, activeProfileId, keywordsRaise, keywordsLower]);
 
   // Ingest the live corpus. No seed data — an empty feed shows as empty.
   useEffect(() => {
@@ -88,10 +130,14 @@ function SourcesPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Live recompute — this is what makes the sliders feel immediate.
+  // Live recompute with custom keywords & language assessments
   const scored = useMemo(
-    () => scoreCorpus(corpus, factors, { customKeywords: { raise: keywordsRaise, lower: keywordsLower } }),
-    [corpus, factors, keywordsRaise, keywordsLower],
+    () =>
+      scoreCorpus(corpus, factors, {
+        customKeywords: { raise: keywordsRaise, lower: keywordsLower },
+        language: languageAssessments,
+      }),
+    [corpus, factors, keywordsRaise, keywordsLower, languageAssessments],
   );
 
   const setWeight = useCallback((id: string, weight: number) => {
@@ -101,6 +147,53 @@ function SourcesPage() {
   const toggleFactor = useCallback((id: string, enabled: boolean) => {
     setFactors((prev) => prev.map((f) => (f.id === id ? { ...f, enabled } : f)));
   }, []);
+
+  const handleRunToneAssessment = async () => {
+    if (corpus.length === 0) {
+      toast.error("No articles available in the current corpus to assess.");
+      return;
+    }
+    setAssessingTone(true);
+    toast.info(`Evaluating linguistic markers for ${corpus.length} article(s)...`);
+    try {
+      const batch = await assessLanguageFor(corpus);
+      setLanguageAssessments(batch.assessments);
+      const summary = assessmentSummary(batch, corpus.length);
+      setToneSummaryText(summary);
+      if (batch.failures.length > 0) {
+        toast.warning(summary);
+      } else {
+        toast.success(summary);
+      }
+      // Ensure linguistic_markers factor is enabled
+      setFactors((prev) => prev.map((f) => (f.id === "linguistic_markers" ? { ...f, enabled: true } : f)));
+    } catch (err: any) {
+      toast.error(`Tone assessment failed: ${err?.message ?? String(err)}`);
+    } finally {
+      setAssessingTone(false);
+    }
+  };
+
+  const handleAddDomainOverride = () => {
+    if (!newDomain.trim()) return;
+    const clean = newDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const updated = {
+      ...domainOverrides,
+      [clean]: { tier: newDomainTier, type: newDomainType },
+    };
+    setDomainOverrides(updated);
+    saveCustomDomainOverrides(updated);
+    setNewDomain("");
+    toast.success(`Domain reputation override added for ${clean}.`);
+  };
+
+  const handleDeleteDomainOverride = (domainKey: string) => {
+    const updated = { ...domainOverrides };
+    delete updated[domainKey];
+    setDomainOverrides(updated);
+    saveCustomDomainOverrides(updated);
+    toast.success(`Domain override for ${domainKey} removed.`);
+  };
 
   const selectProfile = (id: string) => {
     const p = profiles.find((x) => x.id === id);
@@ -186,7 +279,6 @@ function SourcesPage() {
                     <Switch
                       checked={f.enabled}
                       onCheckedChange={(v) => toggleFactor(f.id, v)}
-                      disabled={f.requiresLlm}
                       aria-label={`Enable ${f.name}`}
                     />
                   </div>
@@ -200,9 +292,29 @@ function SourcesPage() {
                 />
                 <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>{f.description}</p>
                 {f.requiresLlm && (
-                  <p className="font-mono text-[9px] text-[#8B5CF6]">
-                    Not implemented in this pass — registered so the gap is visible.
-                  </p>
+                  <div className="space-y-1.5 pt-1">
+                    <Button
+                      size="sm"
+                      onClick={handleRunToneAssessment}
+                      disabled={assessingTone}
+                      className="h-7 w-full rounded bg-[#8B5CF6] font-mono text-[9px] font-bold text-white hover:bg-[#8B5CF6]/90 disabled:opacity-50"
+                    >
+                      {assessingTone ? (
+                        <>
+                          <Loader2 className="mr-1 size-3 animate-spin" /> Evaluating Tone with LLM…
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-1 size-3" /> Analyze Tone with AI
+                        </>
+                      )}
+                    </Button>
+                    {toneSummaryText && (
+                      <p className="font-mono text-[9px] leading-relaxed text-[#A78BFA]">
+                        {toneSummaryText}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             ))}
@@ -223,6 +335,65 @@ function SourcesPage() {
                 <Save className="mr-1 size-3" /> Save as profile
               </Button>
             </div>
+          </Card>
+
+          {/* Domain Reputation Overrides */}
+          <Card className={`${CARD} space-y-3 p-4`}>
+            <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
+              <Globe className="size-4 text-[#06B6D4]" /> Custom Domain Ratings
+            </span>
+            <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
+              Override editorial tiers for specific news domains or add regional sources to the reputation table.
+            </p>
+            <div className="space-y-1.5">
+              <div className="flex gap-1">
+                <Input
+                  value={newDomain}
+                  onChange={(e) => setNewDomain(e.target.value)}
+                  placeholder="domain.com (e.g. defensenews.in)"
+                  className="h-7 border-[#263548] bg-[#0B1220] font-mono text-[10px] text-[#F3F4F6]"
+                />
+                <select
+                  value={newDomainTier}
+                  onChange={(e) => setNewDomainTier(e.target.value as SourceTier)}
+                  className="h-7 rounded border border-[#263548] bg-[#0B1220] px-1 font-mono text-[9px] text-[#F3F4F6]"
+                >
+                  <option value="TIER_1">Tier 1 (0.90)</option>
+                  <option value="SPECIALIST">Specialist (0.85)</option>
+                  <option value="TIER_2">Tier 2 (0.70)</option>
+                  <option value="TIER_3">Tier 3 (0.50)</option>
+                  <option value="LOW">Low (0.25)</option>
+                </select>
+                <Button
+                  size="sm"
+                  onClick={handleAddDomainOverride}
+                  className="h-7 rounded bg-[#06B6D4] px-2 font-mono text-[9px] font-bold text-[#0B1220]"
+                >
+                  <Plus className="size-3" />
+                </Button>
+              </div>
+            </div>
+
+            {Object.keys(domainOverrides).length > 0 && (
+              <div className="space-y-1 border-t border-[#263548] pt-2">
+                {Object.entries(domainOverrides).map(([domainKey, entry]) => (
+                  <div key={domainKey} className="flex items-center justify-between gap-1 rounded bg-[#0B1220] p-1.5">
+                    <div className="font-mono text-[9px] text-[#F3F4F6]">
+                      <span className="font-bold">{domainKey}</span>{" "}
+                      <span className={DIM}>· {entry.tier} ({TIER_SCORES[entry.tier].toFixed(2)})</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => handleDeleteDomainOverride(domainKey)}
+                      className="h-5 w-5 rounded p-0 text-[#EF4444] hover:bg-[#263548]"
+                      aria-label={`Remove override for ${domainKey}`}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
 
           {/* Profiles */}
