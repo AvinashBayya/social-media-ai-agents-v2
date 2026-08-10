@@ -27,13 +27,28 @@ Plus real-time monitoring of user-defined subjects, and data mining at scale.
 
 The frontend is good and worth keeping. Everything behind it needs building: no database (all state is localStorage), no auth, no backend. Roughly 15–20% of PS-18 is covered.
 
-**Deployment drift — the live app is ahead of this repo.** The Azure container app
-`sentinel-web` runs image `v10`, which was built from an authentication system that is **not
-in this repository**: it was committed, deployed, then reverted out of `main`. The running app
-therefore gates every route behind a login that no source here produces, and it **cannot be
-rebuilt from this tree**. The discarded work is recoverable at `1f3259f` in the reflog.
-Resolve this before the next deploy — either restore the auth commits or roll Azure back to
-`v9`, which matches this source.
+**Deployment drift — RESOLVED 2026-08-10.** The container app `sentinel-web` now runs
+`v13`, built from `main` by `az acr build` and serving revision `sentinel-web--0000011`.
+The tree and the live app match again, and the app is rebuildable from source.
+
+The drift this replaces: `v10` was built from an auth system committed, deployed, then
+reverted out of `main`, so the live app gated every route behind a login no source here
+produced. That work is now pushed as branch `backup/pre-auth-rollback` (tip `1f3259f`, auth
+at `214f0df`) and tag `pre-auth-rollback-20260806` — no longer reflog-only. It is **not**
+restored; the route gate on `main` is the disclosed client-side demo session
+(`src/utils/demo-session.ts`), which is not authentication and says so.
+
+Two traps when deploying, both hit on 2026-08-10:
+- **No Docker locally.** Build with `az acr build`, never `docker build`.
+- **The Azure CLI crashes while streaming build logs on Windows** — Vite prints `✓`, and
+  cp1252 cannot encode it (`UnicodeEncodeError`, `_stream_utils.py`). A transient DNS
+  failure on the ACR log-blob host produces the same *symptom*. **Both are client-side log
+  streaming only: the remote build still completes and pushes.** Never conclude a build
+  failed from CLI output alone — check
+  `az acr repository show -n $ACR --image sentinel-web:<tag> --query createdTime`. Setting
+  `PYTHONIOENCODING=utf-8` avoids the encoding crash.
+- Leftover `DATABASE_URL`, `SESSION_SECRET` and `seed-admin-password` remain configured on
+  the container app from the `v10` auth deployment. Nothing on `main` reads them.
 
 `src/utils/gemini.ts` has been **deleted**. It is replaced by `src/utils/llm.ts` — see the LLM section below.
 
