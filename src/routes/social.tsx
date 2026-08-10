@@ -24,6 +24,7 @@ import {
   readMonitor,
   socialReddit,
   socialTelegram,
+  socialMastodon,
   socialProfiles,
   socialCredentials,
   JETSTREAM_ENDPOINT,
@@ -102,7 +103,7 @@ function SocialPage() {
   const [profiles, setProfiles] = useState<BlueskyProfile[]>([]);
 
   const [pullTarget, setPullTarget] = useState("");
-  const [pullBusy, setPullBusy] = useState<"reddit" | "telegram" | null>(null);
+  const [pullBusy, setPullBusy] = useState<"reddit" | "telegram" | "mastodon" | null>(null);
   const [pullError, setPullError] = useState("");
   const [pulled, setPulled] = useState<SocialPost[]>([]);
   /** null = not yet checked. Distinct from false, which is "checked, absent". */
@@ -257,7 +258,7 @@ function SocialPage() {
     }
   }, [active, allPosts]);
 
-  const pull = async (kind: "reddit" | "telegram") => {
+  const pull = async (kind: "reddit" | "telegram" | "mastodon") => {
     const target = pullTarget.trim();
     if (!target) return;
     setPullBusy(kind);
@@ -266,7 +267,9 @@ function SocialPage() {
       const res: any =
         kind === "reddit"
           ? await socialReddit({ data: { query: target, limit: 50 } })
-          : await socialTelegram({ data: { channel: target, limit: 30 } });
+          : kind === "mastodon"
+            ? await socialMastodon({ data: { tag: target, limit: 40 } })
+            : await socialTelegram({ data: { channel: target, limit: 30 } });
       setPulled((prev) => {
         const seen = new Set(prev.map((p) => p.id));
         return [...prev, ...(res as SocialPost[]).filter((p) => !seen.has(p.id))];
@@ -455,12 +458,12 @@ function SocialPage() {
             <CardContent className="p-4">
               <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
                 <Link2 className="size-3.5 text-[#8B5CF6]" />
-                Pull Reddit / Telegram
+                Pull Mastodon / Reddit / Telegram
               </h3>
               <p className="mt-1 text-[10px] leading-relaxed text-[#64748B]">
-                Fetched server-side into the same buffer, so monitors and CIB analysis span all
-                three platforms. Reddit takes a search query; Telegram takes a public channel
-                handle.
+                Fetched server-side into the same buffer, so monitors and CIB analysis span every
+                platform. Mastodon takes a hashtag; Reddit takes a search query; Telegram takes a
+                public channel handle.
               </p>
               {redditReady === false && (
                 <p className="mt-1.5 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#F59E0B]">
@@ -495,6 +498,21 @@ function SocialPage() {
                   className="h-7 flex-1 text-[10px]"
                 >
                   {pullBusy === "reddit" ? <Loader2 className="size-3 animate-spin" /> : "Reddit"}
+                </Button>
+                {/* Keyless and unrestricted — the only pull needing no credential. */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pullBusy !== null || !pullTarget.trim()}
+                  onClick={() => pull("mastodon")}
+                  title="Mastodon hashtag timeline (no credential required)"
+                  className="h-7 flex-1 text-[10px]"
+                >
+                  {pullBusy === "mastodon" ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    "Mastodon"
+                  )}
                 </Button>
                 <Button
                   size="sm"

@@ -49,7 +49,7 @@ export class SocialUnavailableError extends Error {
 
 // ─── Post shape ────────────────────────────────────────────────────────────
 
-export type Platform = "bluesky" | "reddit" | "telegram";
+export type Platform = "bluesky" | "reddit" | "telegram" | "mastodon";
 
 export interface SocialPost {
   /** AT URI for Bluesky, fullname for Reddit, channel-index for Telegram. */
@@ -1016,6 +1016,192 @@ export async function fetchTelegramChannel(channel: string, limit = 30): Promise
   return posts;
 }
 
+// ─── 5. Mastodon collector (server-side) ───────────────────────────────────
+
+/**
+ * Mastodon hashtag timelines — the second genuinely open social feed.
+ *
+ * Verified live 2026-08-10. Mastodon is federated, so there is no single API:
+ * each instance decides what it serves anonymously, and the difference is not
+ * cosmetic.
+ *   mastodon.social  — tag timeline 200, public timeline 422
+ *   mstdn.social     — both 200
+ *   infosec.exchange — both 422 (anonymous access restricted)
+ *
+ * A 422 is the instance declining to serve unauthenticated readers, NOT an
+ * empty result, and the two are reported differently below. Hashtag timelines
+ * are used rather than `/api/v2/search` because search requires a token on
+ * every instance tested.
+ *
+ * Worth noting for Module 3: a Mastodon status carries more CIB-relevant signal
+ * per post than a Jetstream event does — `account.bot` is self-declared,
+ * `account.created_at` gives account maturity without a second profile call, and
+ * `reblog` marks a boost explicitly rather than by inference.
+ */
+export const MASTODON_INSTANCES = ["mastodon.social", "mstdn.social"] as const;
+
+/** First-choice instance; the rest are fallbacks an analyst can select. */
+export const MASTODON_DEFAULT_INSTANCE = MASTODON_INSTANCES[0];
+
+/** Mastodon status fields we read. Everything is optional upstream. */
+interface MastodonStatus {
+  id?: unknown;
+  created_at?: unknown;
+  url?: unknown;
+  uri?: unknown;
+  content?: unknown;
+  language?: unknown;
+  account?: { acct?: unknown; url?: unknown };
+  card?: { url?: unknown } | null;
+  reblog?: unknown;
+}
+
+/**
+ * Mastodon serves `content` as HTML. Strip tags to recover the text an analyst
+ * reads, decoding only the five entities the API actually emits — a general
+ * HTML decoder here would be a needless parser on untrusted input.
+ */
+export function stripMastodonHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Every outbound URL on a status: anchors in the body plus the link card. */
+export function mastodonLinks(html: string, cardUrl?: unknown): string[] {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/href="([^"]+)"/g)) {
+    const href = m[1];
+    // Hashtag and mention anchors point back into the fediverse UI; they are
+    // navigation, not amplified content, and would drown the real links.
+    if (/\/tags\/|\/@/.test(href)) continue;
+    out.add(href);
+  }
+  if (typeof cardUrl === "string" && cardUrl) out.add(cardUrl);
+  return [...out];
+}
+
+/**
+ * Fetch recent public statuses carrying `tag` from one instance.
+ *
+ * Throws on any failure. An empty array means the tag genuinely has no recent
+ * public posts on that instance — which, on a federated network, is a statement
+ * about that instance's view and not about the whole network.
+ */
+export async function fetchMastodonTag(
+  tag: string,
+  instance: string = MASTODON_DEFAULT_INSTANCE,
+  limit = 40,
+): Promise<SocialPost[]> {
+  const clean = tag.trim().replace(/^#/, "");
+  if (!clean) throw new SocialUnavailableError("No hashtag supplied for Mastodon.", "mastodon");
+
+  const host = instance
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+  if (!host) throw new SocialUnavailableError("No Mastodon instance supplied.", "mastodon");
+
+  const key = `mastodon:${host}:${clean}:${limit}`;
+  const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
+  if (hit) return hit;
+
+  const url =
+    `https://${host}/api/v1/timelines/tag/${encodeURIComponent(clean)}` +
+    `?limit=${Math.min(Math.max(limit, 1), 40)}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (err: any) {
+    throw new SocialUnavailableError(
+      `Mastodon request to ${host} failed: ${err?.message ?? String(err)}`,
+      "mastodon",
+    );
+  }
+
+  // 422 is how an instance says "not for anonymous readers". Reporting it as an
+  // empty timeline would suggest the tag is unused, which is a different claim.
+  if (res.status === 422 || res.status === 401) {
+    throw new SocialUnavailableError(
+      `${host} does not serve this timeline to unauthenticated readers (HTTP ${res.status}). ` +
+        `Instances choose this individually — try another instance, e.g. ` +
+        `${MASTODON_INSTANCES.filter((i) => i !== host)[0] ?? "mstdn.social"}. No posts were ` +
+        `returned, which is not the same as the hashtag being unused.`,
+      "mastodon",
+      res.status,
+    );
+  }
+  if (res.status === 429) {
+    throw new SocialUnavailableError(
+      `${host} rate limited this request (HTTP 429). No results were returned — this is not ` +
+        `the same as no matching posts.`,
+      "mastodon",
+      429,
+    );
+  }
+  if (!res.ok) {
+    throw new SocialUnavailableError(
+      `Mastodon instance ${host} returned HTTP ${res.status}.`,
+      "mastodon",
+      res.status,
+    );
+  }
+
+  const json: unknown = await res.json().catch(() => null);
+  if (!Array.isArray(json)) {
+    throw new SocialUnavailableError(
+      `Mastodon instance ${host} returned an unexpected payload (expected a JSON array).`,
+      "mastodon",
+    );
+  }
+
+  const posts: SocialPost[] = [];
+  for (const raw of json as MastodonStatus[]) {
+    const id = typeof raw?.id === "string" ? raw.id : null;
+    const acct = typeof raw?.account?.acct === "string" ? raw.account.acct : null;
+    if (!id || !acct) continue;
+
+    const html = typeof raw.content === "string" ? raw.content : "";
+    const text = stripMastodonHtml(html);
+    if (!text) continue;
+
+    // A bare local handle is ambiguous across instances; qualify it so the same
+    // account is not counted as two, and two accounts are not merged into one.
+    const qualified = acct.includes("@") ? acct : `${acct}@${host}`;
+
+    posts.push({
+      id: `mastodon:${host}:${id}`,
+      platform: "mastodon",
+      author: `@${qualified}`,
+      authorId: qualified,
+      text,
+      createdAt: typeof raw.created_at === "string" ? raw.created_at : "",
+      url: typeof raw.url === "string" ? raw.url : typeof raw.uri === "string" ? raw.uri : "",
+      // The instance reports the author's declared language; this is not our
+      // detection, matching how `langs` is sourced for Bluesky.
+      langs: typeof raw.language === "string" && raw.language ? [raw.language] : [],
+      links: mastodonLinks(html, raw.card?.url),
+    });
+  }
+
+  posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  cacheSet(genericCache, key, posts);
+  return posts;
+}
+
 // ─── Platform availability, stated rather than hidden ──────────────────────
 
 export interface PlatformNote {
@@ -1064,6 +1250,18 @@ export const PLATFORM_NOTES: PlatformNote[] = [
       "is an access-policy change, not the documented rate limit, and no header works around " +
       "it. Registering a free script app at reddit.com/prefs/apps and setting REDDIT_CLIENT_ID " +
       "and REDDIT_CLIENT_SECRET restores search at 100 queries/minute.",
+  },
+  {
+    platform: "Mastodon",
+    available: true,
+    method: "public hashtag timelines, unauthenticated (api/v1/timelines/tag)",
+    limitation:
+      "Federated, so coverage is per-instance rather than network-wide: a tag timeline shows " +
+      "what that instance has seen, not everything posted anywhere. Instances also choose " +
+      "individually whether to serve anonymous readers — mastodon.social and mstdn.social do, " +
+      "infosec.exchange returns 422 — so an instance refusing us is reported as a refusal, not " +
+      "as an unused hashtag. Full-text search needs a token on every instance tested, so " +
+      "collection is by hashtag.",
   },
   {
     platform: "Telegram",
@@ -1121,6 +1319,10 @@ export const socialReddit = createServerFn({ method: "POST" })
 export const socialTelegram = createServerFn({ method: "POST" })
   .validator((d: { channel: string; limit?: number }) => d)
   .handler(async ({ data }) => fetchTelegramChannel(data.channel, data.limit));
+
+export const socialMastodon = createServerFn({ method: "POST" })
+  .validator((d: { tag: string; instance?: string; limit?: number }) => d)
+  .handler(async ({ data }) => fetchMastodonTag(data.tag, data.instance, data.limit));
 
 /**
  * Reports whether Reddit collection is actually configured.

@@ -7,21 +7,36 @@
 ## 1. Active Task State & Progress Roadmap
 
 ### Current Focus
-- **Task:** Project Memory System & Non-Destructive Update Protocol Setup (Active)
+- **Task:** Module 3 collection integrity — Reddit OAuth migration, Mastodon added, fabricated Meta feed removed (Complete)
 - **Phase:** PS-18 Pre-selection Demo Integrity & Memory Infrastructure
-- **Last Verified:** 2026-08-10 — 415 unit tests passing (`bun test`).
+- **Last Verified:** 2026-08-10 — 438 unit tests passing (`bun test`), export audit clean, `bun run build` green.
+
+### Live collection status — verified 2026-08-10
+Re-verify with the `/crawlers` probe rather than trusting this table; it is a snapshot.
+
+| Source | State | Note |
+|---|---|---|
+| Bluesky Jetstream | Working | Browser-side WS; 5 posts in ~2s |
+| Bluesky AppView | Working | `getProfile` / `getProfiles` / `getAuthorFeed` |
+| Mastodon | Working | Keyless hashtag timelines; per-instance, some return 422 |
+| Telegram | Working | `t.me/s/{channel}` previews |
+| **Reddit** | **Blocked** | **All unauthenticated endpoints now 403. Needs `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` from a free script app.** |
+| crt.sh | Flaky | Same URL gave 404 / timeout / 200-in-43s. Retries once; 50s budget |
+| GDELT | Rate limited | 429 at 1 req/5s, as documented |
 
 ### Completed Milestones
 - [x] **Container & Azure Deployment Drift Resolution (2026-08-10)**: `sentinel-web` running `v13` from `main` (`sentinel-web--0000011`). Replaced broken v10 auth drift with demo session (`src/utils/demo-session.ts`).
 - [x] **Data Contract Freeze (2026-08-06)**: Six inter-developer boundary types frozen in `src/types/core.ts` (Article, Post, Entity, Finding, MediaAsset, VideoAsset) + adapters in `src/types/core-adapters.ts`.
 - [x] **Module 1 (Source Credibility)**: Synchronous scoring in `credibility.ts`, 7 PS-18 factors, language marker assessment in `credibility-llm.ts`.
 - [x] **Module 2 (Open-Source Content Analysis)**: Topic clustering, stance detection, entity extraction in `analysis.ts` & `analysis-llm.ts`.
-- [x] **Module 3 (Social Media Analysis)**: Bluesky Jetstream WS, public AppView, Reddit OAuth, Telegram preview, CIB signal detection in `cib.ts` & `social.ts`.
+- [x] **Module 3 (Social Media Analysis)**: Bluesky Jetstream WS, public AppView, Reddit OAuth, Mastodon hashtag timelines, Telegram preview, CIB signal detection in `cib.ts` & `social.ts`.
+- [x] **Module 3 Collection Integrity (2026-08-10)**: Reddit migrated to OAuth after unauthenticated access started returning 403 everywhere; Mastodon added as a keyless second open feed; the fabricated Instagram/Facebook cache and both fake scraper scripts removed; `/crawlers` replaced its invented throughput figures with a live reachability probe.
 - [x] **Module 4 (Media Analysis & Provenance)**: C2PA manifest verification, EXIF parsing, Tesseract OCR, DCT pHash in `imaging.ts` & `imaging-client.ts`.
 - [x] **Module 5 (Reports & GIS)**: Provider-agnostic LLM client (`llm.ts`), citation validator, PDF export, UCDP/USGS/GDELT integration in `reports.ts`, `geo.ts`, `geo-sources.ts`.
 - [x] **Project Memory & Preservation System (2026-08-10)**: Created `PROJECT_MEMORY.md`, `.claude/rules/memory-and-preservation.md`, updated `CLAUDE.md`, and added `scripts/check-exports.ts`.
 
 ### Pending Backlog / Roadmap
+0. **Obtain the Reddit credential** — free script app at reddit.com/prefs/apps. Reddit collection is dead without it, and it is the only blocker on a third live platform.
 1. **Module 1 Enhancement**: Persist custom weight profiles to a backend API (currently localStorage `sentinel_credibility_profiles`).
 2. **Module 5 GIS Enhancement**: Add UCDP API Token configuration UI for conflict event layer.
 3. **vLLM Self-Hosted Migration**: Prepare config switch once Azure NC8as-T4 GPU quota is approved.
@@ -69,7 +84,10 @@ This registry lists key files and their exported symbols. When adding features, 
 - **[credibility-llm.ts](file:///d:/social_media_research/src/utils/credibility-llm.ts)**: Module 1 linguistic factor via LLM.
   - Exports: `assessArticleLanguage`, `assessLanguageFor`, `assessmentSummary`.
 - **[social.ts](file:///d:/social_media_research/src/utils/social.ts)**: Module 3 collection & monitors.
-  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`.
+  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchMastodonTag`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`.
+  - **Removed 2026-08-10 (deliberate, not a regression):** `socialCache`. It read `data/social_cache.json`, whose only writers were `scripts/agent-scraper.js` and `scripts/agent_scraper.py` — both fabricated Instagram/Facebook posts with `Math.random()` engagement counts. All 128 records were invented. Both scripts and the reader are deleted; do not restore them (see §4 rule 2).
+- **[collector-health.ts](file:///d:/social_media_research/src/utils/collector-health.ts)**: Live reachability probe for every collector endpoint (replaces the invented `/crawlers` telemetry).
+  - Exports: `probeCollectors`, `collectorHealth`, `CollectorProbe`, `ProbeStatus`.
 - **[cib.ts](file:///d:/social_media_research/src/utils/cib.ts)**: Module 3 Coordinated Inauthentic Behavior detection.
   - Exports: `analyseCib`, `assessCluster`, `temporalSynchrony`, `contentDuplication`, `accountMaturity`, `handlePatterns`, `amplification`.
 - **[imaging.ts](file:///d:/social_media_research/src/utils/imaging.ts)** & **[imaging-client.ts](file:///d:/social_media_research/src/utils/imaging-client.ts)**: Module 4 media & provenance.

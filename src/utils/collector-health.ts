@@ -93,6 +93,17 @@ const SPECS: ProbeSpec[] = [
     endpoint: "https://t.me/s/BNONews",
   },
   {
+    id: "mastodon",
+    name: "Mastodon hashtag timeline",
+    module: "M3",
+    endpoint: "https://mastodon.social/api/v1/timelines/tag/osint?limit=1",
+    explain: (s) =>
+      s === 422
+        ? "This instance does not serve timelines to unauthenticated readers. Instances choose " +
+          "individually; another instance may work."
+        : null,
+  },
+  {
     id: "crtsh",
     name: "crt.sh certificate transparency",
     module: "M2",
