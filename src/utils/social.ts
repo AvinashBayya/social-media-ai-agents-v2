@@ -901,3 +901,40 @@ export const socialReddit = createServerFn({ method: "POST" })
 export const socialTelegram = createServerFn({ method: "POST" })
   .validator((d: { channel: string; limit?: number }) => d)
   .handler(async ({ data }) => fetchTelegramChannel(data.channel, data.limit));
+
+export const socialCache = createServerFn({ method: "POST" })
+  .validator((d: { query?: string }) => d)
+  .handler(async ({ data }) => {
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const cachePath = path.join(process.cwd(), "data/social_cache.json");
+      const raw = await fs.readFile(cachePath, "utf-8");
+      const parsed: any[] = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+
+      const q = (data?.query || "").toLowerCase().trim();
+      const filtered = q
+        ? parsed.filter(
+            (item) =>
+              (item.query && item.query.toLowerCase().includes(q)) ||
+              (item.text && item.text.toLowerCase().includes(q)) ||
+              (item.author && item.author.toLowerCase().includes(q)),
+          )
+        : parsed;
+
+      return filtered.map((item, idx) => ({
+        id: item.id || `cache-${idx}`,
+        platform: item.platform || "Meta Cache",
+        author: item.author || "scraped_account",
+        authorId: item.author || "scraped_account",
+        text: item.text || "",
+        createdAt: item.pubDate || new Date().toISOString(),
+        url: item.url || "#",
+        likes: item.likes || 0,
+        shares: item.shares || 0,
+      }));
+    } catch {
+      return [];
+    }
+  });

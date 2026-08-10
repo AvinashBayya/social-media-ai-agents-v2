@@ -10,7 +10,7 @@ import {
   ChevronRight, Activity, Link2, Users,
 } from "lucide-react";
 import {
-  JetstreamClient, readMonitor, socialReddit, socialTelegram, socialProfiles,
+  JetstreamClient, readMonitor, socialReddit, socialTelegram, socialProfiles, socialCache,
   JETSTREAM_ENDPOINT, JETSTREAM_INSTANCES, PLATFORM_NOTES,
   type JetstreamStatus, type Monitor, type MonitorReading, type SocialPost,
   type BlueskyProfile,
@@ -22,35 +22,14 @@ import {
 import { assessSocialCorpus } from "@/utils/social-credibility";
 import { PinButton } from "@/components/pin-button";
 
-/**
- * Social Intelligence — Module 3 (PS-18 §6.3).
- *
- * Everything on the previous version of this page was invented: five platforms
- * with hardcoded 24h volumes ("482K"), "Channel Integrity" percentages, "8s ago"
- * timestamps that never changed, and four trending hashtags with fixed counts.
- *
- * What replaces it is a live WebSocket to Bluesky's Jetstream, held BY THE
- * BROWSER — the container scales to zero, so a server-side socket would be torn
- * down between requests. The post rate shown is counted, the connection state is
- * the socket's actual state, and a dropped connection shows as disconnected and
- * reconnects rather than replaying anything.
- */
-
 export const Route = createFileRoute("/social")({
   head: () => ({ meta: [{ title: "Social Intelligence — Sentinel AI" }] }),
   component: SocialPage,
 });
 
 const MONITOR_KEY = "sentinel_social_monitors";
-/** Posts held for rendering. The full ring buffer is larger; this is the visible tail. */
 const RENDER_LIMIT = 120;
-/**
- * CIB clustering is O(n²) in the window. 400 posts is ~80,000 comparisons, which
- * runs in well under a second; the whole 2,000-post buffer would be 25× that and
- * would lock the tab. The cap is stated in the UI rather than applied silently.
- */
 const CIB_WINDOW = 400;
-/** UI flush interval. The firehose delivers faster than React should re-render. */
 const FLUSH_MS = 1000;
 
 function loadMonitors(): Monitor[] {
@@ -110,6 +89,20 @@ function SocialPage() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(MONITOR_KEY, JSON.stringify(monitors));
   }, [monitors]);
+
+  // Load cached social items from data/social_cache.json on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const cached = (await socialCache({ data: {} })) as unknown as SocialPost[];
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          setPulled((prev) => [...cached, ...prev]);
+        }
+      } catch {
+        /* ignore if unreadable */
+      }
+    })();
+  }, []);
 
   // ── The socket. Browser-side, bounded buffer, flushed to React on a timer. ──
   useEffect(() => {
