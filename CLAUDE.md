@@ -2,6 +2,14 @@
 
 OSINT analysis and monitoring platform built for **ADITI 4.0 / iDEX Problem Statement 18**, sponsored by the Indian Air Force. Stage: pre-selection demo.
 
+## Mandatory AI Memory & Preservation Protocol
+
+> **CRITICAL FOR ALL CLAUDE / AI SESSIONS:**
+> 1. **Read Project Memory First:** Always inspect [`PROJECT_MEMORY.md`](file:///d:/social_media_research/PROJECT_MEMORY.md) at the start of any session to load active progress, codebase inventory, and hard constraints.
+> 2. **Never Delete Existing Functions:** Snippet-based edits wipe out un-viewed exports. Inspect full target files before editing. All edits must be **additive-only**.
+> 3. **Verify Integrity:** Run `bun test` after edits to ensure zero regression across the 415+ unit test suite.
+> 4. **Update Memory State:** Record progress and newly added exports in [`PROJECT_MEMORY.md`](file:///d:/social_media_research/PROJECT_MEMORY.md) upon task completion.
+
 ## Stack
 
 Originally scaffolded from a TanStack Start template. All Lovable tooling, branding and
