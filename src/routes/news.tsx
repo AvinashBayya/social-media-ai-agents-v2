@@ -1170,50 +1170,13 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
       //      node:22-alpine, and the scraper logged into Instagram with stored
       //      credentials, which breaches Meta ToS.
       //
-      // An absent or empty cache now simply yields no mentions.
-      let cachedMatches: any[] = [];
-      try {
-        const fs = (await import("fs")).promises;
-        const cacheRaw = await fs.readFile("./data/social_cache.json", "utf-8");
-        const cacheItems = JSON.parse(cacheRaw);
-        const queryLower = q.toLowerCase();
-        cachedMatches = Array.isArray(cacheItems)
-          ? cacheItems.filter((item: any) => item?.query && String(item.query).toLowerCase() === queryLower)
-          : [];
-      } catch {
-        // No cache file, or unreadable. Genuinely zero cached mentions.
-        cachedMatches = [];
-      }
-
-      // Add matches to mentions list
-      for (const item of cachedMatches) {
-        const textLower = item.text.toLowerCase();
-        let tone: "positive" | "negative" | "neutral" = "neutral";
-        const posWords = ["success", "achieve", "land", "keynote", "progress", "growth", "approved", "positive", "launch", "space", "orbit"];
-        const negWords = ["fail", "crash", "lost", "delay", "breach", "leak", "unverified", "investigate", "alert", "crashed", "dispute", "restrict"];
-        
-        let posCount = 0;
-        let negCount = 0;
-        for (const w of posWords) {
-          if (textLower.includes(w)) posCount++;
-        }
-        for (const w of negWords) {
-          if (textLower.includes(w)) negCount++;
-        }
-        if (posCount > negCount) tone = "positive";
-        else if (negCount > posCount) tone = "negative";
-
-        mentions.push({
-          author: item.author,
-          platform: item.platform,
-          text: item.text,
-          pubDate: item.pubDate,
-          likes: item.likes,
-          shares: item.shares,
-          tone,
-          url: item.url
-        });
-      }
+      // 2026-08-10: the cache read itself is now gone too. Its only writers were
+      // scripts/agent-scraper.js and scripts/agent_scraper.py, both since deleted.
+      // Neither scraped anything — they hardcoded Instagram and Facebook posts
+      // with Math.random() likes and shares. All 128 records in the file were
+      // fabricated, so "cached mentions" were invented mentions, and the tone
+      // classifier below was scoring generated filler text. Mentions now come
+      // only from the live collectors above.
 
       // Sort combined mentions by date (newest first)
       mentions.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());

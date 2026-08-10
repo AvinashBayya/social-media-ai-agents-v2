@@ -43,4 +43,6 @@ azure-env.sh
 
 # Scraped social cache. Contains mentions of real, identifiable private
 # individuals, so it must never enter a public repo (DPDP Act 2023).
-data/social_cache.json
+# Every record this ever held was fabricated by the deleted agent-scraper
+# scripts. Kept ignored so a stray copy can never be committed as evidence.
+data/social_cache.json*

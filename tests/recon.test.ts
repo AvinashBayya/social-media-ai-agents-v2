@@ -61,6 +61,15 @@ describe("collectCrtShSubdomains — failures throw, they never return []", () =
     await expect(collectCrtShSubdomains("example.com")).rejects.toThrow(/unreadable/i);
   });
 
+  test("a 404 is a service fault, never 'this domain has no certificates'", async () => {
+    // crt.sh answers 404 with an HTML error page when overloaded. Reading that
+    // as an empty result would invert the conclusion about the target.
+    stubFetch(() => new Response("<html>404</html>", { status: 404 }));
+    const err = await collectCrtShSubdomains("example.com").catch((e) => e);
+    expect(err.message).toMatch(/service fault/i);
+    expect(err.message).toMatch(/NOT a finding/i);
+  });
+
   test("a non-array payload throws", async () => {
     stubFetch(() => jsonRes({ error: "nope" }));
     await expect(collectCrtShSubdomains("example.com")).rejects.toThrow(/expected a JSON array/i);
@@ -74,6 +83,67 @@ describe("collectCrtShSubdomains — failures throw, they never return []", () =
   test("an empty log result is a finding, not an error", async () => {
     stubFetch(() => jsonRes([]));
     await expect(collectCrtShSubdomains("example.com")).resolves.toEqual([]);
+  });
+});
+
+// ─── crt.sh: retry against a demonstrably flaky service ────────────────────
+
+describe("collectCrtShSubdomains — one retry, never a silent loop", () => {
+  /** Serve a different response per call so retry behaviour is observable. */
+  function stubSequence(responses: Array<() => Response>) {
+    let i = 0;
+    const calls = { count: 0 };
+    globalThis.fetch = (async () => {
+      calls.count++;
+      return responses[Math.min(i++, responses.length - 1)]();
+    }) as typeof fetch;
+    return calls;
+  }
+
+  test("a transient 404 is retried, and a good second answer is used", async () => {
+    const calls = stubSequence([
+      () => new Response("<html>404</html>", { status: 404 }),
+      () => jsonRes([{ name_value: "api.example.com", not_before: "2026-01-01T00:00:00" }]),
+    ]);
+
+    const found = await collectCrtShSubdomains("example.com");
+    expect(calls.count).toBe(2);
+    expect(found.map((f) => f.hostname)).toEqual(["api.example.com"]);
+  });
+
+  test("a timeout is retried, and a good second answer is used", async () => {
+    let first = true;
+    const calls = { count: 0 };
+    globalThis.fetch = (async () => {
+      calls.count++;
+      if (first) {
+        first = false;
+        throw new Error("The operation timed out.");
+      }
+      return jsonRes([{ name_value: "vpn.example.com" }]);
+    }) as typeof fetch;
+
+    const found = await collectCrtShSubdomains("example.com");
+    expect(calls.count).toBe(2);
+    expect(found.map((f) => f.hostname)).toEqual(["vpn.example.com"]);
+  });
+
+  test("two failures surface the failure — it is never buried", async () => {
+    const calls = stubSequence([() => new Response("boom", { status: 502 })]);
+    await expect(collectCrtShSubdomains("example.com")).rejects.toThrow(/service fault/i);
+    expect(calls.count).toBe(2);
+  });
+
+  test("a 429 is NOT retried — retrying a rate limit makes it worse", async () => {
+    const calls = stubSequence([() => new Response("slow", { status: 429 })]);
+    await expect(collectCrtShSubdomains("example.com")).rejects.toThrow(/rate-limited/i);
+    expect(calls.count).toBe(1);
+  });
+
+  test("a successful first response is not retried", async () => {
+    const calls = stubSequence([() => jsonRes([{ name_value: "a.example.com" }])]);
+    await collectCrtShSubdomains("example.com");
+    expect(calls.count).toBe(1);
   });
 });
 

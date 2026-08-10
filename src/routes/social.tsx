@@ -6,17 +6,40 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  Radio, Plus, X, AlertTriangle, Loader2, ShieldAlert, Ban, ChevronDown,
-  ChevronRight, Activity, Link2, Users,
+  Radio,
+  Plus,
+  X,
+  AlertTriangle,
+  Loader2,
+  ShieldAlert,
+  Ban,
+  ChevronDown,
+  ChevronRight,
+  Activity,
+  Link2,
+  Users,
 } from "lucide-react";
 import {
-  JetstreamClient, readMonitor, socialReddit, socialTelegram, socialProfiles, socialCache,
-  JETSTREAM_ENDPOINT, JETSTREAM_INSTANCES, PLATFORM_NOTES,
-  type JetstreamStatus, type Monitor, type MonitorReading, type SocialPost,
+  JetstreamClient,
+  readMonitor,
+  socialReddit,
+  socialTelegram,
+  socialProfiles,
+  socialCredentials,
+  JETSTREAM_ENDPOINT,
+  JETSTREAM_INSTANCES,
+  PLATFORM_NOTES,
+  type JetstreamStatus,
+  type Monitor,
+  type MonitorReading,
+  type SocialPost,
   type BlueskyProfile,
 } from "@/utils/social";
 import {
-  assessCluster, observationWindowOf, CIB_CAVEAT, MIN_OBSERVATION_MINUTES,
+  assessCluster,
+  observationWindowOf,
+  CIB_CAVEAT,
+  MIN_OBSERVATION_MINUTES,
   type CibCluster,
 } from "@/utils/cib";
 import { assessSocialCorpus } from "@/utils/social-credibility";
@@ -82,6 +105,8 @@ function SocialPage() {
   const [pullBusy, setPullBusy] = useState<"reddit" | "telegram" | null>(null);
   const [pullError, setPullError] = useState("");
   const [pulled, setPulled] = useState<SocialPost[]>([]);
+  /** null = not yet checked. Distinct from false, which is "checked, absent". */
+  const [redditReady, setRedditReady] = useState<boolean | null>(null);
 
   useEffect(() => setMonitors(loadMonitors()), []);
 
@@ -90,16 +115,21 @@ function SocialPage() {
     window.localStorage.setItem(MONITOR_KEY, JSON.stringify(monitors));
   }, [monitors]);
 
-  // Load cached social items from data/social_cache.json on mount
+  // The data/social_cache.json loader was REMOVED on 2026-08-10. Every record it
+  // seeded `pulled` with was fabricated by scripts/agent-scraper.js — hardcoded
+  // Instagram and Facebook posts with Math.random() engagement counts — so this
+  // page opened showing invented posts from the two platforms it simultaneously
+  // declares uncollectable. Posts now come only from the live collectors.
+
+  // Reddit needs OAuth credentials since 2026-08-10; ask the server whether they
+  // are configured rather than claiming availability from a static list.
   useEffect(() => {
     (async () => {
       try {
-        const cached = (await socialCache({ data: {} })) as unknown as SocialPost[];
-        if (cached && Array.isArray(cached) && cached.length > 0) {
-          setPulled((prev) => [...cached, ...prev]);
-        }
+        const c = (await socialCredentials()) as unknown as { reddit: boolean };
+        setRedditReady(Boolean(c?.reddit));
       } catch {
-        /* ignore if unreadable */
+        setRedditReady(false);
       }
     })();
   }, []);
@@ -155,7 +185,11 @@ function SocialPage() {
     setMonitors((prev) => [
       ...prev,
       // Deterministic id — no Math.random anywhere in this module.
-      { id: `m${Date.now().toString(36)}${prev.length}`, term, createdAt: new Date().toISOString() },
+      {
+        id: `m${Date.now().toString(36)}${prev.length}`,
+        term,
+        createdAt: new Date().toISOString(),
+      },
     ]);
     setTermDraft("");
   };
@@ -192,7 +226,9 @@ function SocialPage() {
         } catch (err: any) {
           // A failed profile fetch degrades the assessment; it does not
           // invalidate it, and the maturity signal will report itself skipped.
-          setCibError(`Profiles unavailable (maturity signal will show as skipped): ${err?.message ?? err}`);
+          setCibError(
+            `Profiles unavailable (maturity signal will show as skipped): ${err?.message ?? err}`,
+          );
         }
       }
 
@@ -202,7 +238,11 @@ function SocialPage() {
       const observationWindowMinutes = observationWindowOf(window_);
       const withProfiles = fetched.length
         ? first.cibClusters.map((c) =>
-            assessCluster(c.posts, { profiles: fetched, now: Date.now(), observationWindowMinutes }),
+            assessCluster(c.posts, {
+              profiles: fetched,
+              now: Date.now(),
+              observationWindowMinutes,
+            }),
           )
         : first.cibClusters;
 
@@ -266,7 +306,9 @@ function SocialPage() {
             <dl className="space-y-0.5 border-t border-[#263548] pt-2 text-[10px] text-[#94A3B8]">
               <div className="flex justify-between">
                 <dt>Posts received</dt>
-                <dd className="tabular-nums text-white">{status?.received.toLocaleString() ?? 0}</dd>
+                <dd className="tabular-nums text-white">
+                  {status?.received.toLocaleString() ?? 0}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt>Rate (last 60s)</dt>
@@ -283,8 +325,8 @@ function SocialPage() {
             </dl>
             <p className="break-all text-[9px] leading-relaxed text-[#64748B]">
               {status?.endpoint ?? JETSTREAM_ENDPOINT} · unauthenticated · one of{" "}
-              {JETSTREAM_INSTANCES.length} public instances, rotated on reconnect · socket held
-              by this tab, so collection stops when you close it.
+              {JETSTREAM_INSTANCES.length} public instances, rotated on reconnect · socket held by
+              this tab, so collection stops when you close it.
             </p>
           </CardContent>
         </Card>
@@ -297,7 +339,10 @@ function SocialPage() {
             </h3>
             <div className="mt-2 space-y-1.5">
               {PLATFORM_NOTES.map((p) => (
-                <div key={p.platform} className="flex items-start gap-2 text-[10px] leading-relaxed">
+                <div
+                  key={p.platform}
+                  className="flex items-start gap-2 text-[10px] leading-relaxed"
+                >
                   <Badge
                     variant="outline"
                     className={`mt-0.5 shrink-0 text-[9px] font-normal ${
@@ -361,7 +406,9 @@ function SocialPage() {
                     <div
                       key={r.monitor.id}
                       className={`rounded border p-2 ${
-                        spiking === true ? "border-[#EF4444]/50 bg-[#EF4444]/5" : "border-[#263548] bg-[#0B1220]/60"
+                        spiking === true
+                          ? "border-[#EF4444]/50 bg-[#EF4444]/5"
+                          : "border-[#263548] bg-[#0B1220]/60"
                       } ${selected ? "ring-1 ring-[#3B82F6]" : ""}`}
                     >
                       <div className="flex items-center gap-2">
@@ -412,8 +459,17 @@ function SocialPage() {
               </h3>
               <p className="mt-1 text-[10px] leading-relaxed text-[#64748B]">
                 Fetched server-side into the same buffer, so monitors and CIB analysis span all
-                three platforms. Reddit takes a search query; Telegram takes a public channel handle.
+                three platforms. Reddit takes a search query; Telegram takes a public channel
+                handle.
               </p>
+              {redditReady === false && (
+                <p className="mt-1.5 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#F59E0B]">
+                  Reddit is unavailable: it began refusing all unauthenticated requests with HTTP
+                  403 on 2026-08-10. Register a free script app at reddit.com/prefs/apps and set
+                  REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to re-enable it. Telegram and Bluesky
+                  are unaffected.
+                </p>
+              )}
               <Input
                 value={pullTarget}
                 onChange={(e) => setPullTarget(e.target.value)}
@@ -421,21 +477,37 @@ function SocialPage() {
                 className="mt-2 h-7 border-[#263548] bg-[#0B1220] text-[11px] text-white"
               />
               <div className="mt-1.5 flex gap-1.5">
+                {/*
+                  Disabled without credentials rather than left clickable to fail:
+                  Reddit blocks all unauthenticated access as of 2026-08-10, so
+                  the button could only ever produce an error.
+                */}
                 <Button
-                  size="sm" variant="outline"
-                  disabled={pullBusy !== null || !pullTarget.trim()}
+                  size="sm"
+                  variant="outline"
+                  disabled={pullBusy !== null || !pullTarget.trim() || redditReady === false}
                   onClick={() => pull("reddit")}
+                  title={
+                    redditReady === false
+                      ? "Reddit needs OAuth credentials — set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET"
+                      : undefined
+                  }
                   className="h-7 flex-1 text-[10px]"
                 >
                   {pullBusy === "reddit" ? <Loader2 className="size-3 animate-spin" /> : "Reddit"}
                 </Button>
                 <Button
-                  size="sm" variant="outline"
+                  size="sm"
+                  variant="outline"
                   disabled={pullBusy !== null || !pullTarget.trim()}
                   onClick={() => pull("telegram")}
                   className="h-7 flex-1 text-[10px]"
                 >
-                  {pullBusy === "telegram" ? <Loader2 className="size-3 animate-spin" /> : "Telegram"}
+                  {pullBusy === "telegram" ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    "Telegram"
+                  )}
                 </Button>
               </div>
               {pulled.length > 0 && (
@@ -461,7 +533,9 @@ function SocialPage() {
                 <div>
                   <h3 className="text-xs font-bold uppercase text-white">
                     Live stream
-                    {active && <span className="text-[#06B6D4]"> · filtered to "{active.monitor.term}"</span>}
+                    {active && (
+                      <span className="text-[#06B6D4]"> · filtered to "{active.monitor.term}"</span>
+                    )}
                   </h3>
                   <p className="text-[9px] text-[#64748B]">
                     Showing the most recent {Math.min(feed.length, RENDER_LIMIT)} of{" "}
@@ -499,7 +573,11 @@ function SocialPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="truncate font-mono text-[#3B82F6] hover:underline"
-                          title={p.author.startsWith("did:") ? "DID — Jetstream does not carry handles; resolved on demand for flagged accounts" : p.author}
+                          title={
+                            p.author.startsWith("did:")
+                              ? "DID — Jetstream does not carry handles; resolved on demand for flagged accounts"
+                              : p.author
+                          }
                         >
                           {p.author.startsWith("did:") ? `${p.author.slice(0, 24)}…` : p.author}
                         </a>
@@ -550,7 +628,11 @@ function SocialPage() {
                   onClick={runCib}
                   className="ml-auto h-7 gap-1 text-[10px]"
                 >
-                  {cibBusy ? <Loader2 className="size-3 animate-spin" /> : <ShieldAlert className="size-3" />}
+                  {cibBusy ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <ShieldAlert className="size-3" />
+                  )}
                   Analyse last {CIB_WINDOW}
                 </Button>
               </div>
@@ -569,12 +651,11 @@ function SocialPage() {
               {cibClusters === null && !cibError && (
                 <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
                   Not yet run. Analysis covers the most recent {CIB_WINDOW} buffered posts —
-                  clustering is quadratic, so the whole 2,000-post buffer would lock the tab.
-                  Select a monitor first to analyse only its matches. Note the stream delivers
-                  roughly {CIB_WINDOW} posts in well under a minute, so the temporal-synchrony
-                  signal will abstain until at least {MIN_OBSERVATION_MINUTES} minutes have been
-                  collected: in a window that short every post is close in time regardless of who
-                  posted it.
+                  clustering is quadratic, so the whole 2,000-post buffer would lock the tab. Select
+                  a monitor first to analyse only its matches. Note the stream delivers roughly{" "}
+                  {CIB_WINDOW} posts in well under a minute, so the temporal-synchrony signal will
+                  abstain until at least {MIN_OBSERVATION_MINUTES} minutes have been collected: in a
+                  window that short every post is close in time regardless of who posted it.
                 </p>
               )}
 
@@ -599,7 +680,9 @@ function SocialPage() {
                         <div
                           key={c.id}
                           className={`rounded border p-2.5 ${
-                            c.flagged ? "border-[#EF4444]/50 bg-[#EF4444]/5" : "border-[#263548] bg-[#0B1220]/60"
+                            c.flagged
+                              ? "border-[#EF4444]/50 bg-[#EF4444]/5"
+                              : "border-[#263548] bg-[#0B1220]/60"
                           }`}
                         >
                           <button
@@ -634,9 +717,14 @@ function SocialPage() {
                           {open && (
                             <div className="mt-2 space-y-2 pl-5">
                               {c.signals.map((s) => (
-                                <div key={s.id} className="rounded border border-[#263548] bg-[#111827] p-2">
+                                <div
+                                  key={s.id}
+                                  className="rounded border border-[#263548] bg-[#111827] p-2"
+                                >
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-semibold text-white">{s.label}</span>
+                                    <span className="text-[10px] font-semibold text-white">
+                                      {s.label}
+                                    </span>
                                     <span
                                       className={`ml-auto font-mono text-[10px] ${
                                         s.score === null
@@ -669,7 +757,9 @@ function SocialPage() {
                                       className="rounded border border-[#263548] px-1.5 py-0.5 font-mono text-[9px] text-[#3B82F6] hover:underline"
                                       title={`${p.author} at ${p.createdAt}`}
                                     >
-                                      {p.author.startsWith("did:") ? `${p.author.slice(8, 20)}…` : p.author}
+                                      {p.author.startsWith("did:")
+                                        ? `${p.author.slice(8, 20)}…`
+                                        : p.author}
                                     </a>
                                   ))}
                                 </div>

@@ -7,7 +7,11 @@
  *              JSON. It is the only genuinely open live social feed of any scale
  *              available at zero cost, and it is what makes this module real
  *              rather than a mock.
- *   Reddit   — public search JSON, unauthenticated, rate limited.
+ *   Reddit   — OAuth ONLY as of 2026-08-10. Every unauthenticated endpoint now
+ *              answers 403 with an HTML anti-bot page: search.json,
+ *              old.reddit.com, api.reddit.com and per-subreddit .json, with a
+ *              browser User-Agent as well as ours. A free script app plus the
+ *              client-credentials grant restores it at 100 queries/minute.
  *   Telegram — public channel previews at t.me/s/{channel}.
  *   Instagram / Facebook — NOT COLLECTED. Meta's terms prohibit scraping, and
  *              the Graph API only grants access to Pages and Business accounts
@@ -159,7 +163,8 @@ function linksFrom(record: NonNullable<NonNullable<JetstreamEvent["commit"]>["re
 export function eventToPost(evt: JetstreamEvent): SocialPost | null {
   if (evt?.kind !== "commit") return null;
   const commit = evt.commit;
-  if (!commit || commit.operation !== "create" || commit.collection !== POST_COLLECTION) return null;
+  if (!commit || commit.operation !== "create" || commit.collection !== POST_COLLECTION)
+    return null;
   const record = commit.record;
   const did = evt.did;
   if (!record || typeof record.text !== "string" || !did || !commit.rkey) return null;
@@ -200,10 +205,19 @@ export class RingBuffer<T> {
       this.droppedCount += 1;
     }
   }
-  toArray(): T[] { return [...this.items]; }
-  get size(): number { return this.items.length; }
-  get dropped(): number { return this.droppedCount; }
-  clear(): void { this.items = []; this.droppedCount = 0; }
+  toArray(): T[] {
+    return [...this.items];
+  }
+  get size(): number {
+    return this.items.length;
+  }
+  get dropped(): number {
+    return this.droppedCount;
+  }
+  clear(): void {
+    this.items = [];
+    this.droppedCount = 0;
+  }
 }
 
 export class JetstreamClient {
@@ -260,7 +274,10 @@ export class JetstreamClient {
     try {
       socket = this.opts.socketFactory ? this.opts.socketFactory(url) : new WebSocket(url);
     } catch (err: any) {
-      this.emit({ state: "error", detail: `WebSocket could not be created: ${err?.message ?? String(err)}` });
+      this.emit({
+        state: "error",
+        detail: `WebSocket could not be created: ${err?.message ?? String(err)}`,
+      });
       this.scheduleReconnect();
       return;
     }
@@ -293,7 +310,10 @@ export class JetstreamClient {
     socket.onerror = () => {
       // The browser deliberately withholds the cause of a socket error, so this
       // says exactly that rather than inventing a reason.
-      this.emit({ state: "error", detail: "Socket error (the browser does not expose the cause)." });
+      this.emit({
+        state: "error",
+        detail: "Socket error (the browser does not expose the cause).",
+      });
     };
 
     socket.onclose = (evt: CloseEvent) => {
@@ -331,17 +351,29 @@ export class JetstreamClient {
 
   disconnect(): void {
     this.stopped = true;
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     // Detach handlers before closing so onclose does not schedule a reconnect.
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;
       this.ws.onerror = null;
       this.ws.onclose = null;
-      try { this.ws.close(); } catch { /* already closing */ }
+      try {
+        this.ws.close();
+      } catch {
+        /* already closing */
+      }
       this.ws = null;
     }
-    this.emit({ state: "closed", detail: "Disconnected by the analyst.", retryInMs: null, connectedAt: null });
+    this.emit({
+      state: "closed",
+      detail: "Disconnected by the analyst.",
+      retryInMs: null,
+      connectedAt: null,
+    });
   }
 }
 
@@ -401,8 +433,11 @@ export const SPIKE_SIGMA = 3;
 export function assessSpike(buckets: number[]): SpikeAssessment {
   if (buckets.length < 2) {
     return {
-      spiking: null, current: buckets[buckets.length - 1] ?? 0,
-      baselineMean: null, baselineStdDev: null, z: null,
+      spiking: null,
+      current: buckets[buckets.length - 1] ?? 0,
+      baselineMean: null,
+      baselineStdDev: null,
+      z: null,
       bucketsObserved: buckets.length,
       reason: "No completed observation window yet.",
     };
@@ -413,7 +448,11 @@ export function assessSpike(buckets: number[]): SpikeAssessment {
 
   if (history.length < MIN_BASELINE_BUCKETS) {
     return {
-      spiking: null, current, baselineMean: null, baselineStdDev: null, z: null,
+      spiking: null,
+      current,
+      baselineMean: null,
+      baselineStdDev: null,
+      z: null,
       bucketsObserved: history.length,
       reason:
         `Baseline needs ${MIN_BASELINE_BUCKETS} completed minutes; ${history.length} observed. ` +
@@ -430,7 +469,11 @@ export function assessSpike(buckets: number[]): SpikeAssessment {
   if (stdDev === 0) {
     const spiking = current > mean * 2 && current > mean + 1;
     return {
-      spiking, current, baselineMean: mean, baselineStdDev: 0, z: null,
+      spiking,
+      current,
+      baselineMean: mean,
+      baselineStdDev: 0,
+      z: null,
       bucketsObserved: history.length,
       reason: spiking
         ? `Baseline was flat at ${mean.toFixed(1)}/min over ${history.length} minutes; this minute carried ${current}.`
@@ -441,7 +484,11 @@ export function assessSpike(buckets: number[]): SpikeAssessment {
   const z = (current - mean) / stdDev;
   const spiking = z >= SPIKE_SIGMA;
   return {
-    spiking, current, baselineMean: mean, baselineStdDev: stdDev, z,
+    spiking,
+    current,
+    baselineMean: mean,
+    baselineStdDev: stdDev,
+    z,
     bucketsObserved: history.length,
     reason:
       `${current} matches this minute against a baseline of ${mean.toFixed(1)} ± ${stdDev.toFixed(1)} ` +
@@ -454,7 +501,11 @@ export function assessSpike(buckets: number[]): SpikeAssessment {
  * `now`. Gaps are zeros — a minute with no matches is a real observation of zero,
  * not missing data.
  */
-export function bucketise(posts: SocialPost[], now: number, windowMinutes = BASELINE_WINDOW + 1): number[] {
+export function bucketise(
+  posts: SocialPost[],
+  now: number,
+  windowMinutes = BASELINE_WINDOW + 1,
+): number[] {
   const buckets = new Array(windowMinutes).fill(0);
   const newestBucket = Math.floor(now / BUCKET_MS);
   for (const p of posts) {
@@ -520,7 +571,10 @@ export interface BlueskyProfile {
 }
 
 /** Short-lived server cache. Profiles change slowly and the AppView is rate limited. */
-interface CacheRow<T> { value: T; at: number }
+interface CacheRow<T> {
+  value: T;
+  at: number;
+}
 const PROFILE_TTL_MS = 10 * 60_000;
 const FEED_TTL_MS = 2 * 60_000;
 const profileCache = new Map<string, CacheRow<BlueskyProfile>>();
@@ -529,7 +583,10 @@ const genericCache = new Map<string, CacheRow<unknown>>();
 function cacheGet<T>(store: Map<string, CacheRow<any>>, key: string, ttl: number): T | null {
   const row = store.get(key);
   if (!row) return null;
-  if (Date.now() - row.at > ttl) { store.delete(key); return null; }
+  if (Date.now() - row.at > ttl) {
+    store.delete(key);
+    return null;
+  }
   return row.value as T;
 }
 function cacheSet(store: Map<string, CacheRow<any>>, key: string, value: unknown): void {
@@ -557,7 +614,8 @@ async function appview(
     });
   } catch (err: any) {
     throw new SocialUnavailableError(
-      `Bluesky AppView request failed: ${err?.message ?? String(err)}`, platform,
+      `Bluesky AppView request failed: ${err?.message ?? String(err)}`,
+      platform,
     );
   }
   if (!res.ok) {
@@ -599,27 +657,32 @@ export async function fetchProfile(actor: string): Promise<BlueskyProfile> {
 
 /** Batched profile lookup — getProfiles accepts up to 25 actors per call. */
 export async function fetchProfiles(actors: string[]): Promise<BlueskyProfile[]> {
-  const wanted = Array.from(new Set(actors.map((a) => a.trim().toLowerCase().replace(/^@/, "")).filter(Boolean)));
+  const wanted = Array.from(
+    new Set(actors.map((a) => a.trim().toLowerCase().replace(/^@/, "")).filter(Boolean)),
+  );
   const out: BlueskyProfile[] = [];
   const missing: string[] = [];
   for (const a of wanted) {
     const hit = cacheGet<BlueskyProfile>(profileCache, a, PROFILE_TTL_MS);
-    if (hit) out.push(hit); else missing.push(a);
+    if (hit) out.push(hit);
+    else missing.push(a);
   }
   for (let i = 0; i < missing.length; i += 25) {
     const batch = missing.slice(i, i + 25);
     const params = new URLSearchParams();
     for (const a of batch) params.append("actors", a);
-    const raw = await appview("app.bsky.actor.getProfiles", params, "bluesky")
-      .catch(async () => {
-        // getProfiles is all-or-nothing; fall back to individual lookups so one
-        // deleted account does not lose the whole batch.
-        const singles = await Promise.allSettled(batch.map((a) => fetchProfile(a)));
-        return { profiles: singles.filter((s) => s.status === "fulfilled").map((s: any) => s.value) };
-      });
+    const raw = await appview("app.bsky.actor.getProfiles", params, "bluesky").catch(async () => {
+      // getProfiles is all-or-nothing; fall back to individual lookups so one
+      // deleted account does not lose the whole batch.
+      const singles = await Promise.allSettled(batch.map((a) => fetchProfile(a)));
+      return { profiles: singles.filter((s) => s.status === "fulfilled").map((s: any) => s.value) };
+    });
     for (const p of raw?.profiles ?? []) {
       const profile = p.did ? toProfile(p) : (p as BlueskyProfile);
-      if (profile.did) { cacheSet(profileCache, profile.handle || profile.did, profile); out.push(profile); }
+      if (profile.did) {
+        cacheSet(profileCache, profile.handle || profile.did, profile);
+        out.push(profile);
+      }
     }
   }
   return out;
@@ -661,10 +724,115 @@ export async function fetchAuthorFeed(actor: string, limit = 50): Promise<Social
 // ─── 4. Reddit and Telegram collectors (server-side) ───────────────────────
 
 /**
- * Reddit public search. Unauthenticated and rate limited; a 429 is reported as a
- * rate limit rather than as "no results", because those mean opposite things to
- * an analyst. Registering a free script app for OAuth would raise the limit and
- * is the obvious next step if this is used at volume.
+ * Reddit OAuth — required since the unauthenticated JSON endpoints started
+ * refusing us.
+ *
+ * Re-verified 2026-08-10: every unauthenticated route now answers **403** and
+ * serves an HTML anti-bot page rather than JSON — `www.reddit.com/search.json`,
+ * `old.reddit.com`, `api.reddit.com` and per-subreddit `.json` alike, with a
+ * browser User-Agent as well as ours. This is not the documented rate limit and
+ * no header or UA works around it; it is an access-policy change.
+ *
+ * A free registered *script* app plus the client-credentials grant restores
+ * access at 100 queries/minute. Credentials are read server-side only.
+ */
+const REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token";
+const REDDIT_OAUTH_BASE = "https://oauth.reddit.com";
+
+/** Reddit requires a descriptive, unique UA; a generic one is itself a ban trigger. */
+const REDDIT_UA = "SentinelAI/1.0 (OSINT research; contact via repository)";
+
+export function redditCredentials(): { id: string; secret: string } | null {
+  const id = process.env.REDDIT_CLIENT_ID?.trim();
+  const secret = process.env.REDDIT_CLIENT_SECRET?.trim();
+  return id && secret ? { id, secret } : null;
+}
+
+/**
+ * Cached bearer token. Per-process and lost on restart, like the LLM cache —
+ * acceptable because a token round-trip is one extra request, not a wrong answer.
+ */
+let redditToken: { value: string; expiresAt: number } | null = null;
+
+/** Exported so tests can reset it; nothing in the app should call this. */
+export function resetRedditToken(): void {
+  redditToken = null;
+}
+
+async function redditAccessToken(): Promise<string> {
+  const creds = redditCredentials();
+  if (!creds) {
+    throw new SocialUnavailableError(
+      "Reddit requires OAuth credentials. Unauthenticated access now returns 403 on every " +
+        "endpoint (verified 2026-08-10), so no query can run. Register a free script app at " +
+        "reddit.com/prefs/apps and set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET. Nothing is " +
+        "shown — that is a missing credential, not a finding that no posts matched.",
+      "reddit",
+      403,
+    );
+  }
+
+  // 60s of headroom: a token that expires mid-flight would surface as a
+  // confusing 401 rather than as the refresh it actually is.
+  if (redditToken && redditToken.expiresAt - 60_000 > Date.now()) return redditToken.value;
+
+  let res: Response;
+  try {
+    res = await fetch(REDDIT_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${btoa(`${creds.id}:${creds.secret}`)}`,
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": REDDIT_UA,
+      },
+      body: "grant_type=client_credentials",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err: any) {
+    throw new SocialUnavailableError(
+      `Reddit token request failed: ${err?.message ?? String(err)}`,
+      "reddit",
+    );
+  }
+
+  // A bad key and a rate limit need different responses from the analyst, so
+  // they must not collapse into one message.
+  if (res.status === 401 || res.status === 403) {
+    throw new SocialUnavailableError(
+      `Reddit rejected the credentials (HTTP ${res.status}). Check REDDIT_CLIENT_ID and ` +
+        `REDDIT_CLIENT_SECRET, and that the app is registered as type "script".`,
+      "reddit",
+      res.status,
+    );
+  }
+  if (!res.ok) {
+    throw new SocialUnavailableError(
+      `Reddit token endpoint returned HTTP ${res.status}.`,
+      "reddit",
+      res.status,
+    );
+  }
+
+  const json: any = await res.json().catch(() => null);
+  const token = typeof json?.access_token === "string" ? json.access_token : "";
+  if (!token) {
+    throw new SocialUnavailableError(
+      "Reddit returned no access_token in an otherwise successful token response.",
+      "reddit",
+    );
+  }
+
+  const ttlSeconds = typeof json?.expires_in === "number" ? json.expires_in : 3600;
+  redditToken = { value: token, expiresAt: Date.now() + ttlSeconds * 1000 };
+  return token;
+}
+
+/**
+ * Reddit search over the OAuth API.
+ *
+ * Failure modes stay distinguishable: a missing credential, a rejected
+ * credential, a rate limit and an empty result set are four different facts and
+ * an analyst acts differently on each. Only the last returns `[]`.
  */
 export async function fetchRedditSearch(query: string, limit = 50): Promise<SocialPost[]> {
   const q = query.trim();
@@ -674,24 +842,50 @@ export async function fetchRedditSearch(query: string, limit = 50): Promise<Soci
   const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
   if (hit) return hit;
 
+  // Throws with the registration instructions when no credential is configured.
+  const token = await redditAccessToken();
+
   const url =
-    `https://www.reddit.com/search.json?q=${encodeURIComponent(q)}` +
+    `${REDDIT_OAUTH_BASE}/search?q=${encodeURIComponent(q)}` +
     `&sort=new&limit=${Math.min(limit, 100)}&raw_json=1`;
 
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { "user-agent": "SentinelAI/1.0 (OSINT research; contact via repository)" },
+      headers: { authorization: `Bearer ${token}`, "user-agent": REDDIT_UA },
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err: any) {
-    throw new SocialUnavailableError(`Reddit request failed: ${err?.message ?? String(err)}`, "reddit");
+    throw new SocialUnavailableError(
+      `Reddit request failed: ${err?.message ?? String(err)}`,
+      "reddit",
+    );
   }
   if (res.status === 429) {
     throw new SocialUnavailableError(
       "Reddit rate limited this request (HTTP 429). No results were returned — this is not " +
         "the same as no matching posts.",
-      "reddit", 429,
+      "reddit",
+      429,
+    );
+  }
+  if (res.status === 401) {
+    // The cached token was revoked or expired early. Drop it so the next call
+    // re-authenticates rather than replaying a token we know is dead.
+    resetRedditToken();
+    throw new SocialUnavailableError(
+      "Reddit rejected the access token (HTTP 401). It has been discarded; retry to " +
+        "re-authenticate.",
+      "reddit",
+      401,
+    );
+  }
+  if (res.status === 403) {
+    throw new SocialUnavailableError(
+      "Reddit refused the request (HTTP 403) despite valid credentials. The script app may " +
+        "lack the scope for this query, or the account may be suspended.",
+      "reddit",
+      403,
     );
   }
   if (!res.ok) {
@@ -732,7 +926,10 @@ export async function fetchRedditSearch(query: string, limit = 50): Promise<Soci
 export async function fetchTelegramChannel(channel: string, limit = 30): Promise<SocialPost[]> {
   const handle = channel.trim().replace(/^@/, "");
   if (!/^[A-Za-z0-9_]{3,64}$/.test(handle)) {
-    throw new SocialUnavailableError(`"${channel}" is not a valid Telegram channel handle.`, "telegram");
+    throw new SocialUnavailableError(
+      `"${channel}" is not a valid Telegram channel handle.`,
+      "telegram",
+    );
   }
 
   const key = `tg:${handle}:${limit}`;
@@ -750,20 +947,23 @@ export async function fetchTelegramChannel(channel: string, limit = 30): Promise
     });
   } catch (err: any) {
     throw new SocialUnavailableError(
-      `Telegram request for @${handle} failed: ${err?.message ?? String(err)}`, "telegram",
+      `Telegram request for @${handle} failed: ${err?.message ?? String(err)}`,
+      "telegram",
     );
   }
   if (!res.ok) {
     throw new SocialUnavailableError(
       `Telegram returned HTTP ${res.status} for @${handle}. The channel may be private, ` +
         `deleted, or have web preview disabled.`,
-      "telegram", res.status,
+      "telegram",
+      res.status,
     );
   }
 
   const html = await res.text();
   const posts: SocialPost[] = [];
-  const blockRe = /<div class="tgme_widget_message(?:_wrap)?[\s\S]*?data-post="([^"]+)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
+  const blockRe =
+    /<div class="tgme_widget_message(?:_wrap)?[\s\S]*?data-post="([^"]+)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
   const textRe = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
   const timeRe = /<time[^>]*datetime="([^"]+)"/g;
 
@@ -776,8 +976,11 @@ export async function fetchTelegramChannel(channel: string, limit = 30): Promise
     const clean = m[1]
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<[^>]*>/g, "")
-      .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
       .trim();
     if (clean) texts.push(clean);
   }
@@ -817,7 +1020,15 @@ export async function fetchTelegramChannel(channel: string, limit = 30): Promise
 
 export interface PlatformNote {
   platform: string;
+  /**
+   * Whether the platform is collectable **as configured out of the box**. A
+   * platform that only works once a credential is supplied is `false` here and
+   * names the credential below — claiming availability the deployment may not
+   * have is the failure this field exists to prevent.
+   */
   available: boolean;
+  /** Env vars that enable it, when availability is credential-gated. */
+  requiresCredential?: string;
   method: string;
   limitation: string;
 }
@@ -840,10 +1051,19 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   },
   {
     platform: "Reddit",
-    available: true,
-    method: "public search.json, unauthenticated",
+    // Was `available: true` via unauthenticated search.json until 2026-08-10,
+    // when every unauthenticated endpoint began returning 403 with an HTML
+    // anti-bot page. Leaving this as available claimed a collector the system
+    // no longer has.
+    available: false,
+    requiresCredential: "REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET",
+    method: "OAuth client-credentials against oauth.reddit.com (free script app)",
     limitation:
-      "Rate limited. A free registered script app would raise the ceiling via OAuth.",
+      "Unauthenticated access is blocked outright — search.json, old.reddit.com, api.reddit.com " +
+      "and per-subreddit .json all return 403, with a browser User-Agent as well as ours. This " +
+      "is an access-policy change, not the documented rate limit, and no header works around " +
+      "it. Registering a free script app at reddit.com/prefs/apps and setting REDDIT_CLIENT_ID " +
+      "and REDDIT_CLIENT_SECRET restores search at 100 queries/minute.",
   },
   {
     platform: "Telegram",
@@ -902,39 +1122,35 @@ export const socialTelegram = createServerFn({ method: "POST" })
   .validator((d: { channel: string; limit?: number }) => d)
   .handler(async ({ data }) => fetchTelegramChannel(data.channel, data.limit));
 
-export const socialCache = createServerFn({ method: "POST" })
-  .validator((d: { query?: string }) => d)
-  .handler(async ({ data }) => {
-    try {
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const cachePath = path.join(process.cwd(), "data/social_cache.json");
-      const raw = await fs.readFile(cachePath, "utf-8");
-      const parsed: any[] = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
+/**
+ * Reports whether Reddit collection is actually configured.
+ *
+ * The UI must not assert a capability from a static list while the deployment
+ * lacks the credential behind it. Returns a boolean only — a key's value never
+ * crosses to the browser.
+ */
+export const socialCredentials = createServerFn({ method: "GET" })
+  .validator((d: undefined) => d)
+  .handler(async () => ({ reddit: redditCredentials() !== null }));
 
-      const q = (data?.query || "").toLowerCase().trim();
-      const filtered = q
-        ? parsed.filter(
-            (item) =>
-              (item.query && item.query.toLowerCase().includes(q)) ||
-              (item.text && item.text.toLowerCase().includes(q)) ||
-              (item.author && item.author.toLowerCase().includes(q)),
-          )
-        : parsed;
-
-      return filtered.map((item, idx) => ({
-        id: item.id || `cache-${idx}`,
-        platform: item.platform || "Meta Cache",
-        author: item.author || "scraped_account",
-        authorId: item.author || "scraped_account",
-        text: item.text || "",
-        createdAt: item.pubDate || new Date().toISOString(),
-        url: item.url || "#",
-        likes: item.likes || 0,
-        shares: item.shares || 0,
-      }));
-    } catch {
-      return [];
-    }
-  });
+/*
+ * `socialCache` was REMOVED on 2026-08-10, along with `scripts/agent-scraper.js`
+ * and `scripts/agent_scraper.py`, because every record it could ever serve was
+ * fabricated.
+ *
+ * It read `data/social_cache.json`, whose only writers were those two scripts.
+ * Neither scraped anything: `agent-scraper.js` hardcoded two posts per query and
+ * generated engagement with `Math.floor(Math.random() * 900)`, stamped
+ * `pubDate: new Date()`, labelled them `Instagram` and `Facebook`, and printed
+ * "Ingestion pipeline verified / AGENT COMPLETED CYCLE SUCCESSFULLY". The cache
+ * held 128 such records, 100% of them Instagram or Facebook — the two platforms
+ * PLATFORM_NOTES on this very page declares uncollectable, because Meta's terms
+ * prohibit it. The reader then compounded it: `catch { return [] }` turned every
+ * failure into "no results", a missing author became "scraped_account", a
+ * missing timestamp became *now*, and absent engagement became `0` rather than
+ * "not measured".
+ *
+ * So the page rendered invented Instagram posts with random like counts directly
+ * beside its own statement that Instagram cannot be collected. Do not reinstate
+ * this path, and do not re-add a Meta scraper — that decision is settled.
+ */

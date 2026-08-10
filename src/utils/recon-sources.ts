@@ -33,8 +33,15 @@ export interface SubdomainFinding {
   issuer: string | null;
 }
 
-/** crt.sh is frequently slow under load; it needs a longer budget than most. */
-const CRTSH_TIMEOUT_MS = 15_000;
+/**
+ * crt.sh is slow, and by more than "under load" suggests.
+ *
+ * Measured 2026-08-10: a wildcard query against a busy domain answered in 18s,
+ * which the original 15s budget would have aborted — turning a working lookup
+ * into "crt.sh unreachable" for exactly the high-value targets that return the
+ * most certificates. A later successful request took 43s. Sized above that.
+ */
+const CRTSH_TIMEOUT_MS = 50_000;
 
 /** The subset of a crt.sh row we read. Every field is optional upstream. */
 interface CrtShRow {
@@ -86,6 +93,43 @@ function earlier(a: string | null, b: string | null): string | null {
 }
 
 /**
+ * One retry against a demonstrably unreliable service.
+ *
+ * Measured 2026-08-10, three consecutive requests for the *same* URL: HTTP 404
+ * in 5s, a timeout at 45s, then HTTP 200 in 43s. crt.sh is the only free source
+ * of this data, so the choice is to retry it or to lose subdomain discovery.
+ * One retry, not a loop — a second failure is reported, never buried.
+ */
+async function crtShFetch(url: string, clean: string): Promise<Response> {
+  let lastError = "";
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(CRTSH_TIMEOUT_MS),
+      });
+      // 404 and 5xx from crt.sh are overload symptoms rather than answers, so
+      // they are worth one retry; anything else is returned for the caller to
+      // classify.
+      if (res.ok || (res.status !== 404 && res.status < 500)) return res;
+      lastError = `HTTP ${res.status}`;
+      if (attempt === 1) return res;
+    } catch (err) {
+      lastError = messageOf(err);
+      if (attempt === 1) {
+        throw new Error(
+          `crt.sh unreachable for ${clean} after two attempts: ${lastError}. The service is ` +
+            `frequently slow or overloaded; this is not a finding about the domain.`,
+        );
+      }
+    }
+  }
+
+  throw new Error(`crt.sh unreachable for ${clean}: ${lastError}`);
+}
+
+/**
  * Query public Certificate Transparency logs for hostnames under `domain`.
  *
  * Passive: this reads a public log, it never contacts the target. Throws on any
@@ -98,15 +142,7 @@ export async function collectCrtShSubdomains(domain: string): Promise<SubdomainF
 
   const url = `https://crt.sh/?q=${encodeURIComponent(`%.${clean}`)}&output=json`;
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(CRTSH_TIMEOUT_MS),
-    });
-  } catch (err) {
-    throw new Error(`crt.sh unreachable for ${clean}: ${messageOf(err)}`);
-  }
+  const res = await crtShFetch(url, clean);
 
   // Distinguished from a generic failure: a rate limit is temporary and the
   // analyst should retry, not conclude the domain has no certificates.
@@ -115,7 +151,17 @@ export async function collectCrtShSubdomains(domain: string): Promise<SubdomainF
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`crt.sh returned HTTP ${res.status} for ${clean}: ${body.slice(0, 200)}`);
+    // crt.sh answers 404 and 502 with an HTML error page when it is overloaded.
+    // That is a service fault, and it must not read as "this domain has no
+    // certificates" — the two are opposite conclusions about the target.
+    const transient = res.status === 404 || res.status >= 500;
+    throw new Error(
+      transient
+        ? `crt.sh is not answering reliably for ${clean} (HTTP ${res.status} after a retry). ` +
+            `This is a crt.sh service fault, NOT a finding that the domain has no certificates. ` +
+            `Retry shortly.`
+        : `crt.sh returned HTTP ${res.status} for ${clean}: ${body.slice(0, 200)}`,
+    );
   }
 
   let rows: unknown;
