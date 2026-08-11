@@ -106,6 +106,13 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
   "src/utils/social-velocity.ts": ["calculateSocialVelocity"],
   "src/utils/threat-classifier.ts": ["classifyThreatText"],
   "src/utils/focal-point.ts": ["detectFocalPoints"],
+  "src/utils/youtube-collector.ts": [
+    "fetchYoutubeMetadata",
+    "fetchYoutubeSubtitles",
+    "downloadYoutubeVideo",
+    "isYoutubeUrl",
+    "extractYoutubeId",
+  ],
 };
 
 let missingCount = 0;

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, PageHeader, StatusDot } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import {
   Activity,
   Link2,
   Users,
+  Youtube,
 } from "lucide-react";
 import {
   JetstreamClient,
@@ -88,6 +89,7 @@ function Sparkline({ values }: { values: number[] }) {
 }
 
 function SocialPage() {
+  const navigate = useNavigate();
   const clientRef = useRef<JetstreamClient | null>(null);
   const [status, setStatus] = useState<JetstreamStatus | null>(null);
   const [posts, setPosts] = useState<SocialPost[]>([]);
@@ -526,6 +528,17 @@ function SocialPage() {
                   ) : (
                     "Telegram"
                   )}
+                </Button>
+              </div>
+              <div className="mt-3 border-t border-[#263548] pt-2 flex items-center justify-between">
+                <span className="text-[10px] text-[#94A3B8]">YouTube Video Sub-Module:</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate({ to: "/youtube" })}
+                  className="h-7 border-[#06B6D4]/40 bg-[#06B6D4]/10 text-[10px] font-bold text-[#06B6D4] hover:bg-[#06B6D4]/20"
+                >
+                  <Youtube className="mr-1 size-3 text-[#EF4444]" /> YouTube Ingestion →
                 </Button>
               </div>
               {pulled.length > 0 && (

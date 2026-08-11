@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as YoutubeRouteImport } from './routes/youtube'
 import { Route as WatchlistsRouteImport } from './routes/watchlists'
 import { Route as VideosRouteImport } from './routes/videos'
 import { Route as VaultRouteImport } from './routes/vault'
@@ -40,6 +41,11 @@ import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 
+const YoutubeRoute = YoutubeRouteImport.update({
+  id: '/youtube',
+  path: '/youtube',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WatchlistsRoute = WatchlistsRouteImport.update({
   id: '/watchlists',
   path: '/watchlists',
@@ -222,6 +228,7 @@ export interface FileRoutesByFullPath {
   '/vault': typeof VaultRoute
   '/videos': typeof VideosRoute
   '/watchlists': typeof WatchlistsRoute
+  '/youtube': typeof YoutubeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -254,6 +261,7 @@ export interface FileRoutesByTo {
   '/vault': typeof VaultRoute
   '/videos': typeof VideosRoute
   '/watchlists': typeof WatchlistsRoute
+  '/youtube': typeof YoutubeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/vault': typeof VaultRoute
   '/videos': typeof VideosRoute
   '/watchlists': typeof WatchlistsRoute
+  '/youtube': typeof YoutubeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -321,6 +330,7 @@ export interface FileRouteTypes {
     | '/vault'
     | '/videos'
     | '/watchlists'
+    | '/youtube'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -353,6 +363,7 @@ export interface FileRouteTypes {
     | '/vault'
     | '/videos'
     | '/watchlists'
+    | '/youtube'
   id:
     | '__root__'
     | '/'
@@ -385,6 +396,7 @@ export interface FileRouteTypes {
     | '/vault'
     | '/videos'
     | '/watchlists'
+    | '/youtube'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -418,10 +430,18 @@ export interface RootRouteChildren {
   VaultRoute: typeof VaultRoute
   VideosRoute: typeof VideosRoute
   WatchlistsRoute: typeof WatchlistsRoute
+  YoutubeRoute: typeof YoutubeRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/youtube': {
+      id: '/youtube'
+      path: '/youtube'
+      fullPath: '/youtube'
+      preLoaderRoute: typeof YoutubeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/watchlists': {
       id: '/watchlists'
       path: '/watchlists'
@@ -666,6 +686,7 @@ const rootRouteChildren: RootRouteChildren = {
   VaultRoute: VaultRoute,
   VideosRoute: VideosRoute,
   WatchlistsRoute: WatchlistsRoute,
+  YoutubeRoute: YoutubeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
