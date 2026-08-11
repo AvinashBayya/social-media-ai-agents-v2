@@ -14,7 +14,7 @@
 
 ### Deployed state — 2026-08-11
 
-`sentinel-web` runs **`v17`** / revision **`sentinel-web--0000015`** (healthy, 1 replica).
+`sentinel-web` runs **`v18`** / revision **`sentinel-web--0000016`** (healthy, 1 replica).
 A snapshot, and one that has gone stale before: CLAUDE.md still said `v13` a day after
 `v14` shipped. Verify against the live app before trusting this line.
 
