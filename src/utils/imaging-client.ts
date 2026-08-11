@@ -50,7 +50,10 @@ export interface DecodedImage {
 /** Longest edge the analysis canvas will use. Bounds memory on a 50MP upload. */
 const MAX_ANALYSIS_EDGE = 1600;
 
-function canvas2d(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+function canvas2d(
+  width: number,
+  height: number,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -194,7 +197,11 @@ export async function runOcr(
       "ocr",
     );
   } finally {
-    try { await worker?.terminate(); } catch { /* worker already gone */ }
+    try {
+      await worker?.terminate();
+    } catch {
+      /* worker already gone */
+    }
   }
 }
 
@@ -258,7 +265,10 @@ export async function extractKeyframes(
     for (let i = 0; i < total; i += 1) {
       const time = Math.min(i * intervalSeconds, Math.max(0, duration - 0.05));
       await new Promise<void>((resolve, reject) => {
-        const onSeeked = () => { video.removeEventListener("seeked", onSeeked); resolve(); };
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
         video.addEventListener("seeked", onSeeked);
         video.onerror = () =>
           reject(new MediaError(`Seek to ${time.toFixed(1)}s failed.`, "video"));

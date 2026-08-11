@@ -25,15 +25,17 @@ export function NotImplementedPanel() {
           Not implemented — and why
         </h3>
         <p className="mt-1.5 text-[10px] leading-relaxed text-[#94A3B8]">
-          These capabilities are absent by decision, not oversight. Each entry states what it
-          would require and what it would still get wrong if we had it. Nothing in this system
-          produces a deepfake score, because a score we cannot stand behind is worse than a
-          stated gap.
+          These capabilities are absent by decision, not oversight. Each entry states what it would
+          require and what it would still get wrong if we had it. Nothing in this system produces a
+          deepfake score, because a score we cannot stand behind is worse than a stated gap.
         </p>
 
         <div className="mt-3 space-y-2">
           {NOT_IMPLEMENTED.map((gap) => (
-            <div key={gap.capability} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5">
+            <div
+              key={gap.capability}
+              className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5"
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-semibold text-white">{gap.capability}</span>
                 <Badge

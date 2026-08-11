@@ -6,17 +6,34 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  FileBarChart, Loader2, AlertTriangle, Info, Search, Download, FileText,
-  Sparkles, Check, Trash2, ChevronDown, ChevronRight, Shield,
+  FileBarChart,
+  Loader2,
+  AlertTriangle,
+  Info,
+  Search,
+  Download,
+  FileText,
+  Sparkles,
+  Check,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  Shield,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchNews } from "./news";
 import { clusterStories, type Article } from "@/utils/analysis";
 import { bandFor, defaultFactors, scoreCorpus } from "@/utils/credibility";
 import {
-  generateIntelligenceProduct, renumber, sourcesFromArticles, sourcesFromGeo, toMarkdown,
+  generateIntelligenceProduct,
+  renumber,
+  sourcesFromArticles,
+  sourcesFromGeo,
+  toMarkdown,
   PRODUCT_TYPES,
-  type IntelligenceProduct, type ProductType, type SourceRef,
+  type IntelligenceProduct,
+  type ProductType,
+  type SourceRef,
 } from "@/utils/reports";
 import { renderProductPdf } from "@/utils/report-pdf";
 import { fetchGeoLayers } from "@/utils/geo-sources";
@@ -123,7 +140,9 @@ function ReportsPage() {
     }
   }, []);
 
-  useEffect(() => { collect(target); }, [target, collect]);
+  useEffect(() => {
+    collect(target);
+  }, [target, collect]);
 
   const selected = useMemo(
     () => renumber(candidates.filter((s) => !excluded.has(s.n))),
@@ -246,7 +265,9 @@ function ReportsPage() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-[10px] leading-relaxed text-[#94A3B8]">{spec.description}</p>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                {spec.description}
+              </p>
 
               {collectError && (
                 <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
@@ -275,8 +296,8 @@ function ReportsPage() {
               <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
                 <Info className="mt-px size-3 shrink-0" />
                 Nothing is generated until you press Generate. Exclude anything you do not want
-                cited — the product can only draw on what remains, and every claim in it is
-                checked to resolve against one of these numbered entries.
+                cited — the product can only draw on what remains, and every claim in it is checked
+                to resolve against one of these numbered entries.
               </p>
 
               <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
@@ -299,7 +320,8 @@ function ReportsPage() {
                       onClick={() =>
                         setExcluded((prev) => {
                           const next = new Set(prev);
-                          if (next.has(s.n)) next.delete(s.n); else next.add(s.n);
+                          if (next.has(s.n)) next.delete(s.n);
+                          else next.add(s.n);
                           return next;
                         })
                       }
@@ -339,8 +361,14 @@ function ReportsPage() {
                 disabled={generating || selected.length === 0}
                 className="mt-3 h-9 w-full gap-1.5 bg-[#10B981] font-bold text-black hover:bg-[#059669]"
               >
-                {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                {generating ? "Generating…" : `Generate ${spec.label} from ${selected.length} source(s)`}
+                {generating ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                {generating
+                  ? "Generating…"
+                  : `Generate ${spec.label} from ${selected.length} source(s)`}
               </Button>
 
               {genError && (
@@ -399,7 +427,8 @@ function ReportsPage() {
                           </Badge>
 
                           <Button
-                            size="sm" variant="outline"
+                            size="sm"
+                            variant="outline"
                             onClick={() => exportPdf(p)}
                             disabled={exporting === `${p.id}-pdf`}
                             className="h-6 gap-1 text-[9px]"
@@ -412,7 +441,8 @@ function ReportsPage() {
                             PDF
                           </Button>
                           <Button
-                            size="sm" variant="outline"
+                            size="sm"
+                            variant="outline"
                             onClick={() => exportMarkdown(p)}
                             className="h-6 gap-1 text-[9px]"
                           >
@@ -447,8 +477,8 @@ function ReportsPage() {
               <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-[#94A3B8]">
                 <li>Every judgement and finding must cite numbered sources.</li>
                 <li>
-                  Citations are resolved against the real source list AFTER generation. A
-                  citation to a source that was not supplied fails validation.
+                  Citations are resolved against the real source list AFTER generation. A citation
+                  to a source that was not supplied fails validation.
                 </li>
                 <li>
                   Findings are typed <em>reported</em> or <em>assessment</em>, so an inference is
@@ -490,12 +520,16 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
       </div>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">Bottom line</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">
+          Bottom line
+        </h4>
         <p className="mt-1 text-[11px] leading-relaxed text-[#F3F4F6]">{product.bottomLine}</p>
       </section>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">Key judgements</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">
+          Key judgements
+        </h4>
         <div className="mt-1 space-y-2">
           {product.keyJudgements.map((kj, i) => (
             <div key={i} className="rounded border border-[#263548] bg-[#111827] p-2">
@@ -592,7 +626,9 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
       </section>
 
       <section className="border-t border-[#263548] pt-2">
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Provenance</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+          Provenance
+        </h4>
         <dl className="mt-1 space-y-0.5 font-mono text-[9px]">
           <div className="flex justify-between">
             <dt className="text-[#64748B]">Model</dt>

@@ -38,16 +38,20 @@ function ThreatsPage() {
             points at the tools rather than asserting a conclusion.
           */}
           <p className="text-[#94A3B8] leading-relaxed">
-            No threat index is computed for this target. Nothing in this system correlates
-            blocklist hits, DNS records and actor infrastructure into a single rating, so none
-            is shown — a number here would be an assertion, not a measurement.
+            No threat index is computed for this target. Nothing in this system correlates blocklist
+            hits, DNS records and actor infrastructure into a single rating, so none is shown — a
+            number here would be an assertion, not a measurement.
           </p>
           <p className="mt-2 text-[#94A3B8] leading-relaxed">
             The collectors that do run are reachable directly:{" "}
-            <a href="/recon" className="text-[#3B82F6] hover:underline">Recon</a> resolves DNS via
-            Cloudflare DoH and queries Shodan InternetDB for exposed services, and{" "}
-            <a href="/osint" className="text-[#3B82F6] hover:underline">OSINT</a> pulls the Feodo
-            C2 blocklist. Both report what they actually find, including nothing.
+            <a href="/recon" className="text-[#3B82F6] hover:underline">
+              Recon
+            </a>{" "}
+            resolves DNS via Cloudflare DoH and queries Shodan InternetDB for exposed services, and{" "}
+            <a href="/osint" className="text-[#3B82F6] hover:underline">
+              OSINT
+            </a>{" "}
+            pulls the Feodo C2 blocklist. Both report what they actually find, including nothing.
           </p>
         </Card>
       </div>

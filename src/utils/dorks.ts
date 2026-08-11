@@ -229,11 +229,7 @@ export interface BuiltDork {
  * those is built without an outlet the placeholder would survive into the query
  * and match nothing, so we reject it rather than run a silently broken search.
  */
-export function buildDork(
-  template: DorkTemplate,
-  target: string,
-  outlet?: string,
-): BuiltDork {
+export function buildDork(template: DorkTemplate, target: string, outlet?: string): BuiltDork {
   const clean = (target || "").trim();
   if (!clean) throw new Error("A target is required to build a dork.");
 

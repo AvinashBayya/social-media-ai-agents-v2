@@ -41,19 +41,27 @@ import {
 // documented-limitation test at the end of this block for that case, kept
 // deliberately rather than hidden.
 
-const SCENE = syntheticImage(256, 256, (x, y) =>
-  128 + 50 * Math.sin(x / 40) + 30 * Math.cos(y / 55) + 15 * Math.sin((x + y) / 70),
+const SCENE = syntheticImage(
+  256,
+  256,
+  (x, y) => 128 + 50 * Math.sin(x / 40) + 30 * Math.cos(y / 55) + 15 * Math.sin((x + y) / 70),
 );
-const OTHER_SCENE = syntheticImage(256, 256, (x, y) =>
-  128 + 70 * Math.sin(x / 48) * Math.cos(y / 64) + 30 * Math.cos((x * x + y * y) / 9000),
+const OTHER_SCENE = syntheticImage(
+  256,
+  256,
+  (x, y) => 128 + 70 * Math.sin(x / 48) * Math.cos(y / 64) + 30 * Math.cos((x * x + y * y) / 9000),
 );
-const THIRD_SCENE = syntheticImage(256, 256, (x, y) =>
-  128 + 55 * Math.cos((x - y) / 52) - 45 * Math.sin(y / 36),
+const THIRD_SCENE = syntheticImage(
+  256,
+  256,
+  (x, y) => 128 + 55 * Math.cos((x - y) / 52) - 45 * Math.sin(y / 36),
 );
 const FLAT = syntheticImage(256, 256, () => 128);
 /** High-frequency content, at the edge of what a 32x32 hash can represent. */
-const NEAR_NYQUIST = syntheticImage(256, 256, (x, y) =>
-  128 + 90 * Math.sin(x / 18) * Math.cos(y / 27) + 40 * Math.sin((x + y) / 9),
+const NEAR_NYQUIST = syntheticImage(
+  256,
+  256,
+  (x, y) => 128 + 90 * Math.sin(x / 18) * Math.cos(y / 27) + 40 * Math.sin((x + y) / 9),
 );
 
 // ─── DCT ───────────────────────────────────────────────────────────────────
@@ -138,8 +146,10 @@ describe("pHash", () => {
     // The DC coefficient is excluded precisely so exposure changes do not move
     // the hash. If this fails, that exclusion has been lost. The pattern must
     // not clip at 0 or 255 — a clipped shift changes structure, not just level.
-    const brighter = syntheticImage(256, 256, (x, y) =>
-      153 + 50 * Math.sin(x / 40) + 30 * Math.cos(y / 55) + 15 * Math.sin((x + y) / 70),
+    const brighter = syntheticImage(
+      256,
+      256,
+      (x, y) => 153 + 50 * Math.sin(x / 40) + 30 * Math.cos(y / 55) + 15 * Math.sin((x + y) / 70),
     );
     const d = hammingDistance(base, hashRgba(brighter.data, brighter.width, brighter.height));
     expect(d).toBeLessThanOrEqual(IDENTICAL_DISTANCE);
@@ -186,12 +196,15 @@ describe("hammingDistance", () => {
   });
 
   test("is symmetric", () => {
-    expect(hammingDistance("a3f9012048bd7e6c", "1c07fedfb7428193"))
-      .toBe(hammingDistance("1c07fedfb7428193", "a3f9012048bd7e6c"));
+    expect(hammingDistance("a3f9012048bd7e6c", "1c07fedfb7428193")).toBe(
+      hammingDistance("1c07fedfb7428193", "a3f9012048bd7e6c"),
+    );
   });
 
   test("satisfies the triangle inequality on a sample triple", () => {
-    const a = "0000000000000000", b = "00000000000000ff", c = "000000000000ffff";
+    const a = "0000000000000000",
+      b = "00000000000000ff",
+      c = "000000000000ffff";
     expect(hammingDistance(a, c)).toBeLessThanOrEqual(
       hammingDistance(a, b) + hammingDistance(b, c),
     );
@@ -415,7 +428,11 @@ describe("C2PA interpretation", () => {
               label: "c2pa.actions",
               data: {
                 actions: [
-                  { action: "c2pa.created", softwareAgent: "Canon EOS R5", when: "2026-07-14T09:12:33.000Z" },
+                  {
+                    action: "c2pa.created",
+                    softwareAgent: "Canon EOS R5",
+                    when: "2026-07-14T09:12:33.000Z",
+                  },
                   { action: "c2pa.color_adjustments", softwareAgent: "Adobe Photoshop 25.0" },
                 ],
               },
@@ -453,7 +470,10 @@ describe("C2PA interpretation", () => {
   test("a failed signature check is reported as a hard finding", () => {
     const tampered = JSON.parse(JSON.stringify(signed));
     tampered.manifestStore.validationStatus = [
-      { code: "assertion.dataHash.mismatch", explanation: "Asset data does not match the claim hash" },
+      {
+        code: "assertion.dataHash.mismatch",
+        explanation: "Asset data does not match the claim hash",
+      },
     ];
     const report = interpretC2pa(tampered);
     expect(report.status).toBe("invalid");
@@ -518,7 +538,17 @@ describe("OCR interpretation", () => {
 
   test("covers the nine Indic scripts the language layer detects", () => {
     const scripts = new Set(OCR_LANGUAGES.map((l) => l.script));
-    for (const s of ["Devanagari", "Tamil", "Telugu", "Bengali", "Kannada", "Malayalam", "Gujarati", "Gurmukhi", "Odia"]) {
+    for (const s of [
+      "Devanagari",
+      "Tamil",
+      "Telugu",
+      "Bengali",
+      "Kannada",
+      "Malayalam",
+      "Gujarati",
+      "Gurmukhi",
+      "Odia",
+    ]) {
       expect(scripts.has(s)).toBe(true);
     }
   });

@@ -67,7 +67,10 @@ function dctBasis(n: number): Float64Array {
 const BASIS_CACHE = new Map<number, Float64Array>();
 function basisFor(n: number): Float64Array {
   let b = BASIS_CACHE.get(n);
-  if (!b) { b = dctBasis(n); BASIS_CACHE.set(n, b); }
+  if (!b) {
+    b = dctBasis(n);
+    BASIS_CACHE.set(n, b);
+  }
   return b;
 }
 
@@ -138,8 +141,9 @@ export function pHash(gray: Float64Array | number[], size = PHASH_SIZE): string 
   return hex;
 }
 
-const POPCOUNT = Array.from({ length: 16 }, (_, i) =>
-  (i & 1) + ((i >> 1) & 1) + ((i >> 2) & 1) + ((i >> 3) & 1),
+const POPCOUNT = Array.from(
+  { length: 16 },
+  (_, i) => (i & 1) + ((i >> 1) & 1) + ((i >> 2) & 1) + ((i >> 3) & 1),
 );
 
 /** Bits that differ between two hex-encoded hashes of equal length. */
@@ -495,7 +499,8 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
   }
 
   if (captureTime && modifyTime) {
-    const gapMinutes = Math.abs(new Date(modifyTime).getTime() - new Date(captureTime).getTime()) / 60_000;
+    const gapMinutes =
+      Math.abs(new Date(modifyTime).getTime() - new Date(captureTime).getTime()) / 60_000;
     if (gapMinutes > 1) {
       findings.push({
         id: "timestamp_gap",
@@ -587,8 +592,14 @@ const AI_ACTION_HINTS = [
 export function interpretC2pa(result: any, error?: string): C2paReport {
   if (error) {
     return {
-      status: "error", signedBy: null, signedAt: null, generator: null, actions: [],
-      aiGenerated: false, aiEvidence: null, validationIssues: [error],
+      status: "error",
+      signedBy: null,
+      signedAt: null,
+      generator: null,
+      actions: [],
+      aiGenerated: false,
+      aiEvidence: null,
+      validationIssues: [error],
       summary: `Content Credentials could not be read: ${error}`,
       method: C2PA_METHOD,
     };
@@ -597,8 +608,14 @@ export function interpretC2pa(result: any, error?: string): C2paReport {
   const active = result?.manifestStore?.activeManifest;
   if (!active) {
     return {
-      status: "absent", signedBy: null, signedAt: null, generator: null, actions: [],
-      aiGenerated: false, aiEvidence: null, validationIssues: [],
+      status: "absent",
+      signedBy: null,
+      signedAt: null,
+      generator: null,
+      actions: [],
+      aiGenerated: false,
+      aiEvidence: null,
+      validationIssues: [],
       summary: `No C2PA manifest is attached to this file. ${C2PA_ABSENCE_NOTE}`,
       method: C2PA_METHOD,
     };
@@ -630,7 +647,11 @@ export function interpretC2pa(result: any, error?: string): C2paReport {
   // them, and missing an AI declaration because it sat one key deeper than
   // expected is a worse failure than matching broadly.
   const serialised = (() => {
-    try { return JSON.stringify(active); } catch { return ""; }
+    try {
+      return JSON.stringify(active);
+    } catch {
+      return "";
+    }
   })();
   const aiHit = AI_ACTION_HINTS.find((h) => serialised.includes(h) && h !== "c2pa.created");
   const aiGenerated = Boolean(aiHit);
@@ -657,9 +678,16 @@ export function interpretC2pa(result: any, error?: string): C2paReport {
   }
 
   return {
-    status, signedBy, signedAt, generator, actions, aiGenerated,
+    status,
+    signedBy,
+    signedAt,
+    generator,
+    actions,
+    aiGenerated,
     aiEvidence: aiHit ? `Manifest carries the "${aiHit}" assertion.` : null,
-    validationIssues, summary, method: C2PA_METHOD,
+    validationIssues,
+    summary,
+    method: C2PA_METHOD,
   };
 }
 
@@ -690,7 +718,12 @@ const INDIC_NOTE =
  * as text collected from a feed.
  */
 export const OCR_LANGUAGES: OcrLanguage[] = [
-  { code: "eng", label: "English", script: "Latin", accuracyNote: "Highest accuracy. Reliable on printed text at reasonable resolution." },
+  {
+    code: "eng",
+    label: "English",
+    script: "Latin",
+    accuracyNote: "Highest accuracy. Reliable on printed text at reasonable resolution.",
+  },
   { code: "hin", label: "Hindi", script: "Devanagari", accuracyNote: INDIC_NOTE },
   { code: "mar", label: "Marathi", script: "Devanagari", accuracyNote: INDIC_NOTE },
   { code: "san", label: "Sanskrit", script: "Devanagari", accuracyNote: INDIC_NOTE },
@@ -703,7 +736,12 @@ export const OCR_LANGUAGES: OcrLanguage[] = [
   { code: "pan", label: "Punjabi", script: "Gurmukhi", accuracyNote: INDIC_NOTE },
   { code: "ori", label: "Odia", script: "Odia", accuracyNote: INDIC_NOTE },
   { code: "urd", label: "Urdu", script: "Arabic", accuracyNote: INDIC_NOTE },
-  { code: "ara", label: "Arabic", script: "Arabic", accuracyNote: "Lower than Latin. Cursive joining and diacritics are frequently mis-segmented." },
+  {
+    code: "ara",
+    label: "Arabic",
+    script: "Arabic",
+    accuracyNote: "Lower than Latin. Cursive joining and diacritics are frequently mis-segmented.",
+  },
 ];
 
 export interface OcrWord {
@@ -788,10 +826,7 @@ export interface SceneReport {
  * Sampling at a fixed interval means a cut is located to within one interval,
  * not to the frame — stated in the method string rather than implied away.
  */
-export function detectSceneCuts(
-  frames: Keyframe[],
-  threshold = SCENE_CUT_DISTANCE,
-): SceneReport {
+export function detectSceneCuts(frames: Keyframe[], threshold = SCENE_CUT_DISTANCE): SceneReport {
   const method =
     `Hamming distance between perceptual hashes of consecutive sampled frames, cut at >= ` +
     `${threshold} of 64 bits. Frames are sampled at a fixed interval, so a cut is located to ` +
@@ -846,7 +881,9 @@ export function assessProvenance(input: {
   if (input.c2pa) {
     if (input.c2pa.status === "valid") {
       findings.push({
-        label: input.c2pa.aiGenerated ? "Declared AI-generated (signed)" : "Content Credentials validate",
+        label: input.c2pa.aiGenerated
+          ? "Declared AI-generated (signed)"
+          : "Content Credentials validate",
         detail: input.c2pa.summary,
         strength: "verified",
       });
@@ -947,8 +984,7 @@ export const NOT_IMPLEMENTED: Gap[] = [
   },
   {
     capability: "Diffusion-generated image detection",
-    requires:
-      "A trained detector plus GPU inference, retrained as each new generator is released.",
+    requires: "A trained detector plus GPU inference, retrained as each new generator is released.",
     limitation:
       "Detectors are generator-specific in practice and lag new models by months. Where a C2PA " +
       "manifest declares generative provenance we report it with high confidence, because that " +
@@ -956,8 +992,7 @@ export const NOT_IMPLEMENTED: Gap[] = [
   },
   {
     capability: "Object and materiel recognition",
-    requires:
-      "Grounding DINO (Apache 2.0) for open-vocabulary detection, with GPU inference.",
+    requires: "Grounding DINO (Apache 2.0) for open-vocabulary detection, with GPU inference.",
     licence:
       "Grounding DINO is Apache 2.0 and usable here. Ultralytics YOLO is AGPL-3.0 and must NOT " +
       "be used: it would force open-sourcing the entire system unless a commercial licence is " +

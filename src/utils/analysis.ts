@@ -52,15 +52,58 @@ export function sourceKeyOf(article: Article): string {
 // ─── Tokenisation ──────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "of", "in", "on", "to", "for", "with", "at",
-  "by", "from", "as", "is", "are", "was", "were", "be", "been", "after", "over",
-  "says", "said", "amid", "new", "its", "it", "this", "that", "has", "have",
-  "will", "into", "about", "more", "than", "but",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "in",
+  "on",
+  "to",
+  "for",
+  "with",
+  "at",
+  "by",
+  "from",
+  "as",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "after",
+  "over",
+  "says",
+  "said",
+  "amid",
+  "new",
+  "its",
+  "it",
+  "this",
+  "that",
+  "has",
+  "have",
+  "will",
+  "into",
+  "about",
+  "more",
+  "than",
+  "but",
   // Prepositions that survive the >2-character filter. Leaving these in pads the
   // Jaccard denominator with noise: "India tests hypersonic missile OFF Odisha
   // COAST" vs "DRDO confirms Odisha hypersonic missile test" scored 0.444 and
   // fell just under the 0.45 threshold purely because of "off".
-  "off", "out", "per", "via", "near", "amongst", "among", "onto", "upon",
+  "off",
+  "out",
+  "per",
+  "via",
+  "near",
+  "amongst",
+  "among",
+  "onto",
+  "upon",
 ]);
 
 /**
@@ -122,17 +165,41 @@ export interface LanguageResult {
   /** ISO 639-1 where unambiguous, else a script tag like "deva". */
   code: string;
   name: string;
-  script: "latin" | "devanagari" | "bengali" | "gurmukhi" | "gujarati" | "odia" | "tamil" | "telugu" | "kannada" | "malayalam" | "arabic" | "unknown";
+  script:
+    | "latin"
+    | "devanagari"
+    | "bengali"
+    | "gurmukhi"
+    | "gujarati"
+    | "odia"
+    | "tamil"
+    | "telugu"
+    | "kannada"
+    | "malayalam"
+    | "arabic"
+    | "unknown";
   confidence: number;
   /** True when the script is unambiguous but the language within it is not. */
   ambiguous: boolean;
 }
 
-const SCRIPT_RANGES: { script: LanguageResult["script"]; re: RegExp; code: string; name: string; ambiguous: boolean }[] = [
+const SCRIPT_RANGES: {
+  script: LanguageResult["script"];
+  re: RegExp;
+  code: string;
+  name: string;
+  ambiguous: boolean;
+}[] = [
   // Devanagari carries Hindi, Marathi, Nepali, Sanskrit and Konkani. Script
   // detection cannot separate them, and pretending otherwise would be a
   // fabricated identification — so it is reported as ambiguous.
-  { script: "devanagari", re: /[ऀ-ॿ]/g, code: "deva", name: "Devanagari (Hindi / Marathi / Nepali)", ambiguous: true },
+  {
+    script: "devanagari",
+    re: /[ऀ-ॿ]/g,
+    code: "deva",
+    name: "Devanagari (Hindi / Marathi / Nepali)",
+    ambiguous: true,
+  },
   { script: "bengali", re: /[ঀ-৿]/g, code: "bn", name: "Bengali / Assamese", ambiguous: true },
   { script: "gurmukhi", re: /[਀-੿]/g, code: "pa", name: "Punjabi", ambiguous: false },
   { script: "gujarati", re: /[઀-૿]/g, code: "gu", name: "Gujarati", ambiguous: false },
@@ -146,11 +213,31 @@ const SCRIPT_RANGES: { script: LanguageResult["script"]; re: RegExp; code: strin
 
 /** Distinctive high-frequency words, for Latin-script disambiguation. */
 const LATIN_MARKERS: { code: string; name: string; words: string[] }[] = [
-  { code: "en", name: "English", words: ["the", "and", "of", "to", "in", "for", "with", "said", "after"] },
-  { code: "es", name: "Spanish", words: ["el", "la", "los", "las", "de", "que", "para", "con", "según"] },
-  { code: "fr", name: "French", words: ["le", "la", "les", "des", "une", "pour", "avec", "selon", "après"] },
-  { code: "de", name: "German", words: ["der", "die", "das", "und", "mit", "nach", "über", "auch", "wurde"] },
-  { code: "pt", name: "Portuguese", words: ["de", "que", "para", "com", "uma", "não", "segundo", "após"] },
+  {
+    code: "en",
+    name: "English",
+    words: ["the", "and", "of", "to", "in", "for", "with", "said", "after"],
+  },
+  {
+    code: "es",
+    name: "Spanish",
+    words: ["el", "la", "los", "las", "de", "que", "para", "con", "según"],
+  },
+  {
+    code: "fr",
+    name: "French",
+    words: ["le", "la", "les", "des", "une", "pour", "avec", "selon", "après"],
+  },
+  {
+    code: "de",
+    name: "German",
+    words: ["der", "die", "das", "und", "mit", "nach", "über", "auch", "wurde"],
+  },
+  {
+    code: "pt",
+    name: "Portuguese",
+    words: ["de", "que", "para", "com", "uma", "não", "segundo", "após"],
+  },
 ];
 
 /** Below this share of non-Latin characters, stray glyphs are treated as noise. */
@@ -170,7 +257,10 @@ export function detectLanguage(article: Pick<Article, "title" | "body">): Langua
   for (const entry of SCRIPT_RANGES) {
     const hits = (text.match(entry.re) ?? []).length;
     const share = hits / total;
-    if (share > bestShare) { bestShare = share; best = entry; }
+    if (share > bestShare) {
+      bestShare = share;
+      best = entry;
+    }
   }
 
   if (best && bestShare >= SCRIPT_SHARE_FLOOR) {
@@ -186,7 +276,11 @@ export function detectLanguage(article: Pick<Article, "title" | "body">): Langua
   }
 
   // Latin script: score against stopword markers.
-  const words = text.toLowerCase().replace(/[^a-zà-ÿ\s]/g, " ").split(/\s+/).filter(Boolean);
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-zà-ÿ\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
   if (words.length === 0) {
     return { code: "und", name: "Undetermined", script: "unknown", confidence: 0, ambiguous: true };
   }
@@ -196,7 +290,10 @@ export function detectLanguage(article: Pick<Article, "title" | "body">): Langua
   let bestHits = 0;
   for (const lang of LATIN_MARKERS) {
     const hits = lang.words.filter((w) => wordSet.has(w)).length;
-    if (hits > bestHits) { bestHits = hits; bestLang = lang; }
+    if (hits > bestHits) {
+      bestHits = hits;
+      bestLang = lang;
+    }
   }
 
   return {
@@ -280,7 +377,10 @@ export function corpusTerms(corpus: Article[], limit = 8): Keyword[] {
   const docSets = docTokens.map((t) => new Set(t));
   const n = corpus.length;
 
-  const totals = new Map<string, { score: number; tf: number; documentCount: number; idf: number }>();
+  const totals = new Map<
+    string,
+    { score: number; tf: number; documentCount: number; idf: number }
+  >();
   docTokens.forEach((tokens) => {
     if (tokens.length === 0) return;
     const counts = new Map<string, number>();
@@ -299,12 +399,20 @@ export function corpusTerms(corpus: Article[], limit = 8): Keyword[] {
     }
   });
 
-  return Array.from(totals.entries())
-    // A term appearing in exactly one article says nothing about the collection.
-    .filter(([, v]) => v.documentCount > 1)
-    .map(([term, v]) => ({ term, tf: v.tf, idf: v.idf, score: v.score, documentCount: v.documentCount }))
-    .sort((a, b) => b.score - a.score || a.term.localeCompare(b.term))
-    .slice(0, limit);
+  return (
+    Array.from(totals.entries())
+      // A term appearing in exactly one article says nothing about the collection.
+      .filter(([, v]) => v.documentCount > 1)
+      .map(([term, v]) => ({
+        term,
+        tf: v.tf,
+        idf: v.idf,
+        score: v.score,
+        documentCount: v.documentCount,
+      }))
+      .sort((a, b) => b.score - a.score || a.term.localeCompare(b.term))
+      .slice(0, limit)
+  );
 }
 
 // ─── 3. Clustering (union-find) ────────────────────────────────────────────
@@ -329,13 +437,19 @@ export interface StoryCluster {
 
 class UnionFind {
   private parent: number[];
-  constructor(n: number) { this.parent = Array.from({ length: n }, (_, i) => i); }
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+  }
   find(x: number): number {
-    while (this.parent[x] !== x) { this.parent[x] = this.parent[this.parent[x]]; x = this.parent[x]; }
+    while (this.parent[x] !== x) {
+      this.parent[x] = this.parent[this.parent[x]];
+      x = this.parent[x];
+    }
     return x;
   }
   union(a: number, b: number): void {
-    const ra = this.find(a), rb = this.find(b);
+    const ra = this.find(a),
+      rb = this.find(b);
     if (ra !== rb) this.parent[rb] = ra;
   }
 }
@@ -367,7 +481,8 @@ export function clusterStories(corpus: Article[]): StoryCluster[] {
   corpus.forEach((a, i) => {
     const root = uf.find(i);
     const list = groups.get(root);
-    if (list) list.push(a); else groups.set(root, [a]);
+    if (list) list.push(a);
+    else groups.set(root, [a]);
   });
 
   const clusters: StoryCluster[] = [];
@@ -402,7 +517,9 @@ export function clusterStories(corpus: Article[]): StoryCluster[] {
 
   // Biggest stories first; ties broken by recency of the first report.
   return clusters.sort(
-    (a, b) => b.independentDomains.length - a.independentDomains.length || timeOf(b.members[0]) - timeOf(a.members[0]),
+    (a, b) =>
+      b.independentDomains.length - a.independentDomains.length ||
+      timeOf(b.members[0]) - timeOf(a.members[0]),
   );
 }
 
@@ -435,7 +552,12 @@ export function buildTimeline(cluster: StoryCluster): Timeline {
   const dated = cluster.members.filter((m) => Number.isFinite(timeOf(m)));
   if (dated.length === 0) {
     return {
-      entries: cluster.members.map((m) => ({ article: m, domain: sourceKeyOf(m), minutesAfterFirst: null, isFirst: false })),
+      entries: cluster.members.map((m) => ({
+        article: m,
+        domain: sourceKeyOf(m),
+        minutesAfterFirst: null,
+        isFirst: false,
+      })),
       brokenBy: null,
       spanMinutes: null,
       summary: "No member of this cluster carries a usable publication date.",
@@ -460,10 +582,17 @@ export function buildTimeline(cluster: StoryCluster): Timeline {
   } else {
     const second = entries[1];
     const gap = second.minutesAfterFirst ?? 0;
-    const gapText = gap < 1 ? "within a minute" : gap < 60 ? `${gap} minutes later` : `${Math.round(gap / 60)}h later`;
+    const gapText =
+      gap < 1
+        ? "within a minute"
+        : gap < 60
+          ? `${gap} minutes later`
+          : `${Math.round(gap / 60)}h later`;
     summary =
       `First reported by ${brokenBy}, picked up by ${second.domain} ${gapText}` +
-      (entries.length > 2 ? `, then ${entries.length - 2} more source${entries.length - 2 === 1 ? "" : "s"}` : "") +
+      (entries.length > 2
+        ? `, then ${entries.length - 2} more source${entries.length - 2 === 1 ? "" : "s"}`
+        : "") +
       ` over ${spanMinutes < 60 ? `${spanMinutes} minutes` : `${Math.round(spanMinutes / 60)} hours`}.`;
   }
 

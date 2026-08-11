@@ -116,7 +116,16 @@ describe("source assembly", () => {
 
   test("social, imagery and geo sources each record which module contributed them", () => {
     const social = sourcesFromSocial(
-      [{ id: "p1", author: "a.bsky.social", text: "post text", url: "u", createdAt: "2026-07-14T00:00:00Z", platform: "bluesky" }],
+      [
+        {
+          id: "p1",
+          author: "a.bsky.social",
+          text: "post text",
+          url: "u",
+          createdAt: "2026-07-14T00:00:00Z",
+          platform: "bluesky",
+        },
+      ],
       { p1: { cibScore: 0.8, maturityConcern: 0.6 } },
     );
     expect(social[0].module).toBe("Module 3 · social");
@@ -125,7 +134,12 @@ describe("source assembly", () => {
     expect(social[0].credibilityRationale).toContain("not inauthenticity");
 
     const imagery = sourcesFromImages([
-      { id: "i1", name: "photo.jpg", findings: ["No C2PA manifest"], capturedAt: "2026-07-14T00:00:00Z" },
+      {
+        id: "i1",
+        name: "photo.jpg",
+        findings: ["No C2PA manifest"],
+        capturedAt: "2026-07-14T00:00:00Z",
+      },
     ]);
     expect(imagery[0].module).toBe("Module 4 · imagery");
 
@@ -141,9 +155,10 @@ describe("source assembly", () => {
   });
 
   test("renumbering makes a merged list contiguous from 1", () => {
-    const merged = renumber([...sourcesFromArticles(ARTICLES, []), ...sourcesFromImages([
-      { id: "i", name: "n", findings: [], capturedAt: null },
-    ])]);
+    const merged = renumber([
+      ...sourcesFromArticles(ARTICLES, []),
+      ...sourcesFromImages([{ id: "i", name: "n", findings: [], capturedAt: null }]),
+    ]);
     expect(merged.map((s) => s.n)).toEqual([1, 2, 3, 4]);
   });
 
@@ -192,9 +207,17 @@ describe("citation validation", () => {
   test("problems name the specific judgement or finding at fault", () => {
     const bad: ProductBody = {
       ...BODY,
-      findings: [{ text: "A very specific unattributed claim about something", kind: "reported", sources: [42] }],
+      findings: [
+        {
+          text: "A very specific unattributed claim about something",
+          kind: "reported",
+          sources: [42],
+        },
+      ],
     };
-    expect(validateCitations(bad, SOURCES)[0].where).toContain("A very specific unattributed claim");
+    expect(validateCitations(bad, SOURCES)[0].where).toContain(
+      "A very specific unattributed claim",
+    );
   });
 
   test("the schema itself rejects an empty citation array before validation runs", () => {
@@ -222,7 +245,11 @@ describe("citation validation", () => {
 describe("product structure", () => {
   test("all five product types are defined with a brief and a token budget", () => {
     expect(PRODUCT_TYPES.map((p) => p.id).sort()).toEqual([
-      "DAILY_SUMMARY", "EVENT_TIMELINE", "EXECUTIVE_BRIEF", "TARGET_DOSSIER", "THREAT_ASSESSMENT",
+      "DAILY_SUMMARY",
+      "EVENT_TIMELINE",
+      "EXECUTIVE_BRIEF",
+      "TARGET_DOSSIER",
+      "THREAT_ASSESSMENT",
     ]);
     for (const p of PRODUCT_TYPES) {
       expect(p.brief.length).toBeGreaterThan(80);
@@ -261,7 +288,13 @@ describe("markdown rendering", () => {
   const md = toMarkdown(PRODUCT);
 
   test("contains every required section", () => {
-    for (const section of ["## Bottom Line", "## Key Judgements", "## Findings", "## Intelligence Gaps", "## Sources"]) {
+    for (const section of [
+      "## Bottom Line",
+      "## Key Judgements",
+      "## Findings",
+      "## Intelligence Gaps",
+      "## Sources",
+    ]) {
       expect(md).toContain(section);
     }
   });

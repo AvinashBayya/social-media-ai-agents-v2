@@ -124,8 +124,20 @@ describe("no invented case scores", () => {
 
 describe("pinned evidence becomes a citable source list", () => {
   const evidence = [
-    ev({ id: "a", title: "Reuters report", source: "reuters.com", credibility: 0.9, credibilityRationale: "TIER_1 wire." }),
-    ev({ id: "b", kind: "social", title: "A post", source: "@handle (bluesky)", credibility: null }),
+    ev({
+      id: "a",
+      title: "Reuters report",
+      source: "reuters.com",
+      credibility: 0.9,
+      credibilityRationale: "TIER_1 wire.",
+    }),
+    ev({
+      id: "b",
+      kind: "social",
+      title: "A post",
+      source: "@handle (bluesky)",
+      credibility: null,
+    }),
     ev({ id: "c", kind: "image", title: "photo.jpg", source: "Canon EOS R5" }),
   ];
   const sources = sourcesFromEvidence(evidence);
@@ -156,7 +168,12 @@ describe("pinned evidence becomes a citable source list", () => {
     const body: ProductBody = {
       bottomLine: "Bottom line.",
       keyJudgements: [
-        { judgement: "A judgement.", confidence: "moderate", confidenceRationale: "Two sources.", sources: [1, 2] },
+        {
+          judgement: "A judgement.",
+          confidence: "moderate",
+          confidenceRationale: "Two sources.",
+          sources: [1, 2],
+        },
       ],
       findings: [{ text: "A finding.", kind: "reported", sources: [3] }],
       gaps: [{ gap: "Something unknown.", why: "Not covered by the pinned evidence." }],
@@ -170,7 +187,12 @@ describe("pinned evidence becomes a citable source list", () => {
     const body: ProductBody = {
       bottomLine: "Bottom line.",
       keyJudgements: [
-        { judgement: "A judgement.", confidence: "low", confidenceRationale: "Thin.", sources: [9] },
+        {
+          judgement: "A judgement.",
+          confidence: "low",
+          confidenceRationale: "Thin.",
+          sources: [9],
+        },
       ],
       findings: [{ text: "A finding.", kind: "assessment", sources: [1] }],
       gaps: [{ gap: "Unknown.", why: "Not covered." }],

@@ -6,3 +6,14 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+
+# Vendored map geometry, shipped minified on purpose. Running prettier over
+# these expands three files by ~113,000 lines and inflates what the GIS page
+# downloads at runtime.
+public/data/countries-50m.json
+public/data/countries-110m.json
+public/data/world.geo.json
+
+# Bulk coordinate data rather than hand-maintained source: reformatting it
+# produces ~9,000 lines of churn that hides real edits in review.
+src/data/geo-map.ts

@@ -142,7 +142,8 @@ async function internetDb(ip: string): Promise<HostSurface> {
   }
 
   const json: any = await res.json();
-  const arr = (v: any): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  const arr = (v: any): string[] =>
+    Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 
   return {
     ip,

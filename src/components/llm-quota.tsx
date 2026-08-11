@@ -61,9 +61,7 @@ export function LlmQuotaCard() {
 
   if (!stats) return null;
 
-  const hitRate = stats.totalCalls > 0
-    ? Math.round((stats.cacheHits / stats.totalCalls) * 100)
-    : 0;
+  const hitRate = stats.totalCalls > 0 ? Math.round((stats.cacheHits / stats.totalCalls) * 100) : 0;
 
   const row = (label: string, value: string) => (
     <div className="flex items-center justify-between">

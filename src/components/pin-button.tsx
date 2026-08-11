@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Bookmark, Plus, Check } from "lucide-react";
 import {
-  createInvestigation, getInvestigations, pinToInvestigation,
+  createInvestigation,
+  getInvestigations,
+  pinToInvestigation,
   type PinInput,
 } from "@/utils/investigations-store";
 import { toast } from "sonner";
@@ -52,7 +54,10 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
   return (
     <div className="relative inline-block text-left font-mono">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
         className={`flex items-center gap-1 rounded border px-1.5 py-1 transition-colors ${
           pinned
             ? "border-[#10B981]/50 bg-[#10B981]/10 text-[#10B981]"
@@ -68,7 +73,11 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); setCreating(false); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              setCreating(false);
+            }}
           />
           <div className="absolute right-0 z-50 mt-1 w-64 overflow-hidden rounded border border-[#263548] bg-[#111827] text-[10px] text-[#94A3B8] shadow-xl">
             <div className="border-b border-[#263548] bg-[#0B1220]/60 p-2 text-[9px] font-bold uppercase tracking-wider text-white">
@@ -84,7 +93,10 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                 cases.map((c) => (
                   <button
                     key={c.id}
-                    onClick={(e) => { e.stopPropagation(); pin(c.id, c.title); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pin(c.id, c.title);
+                    }}
                     className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-[#1A2332] hover:text-white"
                   >
                     <span className="max-w-[140px] truncate">{c.title}</span>
@@ -113,7 +125,10 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                     className="min-w-0 flex-1 rounded border border-[#263548] bg-[#0B1220] px-1.5 py-1 text-[10px] text-white outline-none focus:border-[#3B82F6]"
                   />
                   <button
-                    onClick={(e) => { e.stopPropagation(); createAndPin(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      createAndPin();
+                    }}
                     disabled={!newTarget.trim()}
                     className="rounded bg-[#10B981] px-2 py-1 text-[9px] font-bold text-black disabled:opacity-40"
                   >
@@ -122,7 +137,10 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                 </div>
               ) : (
                 <button
-                  onClick={(e) => { e.stopPropagation(); setCreating(true); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCreating(true);
+                  }}
                   className="flex w-full items-center gap-1 rounded px-2 py-1.5 hover:bg-[#1A2332] hover:text-white"
                 >
                   <Plus className="size-3" /> New case from this item

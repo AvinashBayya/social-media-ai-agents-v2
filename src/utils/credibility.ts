@@ -29,8 +29,12 @@
 // Module 2 owns the definition of "the same story" and this module consumes it.
 // Re-exported here so existing importers keep working.
 import {
-  clusterFor, clusterStories, domainOf, sourceKeyOf,
-  type Article, type StoryCluster,
+  clusterFor,
+  clusterStories,
+  domainOf,
+  sourceKeyOf,
+  type Article,
+  type StoryCluster,
 } from "./analysis";
 
 // TYPE-ONLY, and deliberately so. This import is erased at compile time, so the
@@ -42,9 +46,14 @@ import type { LanguageAssessment } from "./llm";
 
 export type { Article, StoryCluster };
 export {
-  domainOf, titleTokens, titleSimilarity, sourceKeyOf,
-  clusterStories, clusterFor,
-  SAME_STORY_THRESHOLD, SYNDICATION_THRESHOLD,
+  domainOf,
+  titleTokens,
+  titleSimilarity,
+  sourceKeyOf,
+  clusterStories,
+  clusterFor,
+  SAME_STORY_THRESHOLD,
+  SYNDICATION_THRESHOLD,
 } from "./analysis";
 
 export interface FactorResult {
@@ -131,7 +140,13 @@ export interface SocialSignalContext {
 // alignment. `type` drives the source_diversity factor.
 
 export type SourceTier = "TIER_1" | "TIER_2" | "TIER_3" | "SPECIALIST" | "LOW";
-export type SourceType = "wire" | "broadsheet" | "government" | "specialist" | "blog" | "aggregator";
+export type SourceType =
+  | "wire"
+  | "broadsheet"
+  | "government"
+  | "specialist"
+  | "blog"
+  | "aggregator";
 
 export const TIER_SCORES: Record<SourceTier, number> = {
   TIER_1: 0.9,
@@ -231,7 +246,10 @@ export function saveCustomDomainOverrides(overrides: Record<string, DomainEntry>
 }
 
 /** Longest-suffix lookup, checking custom domain overrides first, then DOMAIN_REPUTATION. */
-export function reputationOf(domain: string, overrides?: Record<string, DomainEntry>): DomainEntry | null {
+export function reputationOf(
+  domain: string,
+  overrides?: Record<string, DomainEntry>,
+): DomainEntry | null {
   if (!domain) return null;
   const cleanDomain = domain.toLowerCase().trim();
   const activeOverrides = overrides ?? loadCustomDomainOverrides();
@@ -409,7 +427,11 @@ const FULL_SCORE_HOURS = 6;
 const DECAY_END_HOURS = 168; // 7 days
 const RECENCY_FLOOR = 0.3;
 
-function computeRecency(article: Article, _corpus: Article[], now = Date.now()): FactorResult | null {
+function computeRecency(
+  article: Article,
+  _corpus: Article[],
+  now = Date.now(),
+): FactorResult | null {
   const t = new Date(article.pubDate).getTime();
   if (!Number.isFinite(t)) return null;
 
@@ -425,7 +447,11 @@ function computeRecency(article: Article, _corpus: Article[], now = Date.now()):
   }
 
   const age =
-    hours < 1 ? "under an hour" : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)} days`;
+    hours < 1
+      ? "under an hour"
+      : hours < 48
+        ? `${Math.round(hours)}h`
+        : `${Math.round(hours / 24)} days`;
   return {
     score,
     evidence: `Published ${age} ago. For a monitoring tool, stale sourcing is itself a credibility signal.`,
@@ -473,8 +499,12 @@ function computeCustomKeyword(
   _corpus: Article[],
   options?: FactorOptions,
 ): FactorResult | null {
-  const raise = (options?.customKeywords?.raise ?? []).map((k) => k.toLowerCase().trim()).filter(Boolean);
-  const lower = (options?.customKeywords?.lower ?? []).map((k) => k.toLowerCase().trim()).filter(Boolean);
+  const raise = (options?.customKeywords?.raise ?? [])
+    .map((k) => k.toLowerCase().trim())
+    .filter(Boolean);
+  const lower = (options?.customKeywords?.lower ?? [])
+    .map((k) => k.toLowerCase().trim())
+    .filter(Boolean);
 
   // Enabled but with no criterion defined is a configuration gap, not a score.
   if (raise.length === 0 && lower.length === 0) return null;
@@ -685,16 +715,22 @@ function skipReason(
   if (factor.id === "account_maturity" || factor.id === "cib_signals") {
     return "Applies only to social posts; this is a published article.";
   }
-  if (factor.id === "citation_depth" && !article.body?.trim()) return "Feed supplied no body text to scan.";
-  if (factor.id === "corroboration" && corpus.length <= 1) return "Corpus has no other articles to compare against.";
-  if (factor.id === "source_diversity") return "No corroborating sources to measure diversity across.";
+  if (factor.id === "citation_depth" && !article.body?.trim())
+    return "Feed supplied no body text to scan.";
+  if (factor.id === "corroboration" && corpus.length <= 1)
+    return "Corpus has no other articles to compare against.";
+  if (factor.id === "source_diversity")
+    return "No corroborating sources to measure diversity across.";
   if (factor.id === "custom_keyword") return "No keyword criterion defined.";
   if (factor.id === "recency") return "Article has no usable publication date.";
   if (factor.id === "domain_tier") return "No resolvable domain for this article.";
   return "Factor returned no value for this article.";
 }
 
-export function bandFor(score: number | null): { label: string; tone: "high" | "medium" | "low" | "unknown" } {
+export function bandFor(score: number | null): {
+  label: string;
+  tone: "high" | "medium" | "low" | "unknown";
+} {
   if (score === null) return { label: "Unscored", tone: "unknown" };
   if (score >= 0.7) return { label: "High", tone: "high" };
   if (score >= 0.45) return { label: "Moderate", tone: "medium" };
@@ -702,7 +738,11 @@ export function bandFor(score: number | null): { label: string; tone: "high" | "
 }
 
 /** One sentence an analyst can act on, naming the strongest driver each way. */
-function explain(score: number | null, breakdown: FactorBreakdown[], skipped: SkippedFactor[]): string {
+function explain(
+  score: number | null,
+  breakdown: FactorBreakdown[],
+  skipped: SkippedFactor[],
+): string {
   if (score === null) {
     return "Not scored — no factor could be computed for this article.";
   }
@@ -713,9 +753,12 @@ function explain(score: number | null, breakdown: FactorBreakdown[], skipped: Sk
 
   const clauses: string[] = [];
   if (best && best.rawScore >= 0.6) clauses.push(best.evidence.replace(/\.$/, ""));
-  if (worst && worst !== best && worst.rawScore < 0.5) clauses.push(`but ${worst.evidence.replace(/\.$/, "").toLowerCase()}`);
+  if (worst && worst !== best && worst.rawScore < 0.5)
+    clauses.push(`but ${worst.evidence.replace(/\.$/, "").toLowerCase()}`);
 
-  const skippedNote = skipped.length ? ` ${skipped.length} factor${skipped.length === 1 ? "" : "s"} skipped.` : "";
+  const skippedNote = skipped.length
+    ? ` ${skipped.length} factor${skipped.length === 1 ? "" : "s"} skipped.`
+    : "";
   const body = clauses.length ? `: ${clauses.join(", ")}` : "";
   return `${band.charAt(0).toUpperCase() + band.slice(1)} credibility (${score.toFixed(2)})${body}.${skippedNote}`;
 }
@@ -734,13 +777,20 @@ export function scoreArticle(
       skipped.push({
         id: factor.id,
         name: factor.name,
-        reason: factor.weight <= 0 && factor.enabled ? "Weight set to zero." : skipReason(factor, article, corpus, options),
+        reason:
+          factor.weight <= 0 && factor.enabled
+            ? "Weight set to zero."
+            : skipReason(factor, article, corpus, options),
       });
       continue;
     }
     const result = factor.compute(article, corpus, options);
     if (result === null) {
-      skipped.push({ id: factor.id, name: factor.name, reason: skipReason(factor, article, corpus, options) });
+      skipped.push({
+        id: factor.id,
+        name: factor.name,
+        reason: skipReason(factor, article, corpus, options),
+      });
       continue;
     }
     computed.push({ factor, result });
@@ -775,7 +825,14 @@ export function scoreArticle(
   const score = breakdown.reduce((s, b) => s + b.contribution, 0);
   const confidence = breakdown.reduce((s, b) => s + b.weight * b.confidence, 0);
 
-  return { article, score, confidence, breakdown, skipped, explanation: explain(score, breakdown, skipped) };
+  return {
+    article,
+    score,
+    confidence,
+    breakdown,
+    skipped,
+    explanation: explain(score, breakdown, skipped),
+  };
 }
 
 export function scoreCorpus(
@@ -859,7 +916,10 @@ export function builtinProfiles(): WeightProfile[] {
   ];
 }
 
-export function applyProfile(factors: CredibilityFactor[], profile: WeightProfile): CredibilityFactor[] {
+export function applyProfile(
+  factors: CredibilityFactor[],
+  profile: WeightProfile,
+): CredibilityFactor[] {
   return factors.map((f) => {
     const s = profile.settings[f.id];
     return s ? { ...f, weight: s.weight, enabled: s.enabled } : f;

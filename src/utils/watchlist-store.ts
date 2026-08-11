@@ -24,10 +24,10 @@ export interface Watchlist {
 
 export interface WatchlistMatch {
   id: string;
-  source: string;        // e.g. "News", "Telegram", "Twitter", "Threat Feed"
-  title: string;         // Headline / snippet
-  matchValue: string;    // The keyword or tag that triggered the match
-  matchType: string;     // e.g. "Keyword", "Country", "Domain"
+  source: string; // e.g. "News", "Telegram", "Twitter", "Threat Feed"
+  title: string; // Headline / snippet
+  matchValue: string; // The keyword or tag that triggered the match
+  matchType: string; // e.g. "Keyword", "Country", "Domain"
   date: string;
   severity: "low" | "medium" | "high" | "critical";
 }
@@ -46,15 +46,16 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
       emails: ["analyst@sentinel.ai"],
       phones: ["+1-555"],
       hashtags: ["#ElectionIntegrity", "#OSINT", "#cybersecurity"],
-      socialAccounts: ["@osint_watch", "@OSINTdefender"]
+      socialAccounts: ["@osint_watch", "@OSINTdefender"],
     },
     riskScore: 78,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   },
   {
     id: "wl-2",
     name: "[SAMPLE] Enterprise Brand Protection",
-    description: "Tracking brand risk vectors, vendor vulnerabilities, and leaks for partner entities.",
+    description:
+      "Tracking brand risk vectors, vendor vulnerabilities, and leaks for partner entities.",
     filters: {
       keywords: ["breach", "exploit", "hack", "ransomware", "defamation"],
       organizations: ["Aster Motors", "Meridian Capital", "Northwind Logistics"],
@@ -64,11 +65,11 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
       emails: [],
       phones: [],
       hashtags: ["#AsterMotors", "#FintechBreach"],
-      socialAccounts: ["@AsterMotors"]
+      socialAccounts: ["@AsterMotors"],
     },
     riskScore: 42,
-    createdAt: new Date().toISOString()
-  }
+    createdAt: new Date().toISOString(),
+  },
 ];
 
 export function getWatchlists(): Watchlist[] {
@@ -94,7 +95,7 @@ export function saveWatchlists(list: Watchlist[]) {
 export function createWatchlist(
   name: string,
   description: string,
-  filters: WatchlistFilters
+  filters: WatchlistFilters,
 ): Watchlist {
   const list = getWatchlists();
   const newWatch: Watchlist = {
@@ -105,7 +106,7 @@ export function createWatchlist(
     // Was Math.round(40 + Math.random() * 50) — a random risk score attached to
     // a watchlist the analyst just created, before it had matched anything.
     riskScore: null,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
   list.unshift(newWatch);
   saveWatchlists(list);
@@ -113,21 +114,31 @@ export function createWatchlist(
 }
 
 export function deleteWatchlist(id: string) {
-  const list = getWatchlists().filter(w => w.id !== id);
+  const list = getWatchlists().filter((w) => w.id !== id);
   saveWatchlists(list);
 }
 
 // Dynamically generate matches based on the watchlist's rules and active state logs
-export function getWatchlistMatches(watchlist: Watchlist, searchData: {
-  stories?: any[];
-  socialMentions?: any[];
-  cyberThreats?: any[];
-  telegramPosts?: any[];
-}): WatchlistMatch[] {
+export function getWatchlistMatches(
+  watchlist: Watchlist,
+  searchData: {
+    stories?: any[];
+    socialMentions?: any[];
+    cyberThreats?: any[];
+    telegramPosts?: any[];
+  },
+): WatchlistMatch[] {
   const matches: WatchlistMatch[] = [];
   const { filters } = watchlist;
 
-  const checkText = (text: string, list: string[], type: string, src: string, date: string, sev: any) => {
+  const checkText = (
+    text: string,
+    list: string[],
+    type: string,
+    src: string,
+    date: string,
+    sev: any,
+  ) => {
     if (!text) return;
     const txt = text.toLowerCase();
     for (const val of list) {
@@ -139,7 +150,7 @@ export function getWatchlistMatches(watchlist: Watchlist, searchData: {
           matchValue: val,
           matchType: type,
           date: date,
-          severity: sev
+          severity: sev,
         });
         break; // Count once per source item
       }
@@ -148,7 +159,7 @@ export function getWatchlistMatches(watchlist: Watchlist, searchData: {
 
   // 1. Check stories
   if (searchData.stories?.length) {
-    searchData.stories.forEach(s => {
+    searchData.stories.forEach((s) => {
       const headline = s.primaryTitle || "";
       const source = s.primarySource || "News Wire";
       const sev = s.threatLevel || "medium";
@@ -164,34 +175,62 @@ export function getWatchlistMatches(watchlist: Watchlist, searchData: {
 
   // 2. Check social mentions
   if (searchData.socialMentions?.length) {
-    searchData.socialMentions.forEach(m => {
+    searchData.socialMentions.forEach((m) => {
       const text = m.text || "";
       const author = m.author || "User";
       const date = m.pubDate || new Date().toISOString();
       checkText(text, filters.keywords, "Keyword", `Twitter (@${author})`, date, "medium");
       checkText(text, filters.hashtags, "Hashtag", `Twitter (@${author})`, date, "medium");
-      checkText(m.platform, filters.socialAccounts, "Social Account", `Twitter (@${author})`, date, "medium");
+      checkText(
+        m.platform,
+        filters.socialAccounts,
+        "Social Account",
+        `Twitter (@${author})`,
+        date,
+        "medium",
+      );
     });
   }
 
   // 3. Check cyber threats
   if (searchData.cyberThreats?.length) {
-    searchData.cyberThreats.forEach(t => {
+    searchData.cyberThreats.forEach((t) => {
       const ip = t.ip || "";
       const malware = t.malware || "";
-      checkText(ip, filters.domains, "Domain/IP", "Threat Feed (Feodo)", new Date().toISOString(), "critical");
-      checkText(malware, filters.keywords, "Malware keyword", "Threat Feed (Feodo)", new Date().toISOString(), "high");
+      checkText(
+        ip,
+        filters.domains,
+        "Domain/IP",
+        "Threat Feed (Feodo)",
+        new Date().toISOString(),
+        "critical",
+      );
+      checkText(
+        malware,
+        filters.keywords,
+        "Malware keyword",
+        "Threat Feed (Feodo)",
+        new Date().toISOString(),
+        "high",
+      );
     });
   }
 
   // 4. Check telegram posts
   if (searchData.telegramPosts?.length) {
-    searchData.telegramPosts.forEach(p => {
+    searchData.telegramPosts.forEach((p) => {
       const text = p.text || "";
       const channel = p.channel || "channel";
       const date = p.date || new Date().toISOString();
       checkText(text, filters.keywords, "Keyword", `Telegram (@${channel})`, date, "high");
-      checkText(text, filters.organizations, "Organization", `Telegram (@${channel})`, date, "high");
+      checkText(
+        text,
+        filters.organizations,
+        "Organization",
+        `Telegram (@${channel})`,
+        date,
+        "high",
+      );
     });
   }
 

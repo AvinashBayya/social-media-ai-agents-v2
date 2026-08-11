@@ -6,11 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
-  Users, Loader2, AlertTriangle, Plus, X, ExternalLink, Info, Network as NetworkIcon,
+  Users,
+  Loader2,
+  AlertTriangle,
+  Plus,
+  X,
+  ExternalLink,
+  Info,
+  Network as NetworkIcon,
 } from "lucide-react";
 import {
-  socialProfile, socialAuthorFeed,
-  type BlueskyProfile, type SocialPost,
+  socialProfile,
+  socialAuthorFeed,
+  type BlueskyProfile,
+  type SocialPost,
 } from "@/utils/social";
 import { accountMaturity, analyseCib, CIB_CAVEAT, type CibCluster } from "@/utils/cib";
 
@@ -57,10 +66,13 @@ function ageOf(createdAt: string | null): { days: number; label: string } | null
   if (!Number.isFinite(t)) return null;
   const days = (Date.now() - t) / 86_400_000;
   const label =
-    days < 1 ? "under a day" :
-    days < 60 ? `${Math.round(days)} days` :
-    days < 730 ? `${Math.round(days / 30)} months` :
-    `${(days / 365).toFixed(1)} years`;
+    days < 1
+      ? "under a day"
+      : days < 60
+        ? `${Math.round(days)} days`
+        : days < 730
+          ? `${Math.round(days / 30)} months`
+          : `${(days / 365).toFixed(1)} years`;
   return { days, label };
 }
 
@@ -73,7 +85,8 @@ function Page() {
 
   const add = async () => {
     const actor = handle.trim().replace(/^@/, "");
-    if (!actor || subjects.some((s) => s.profile.handle === actor || s.profile.did === actor)) return;
+    if (!actor || subjects.some((s) => s.profile.handle === actor || s.profile.did === actor))
+      return;
     setBusy(true);
     setError("");
     try {
@@ -91,11 +104,19 @@ function Page() {
       const { signal } = accountMaturity(
         posts.length
           ? posts
-          : [{
-              id: profile.did, platform: "bluesky" as const, author: profile.handle,
-              authorId: profile.did, text: "", createdAt: profile.createdAt ?? "",
-              url: "", langs: [], links: [],
-            }],
+          : [
+              {
+                id: profile.did,
+                platform: "bluesky" as const,
+                author: profile.handle,
+                authorId: profile.did,
+                text: "",
+                createdAt: profile.createdAt ?? "",
+                url: "",
+                langs: [],
+                links: [],
+              },
+            ],
         [profile],
       );
 
@@ -125,9 +146,7 @@ function Page() {
 
   const analyse = () => {
     const posts = subjects.flatMap((s) => s.posts);
-    setClusters(
-      analyseCib(posts, { profiles: subjects.map((s) => s.profile) }),
-    );
+    setClusters(analyseCib(posts, { profiles: subjects.map((s) => s.profile) }));
   };
 
   const totalPosts = subjects.reduce((n, s) => n + s.posts.length, 0);
@@ -159,7 +178,8 @@ function Page() {
               Add account
             </Button>
             <Button
-              size="sm" variant="outline"
+              size="sm"
+              variant="outline"
               disabled={totalPosts < 4}
               onClick={analyse}
               className="h-8 gap-1"
@@ -307,7 +327,9 @@ function Page() {
                   <div
                     key={c.id}
                     className={`rounded border p-2.5 ${
-                      c.flagged ? "border-[#EF4444]/50 bg-[#EF4444]/5" : "border-[#263548] bg-[#0B1220]/60"
+                      c.flagged
+                        ? "border-[#EF4444]/50 bg-[#EF4444]/5"
+                        : "border-[#263548] bg-[#0B1220]/60"
                     }`}
                   >
                     <div className="flex items-center gap-2">

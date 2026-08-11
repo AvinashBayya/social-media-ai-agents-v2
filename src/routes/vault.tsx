@@ -24,7 +24,7 @@ import {
   Tag,
   Download,
   AlertTriangle,
-  FolderLock
+  FolderLock,
 } from "lucide-react";
 import { SampleDataBanner } from "@/components/sample-data-banner";
 
@@ -65,7 +65,7 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     caseId: "INV-2041",
     risk: 85,
     tags: ["surveillance", "exif", "dossier"],
-    fileSize: "4.2 MB"
+    fileSize: "4.2 MB",
   },
   {
     id: "EVID-0405",
@@ -79,7 +79,7 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     caseId: "INV-2041",
     risk: 72,
     tags: ["confidential", "memo", "leak"],
-    fileSize: "1.8 MB"
+    fileSize: "1.8 MB",
   },
   {
     id: "EVID-0391",
@@ -93,8 +93,8 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     caseId: "INV-2038",
     risk: 61,
     tags: ["social", "cib", "disinfo"],
-    fileSize: "245 KB"
-  }
+    fileSize: "245 KB",
+  },
 ];
 
 function VaultPage() {
@@ -126,7 +126,7 @@ function VaultPage() {
         localStorage.setItem("sentinel_evidence", JSON.stringify(DEFAULT_EVIDENCE));
         setEvidenceList(DEFAULT_EVIDENCE);
       }
-      
+
       // Load cases
       const caseList = getInvestigations();
       setCases(caseList);
@@ -163,7 +163,9 @@ function VaultPage() {
    */
   const sha256OfFile = async (file: File): Promise<string> => {
     if (!globalThis.crypto?.subtle) {
-      throw new Error("SubtleCrypto unavailable — a secure context (HTTPS) is required to hash evidence.");
+      throw new Error(
+        "SubtleCrypto unavailable — a secure context (HTTPS) is required to hash evidence.",
+      );
     }
     const buf = await file.arrayBuffer();
     const digest = await globalThis.crypto.subtle.digest("SHA-256", buf);
@@ -179,7 +181,11 @@ function VaultPage() {
     if (files.length === 0) return;
 
     const file = files[0];
-    const type = file.type.includes("pdf") ? "PDF" : file.type.includes("video") ? "Video" : "Image";
+    const type = file.type.includes("pdf")
+      ? "PDF"
+      : file.type.includes("video")
+        ? "Video"
+        : "Image";
 
     let hash: string;
     try {
@@ -216,13 +222,15 @@ function VaultPage() {
       // drove the high/medium tone on the pinned investigation entry. There is no
       // basis to score an arbitrary upload, so it is unset until an analyst rates it.
       risk: null,
-      tags: uploadTags ? uploadTags.split(",").map(t => t.trim()) : ["uploaded", type.toLowerCase()],
-      fileSize: size
+      tags: uploadTags
+        ? uploadTags.split(",").map((t) => t.trim())
+        : ["uploaded", type.toLowerCase()],
+      fileSize: size,
     };
 
     list.unshift(newItem);
     saveEvidence(list);
-    
+
     // Automatically pin evidence to related investigation if assigned
     if (uploadCaseId) {
       pinToInvestigation(uploadCaseId, {
@@ -238,9 +246,9 @@ function VaultPage() {
         data: newItem,
       });
     }
-    
+
     toast.success(`Evidence node ${newId} initialized and linked to case ${uploadCaseId}`);
-    
+
     // Clear inputs
     setUploadTitle("");
     setUploadTags("");
@@ -275,7 +283,7 @@ function VaultPage() {
         e.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.caseId.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       const matchesTag = !selectedTag || e.tags?.includes(selectedTag);
       return matchesSearch && matchesTag;
     });
@@ -300,9 +308,13 @@ function VaultPage() {
             className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[160px] ${isDragging ? "border-[#3B82F6] bg-[#3B82F6]/5" : "border-[#263548] bg-[#111827] hover:border-[#3B82F6]/50"}`}
           >
             <UploadCloud className="size-8 text-[#3B82F6] animate-bounce mb-2" />
-            <h3 className="text-white text-xs font-bold uppercase tracking-wider">Drag & Drop Cryptographic Node</h3>
-            <p className="text-[10px] text-[#94A3B8]/60 mt-1">Supports Images, Videos, PDFs, and Document telemetry up to 50MB</p>
-            
+            <h3 className="text-white text-xs font-bold uppercase tracking-wider">
+              Drag & Drop Cryptographic Node
+            </h3>
+            <p className="text-[10px] text-[#94A3B8]/60 mt-1">
+              Supports Images, Videos, PDFs, and Document telemetry up to 50MB
+            </p>
+
             <div className="mt-4 flex flex-wrap justify-center gap-4 items-center border-t border-[#263548]/30 pt-3 text-[9px] w-full max-w-lg">
               <div className="flex items-center gap-1">
                 <span className="text-white">LINK CASE:</span>
@@ -313,7 +325,9 @@ function VaultPage() {
                 >
                   <option value="">-- No Case Link --</option>
                   {cases.map((c) => (
-                    <option key={c.id} value={c.id}>{c.id}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.id}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -345,7 +359,10 @@ function VaultPage() {
             <div className="flex gap-1.5 flex-wrap items-center">
               <span className="text-[10px]">Filter Tag:</span>
               {selectedTag && (
-                <Badge onClick={() => setSelectedTag("")} className="bg-[#ef4444]/20 text-[#ef4444] border-[#ef4444]/30 text-[9px] rounded-none hover:bg-red-900/40 cursor-pointer">
+                <Badge
+                  onClick={() => setSelectedTag("")}
+                  className="bg-[#ef4444]/20 text-[#ef4444] border-[#ef4444]/30 text-[9px] rounded-none hover:bg-red-900/40 cursor-pointer"
+                >
                   [Clear: #{selectedTag}]
                 </Badge>
               )}
@@ -365,7 +382,7 @@ function VaultPage() {
           {/* Evidence Grid */}
           <div className="grid gap-3 sm:grid-cols-2">
             {filteredEvidenceList.length === 0 ? (
-              <EmptyState 
+              <EmptyState
                 className="sm:col-span-2"
                 title="No Matching Blocks"
                 message="No cryptographic evidence blocks match the active search or tag filters."
@@ -374,10 +391,13 @@ function VaultPage() {
               filteredEvidenceList.map((item) => {
                 const isSelected = selectedItem?.id === item.id;
                 const IconComponent =
-                  item.type === "Image" ? ImageIcon :
-                  item.type === "Video" ? VideoIcon :
-                  item.type === "PDF" ? FileText :
-                  Link2;
+                  item.type === "Image"
+                    ? ImageIcon
+                    : item.type === "Video"
+                      ? VideoIcon
+                      : item.type === "PDF"
+                        ? FileText
+                        : Link2;
 
                 return (
                   <Card
@@ -387,13 +407,19 @@ function VaultPage() {
                   >
                     <CardContent className="p-3 space-y-2">
                       <div className="flex items-center justify-between text-[8px] text-[#94A3B8]/60">
-                        <span className="font-bold text-[#06B6D4] flex items-center gap-1"><IconComponent className="size-3" /> {item.id}</span>
+                        <span className="font-bold text-[#06B6D4] flex items-center gap-1">
+                          <IconComponent className="size-3" /> {item.id}
+                        </span>
                         <span>{item.fileSize || "N/A"}</span>
                       </div>
-                      <h4 className="font-semibold text-white text-[11px] line-clamp-1">{item.title}</h4>
-                      
+                      <h4 className="font-semibold text-white text-[11px] line-clamp-1">
+                        {item.title}
+                      </h4>
+
                       <div className="flex justify-between text-[8px] border-t border-[#263548]/30 pt-1.5">
-                        <span className="text-[#94A3B8]/70 truncate max-w-[140px]">{item.source}</span>
+                        <span className="text-[#94A3B8]/70 truncate max-w-[140px]">
+                          {item.source}
+                        </span>
                         <span className="text-[#3B82F6] font-bold">{item.caseId}</span>
                       </div>
                     </CardContent>
@@ -418,29 +444,46 @@ function VaultPage() {
                 <div className="space-y-4 flex-1 flex flex-col justify-between">
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[8px] text-[#06B6D4] font-bold font-mono">{selectedItem.id} ({selectedItem.type})</div>
-                      <h3 className="text-white text-xs font-bold leading-snug mt-0.5">{selectedItem.title}</h3>
+                      <div className="text-[8px] text-[#06B6D4] font-bold font-mono">
+                        {selectedItem.id} ({selectedItem.type})
+                      </div>
+                      <h3 className="text-white text-xs font-bold leading-snug mt-0.5">
+                        {selectedItem.title}
+                      </h3>
                     </div>
 
                     <div className="border border-[#263548]/40 rounded bg-[#0B1220] p-2 space-y-2 text-[9px] font-mono leading-normal">
                       <div className="flex justify-between">
                         <span className="text-[#94A3B8]/60">TIMETAG:</span>
-                        <span className="text-white truncate max-w-[150px]">{selectedItem.timestamp}</span>
+                        <span className="text-white truncate max-w-[150px]">
+                          {selectedItem.timestamp}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-[#94A3B8]/60">SOURCE:</span>
-                        <span className="text-white truncate max-w-[150px]">{selectedItem.source}</span>
+                        <span className="text-white truncate max-w-[150px]">
+                          {selectedItem.source}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-[#94A3B8]/60">GEOPOINT:</span>
-                        <span className="text-white truncate max-w-[150px]">{selectedItem.geo}</span>
+                        <span className="text-white truncate max-w-[150px]">
+                          {selectedItem.geo}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-[#94A3B8]/60">LINK CASE:</span>
-                        <Link to="/investigations" className="text-[#3B82F6] hover:underline font-bold">{selectedItem.caseId}</Link>
+                        <Link
+                          to="/investigations"
+                          className="text-[#3B82F6] hover:underline font-bold"
+                        >
+                          {selectedItem.caseId}
+                        </Link>
                       </div>
                       <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
-                        <div className="text-[#94A3B8]/50 uppercase text-[8px]">SHA-256 Checksum:</div>
+                        <div className="text-[#94A3B8]/50 uppercase text-[8px]">
+                          SHA-256 Checksum:
+                        </div>
                         <div className="text-[8px] text-[#06B6D4] select-all break-all leading-normal">
                           {selectedItem.hash ?? "No file supplied — nothing to hash."}
                         </div>
@@ -450,7 +493,11 @@ function VaultPage() {
                     {selectedItem.tags?.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {selectedItem.tags.map((t, idx) => (
-                          <Badge key={idx} variant="outline" className="border-[#263548] text-[#94A3B8] text-[8px] bg-[#0B1220]/60 rounded-none h-4">
+                          <Badge
+                            key={idx}
+                            variant="outline"
+                            className="border-[#263548] text-[#94A3B8] text-[8px] bg-[#0B1220]/60 rounded-none h-4"
+                          >
                             #{t}
                           </Badge>
                         ))}
@@ -467,7 +514,8 @@ function VaultPage() {
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8]/40 py-12">
                   <Shield className="size-8 text-[#263548] mb-2 animate-pulse" />
-                  Select an evidence node in the grid to display its cryptographic properties and preview payload contents.
+                  Select an evidence node in the grid to display its cryptographic properties and
+                  preview payload contents.
                 </div>
               )}
             </CardContent>

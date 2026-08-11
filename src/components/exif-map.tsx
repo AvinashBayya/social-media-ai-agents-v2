@@ -19,7 +19,7 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
     if (typeof window === "undefined" || !containerRef.current) return;
     let cancelled = false;
 
-    if (!document.querySelector('link[data-leaflet]')) {
+    if (!document.querySelector("link[data-leaflet]")) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";

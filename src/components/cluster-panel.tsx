@@ -113,7 +113,11 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
               : "Compare what the sources agree and disagree on"
           }
         >
-          {busy === "synth" ? <Loader2 className="size-3 animate-spin" /> : <Scale className="size-3" />}
+          {busy === "synth" ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Scale className="size-3" />
+          )}
           Analyse across sources
         </Button>
         <Button
@@ -123,7 +127,11 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
           onClick={() => run("framing")}
           className="h-7 gap-1 text-xs"
         >
-          {busy === "framing" ? <Loader2 className="size-3 animate-spin" /> : <GitCompare className="size-3" />}
+          {busy === "framing" ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <GitCompare className="size-3" />
+          )}
           Compare framing
         </Button>
       </div>
@@ -192,7 +200,9 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
                 Carried by one source only
               </div>
               <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-[11px] text-muted-foreground">
-                {synth.uncorroborated.map((u, i) => <li key={i}>{u}</li>)}
+                {synth.uncorroborated.map((u, i) => (
+                  <li key={i}>{u}</li>
+                ))}
               </ul>
             </div>
           )}

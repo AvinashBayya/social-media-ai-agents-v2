@@ -5,6 +5,7 @@ OSINT analysis and monitoring platform built for **ADITI 4.0 / iDEX Problem Stat
 ## Mandatory AI Memory & Preservation Protocol
 
 > **CRITICAL FOR ALL CLAUDE / AI SESSIONS:**
+>
 > 1. **Read Project Memory First:** Always inspect [`PROJECT_MEMORY.md`](file:///d:/social_media_research/PROJECT_MEMORY.md) at the start of any session to load active progress, codebase inventory, and hard constraints.
 > 2. **Never Delete Existing Functions:** Snippet-based edits wipe out un-viewed exports. Inspect full target files before editing. All edits must be **additive-only**.
 > 3. **Verify Integrity:** Run `bun test` after edits to ensure zero regression across the 415+ unit test suite.
@@ -47,10 +48,11 @@ restored; the route gate on `main` is the disclosed client-side demo session
 (`src/utils/demo-session.ts`), which is not authentication and says so.
 
 Two traps when deploying, both hit on 2026-08-10:
+
 - **No Docker locally.** Build with `az acr build`, never `docker build`.
 - **The Azure CLI crashes while streaming build logs on Windows** — Vite prints `✓`, and
   cp1252 cannot encode it (`UnicodeEncodeError`, `_stream_utils.py`). A transient DNS
-  failure on the ACR log-blob host produces the same *symptom*. **Both are client-side log
+  failure on the ACR log-blob host produces the same _symptom_. **Both are client-side log
   streaming only: the remote build still completes and pushes.** Never conclude a build
   failed from CLI output alone — check
   `az acr repository show -n $ACR --image sentinel-web:<tag> --query createdTime`. Setting
@@ -69,11 +71,12 @@ removals need a joint re-freeze.
 
 These are **boundary** types, deliberately not the internal working types. `analysis.ts` keeps
 its own richer `Article` (note `pubDate`, not `publishedAt`), `social.ts` its `SocialPost`,
-`imaging.ts` its report family. `src/types/core-adapters.ts` is the *only* place the two
+`imaging.ts` its report family. `src/types/core-adapters.ts` is the _only_ place the two
 worlds convert — one function per direction per type. Retyping the existing modules onto the
 contract would have rewritten Modules 1–5 to fix an integration seam.
 
 Rules that must not regress:
+
 - Anything that can genuinely fail to be measured is `| null`, deviating from the brief's bare
   fields. `null` means **not measured**, never zero — an unfetchable account age must stay
   distinguishable from an account created today.
@@ -99,6 +102,7 @@ importable from `src/` are one refactor away from rendering as real findings. **
 **Open-source LLMs only.** Do not propose Gemini, Azure OpenAI, or any hosted commercial LLM API. Do not propose Llama or anything derived from it — Meta's Acceptable Use Policy explicitly bans military and espionage use, which disqualifies it for an IAF system.
 
 Approved models:
+
 - Sarvam (Apache 2.0, Indian)
 - Mistral 3 (Apache 2.0)
 - AI4Bharat IndicTrans2 (MIT)
@@ -127,6 +131,7 @@ LLM_FALLBACK_MODEL=mistral-saba-24b
 ```
 
 **Model IDs — both verified against `/models` on 2026-08-03 with live keys.**
+
 - Sarvam returns exactly one model: **`sarvam-105b`**. There is no `sarvam-m`.
 - Groq offers **no Mistral model at all** — `mistral-saba-24b` does not exist there.
   Of Groq's 15 models, the licence-clean chat options are `openai/gpt-oss-120b`,
@@ -147,6 +152,7 @@ Measured: `max_tokens: 16` → empty content; `400` → clean answer. Call budge
 military and espionage use. Mistral (Apache 2.0) and Sarvam (Apache 2.0) are clear.
 
 Behaviour that must not regress:
+
 - Every failure throws `LlmUnavailableError` with the real upstream cause. No fallback text,
   ever. The UI renders an explicit "AI unavailable" state.
 - JSON responses are validated with zod; a schema mismatch throws rather than coercing.
@@ -184,12 +190,12 @@ assessing a whole feed is one call per item against a free tier.
   not the reverse — mirroring `analysis-llm.ts` over `analysis.ts`. The five deterministic
   factors keep scoring with the model unreachable.
 - **Hedging is deliberately NOT scored.** The score is `1 - mean(emotiveLoad, absolutism,
-  sensationalism)`. Hedging's direction is genuinely ambiguous — "officials said" is careful
+sensationalism)`. Hedging's direction is genuinely ambiguous — "officials said" is careful
   attribution, "reportedly" throughout is vagueness — and one number cannot separate them. It
   is reported as evidence, with the reason for its exclusion, and the analyst judges it.
 - Confidence is **0.55**, below the fixed-confidence deterministic factors. Note corroboration
   and source diversity scale confidence with corpus size (`0.4 + n/50`), so on a small corpus
-  they sit *below* the linguistic factor — correctly, and a test asserts only against the
+  they sit _below_ the linguistic factor — correctly, and a test asserts only against the
   fixed ones.
 - A missing entry in the language map means **not yet assessed**, never "assessed and clean".
   Failures are collected per article with the real upstream cause; `assessmentSummary` reports
@@ -236,10 +242,11 @@ thing the hard constraints forbid.
 
 Position taken instead: **provenance beats classification**. A C2PA Content Credential is a
 signature (verifies or does not, no false positives); a deepfake score is a guess. The only
-high-confidence AI finding the system makes is a *signed C2PA manifest declaring* generative
+high-confidence AI finding the system makes is a _signed C2PA manifest declaring_ generative
 provenance.
 
 Dependencies (all free, all in-browser WASM, no server, no GPU):
+
 - `exifr` (MIT) — EXIF/TIFF/XMP
 - `c2pa` (MIT, contentauth) — Content Credentials. WASM + worker emitted as **first-party
   assets** via Vite `?url`, deliberately not a CDN.
@@ -264,6 +271,7 @@ product shows its model — on screen, in the provenance block, and in the PDF f
 page. That visibility is compliance evidence.
 
 **Geo source reality, verified live 2026-08-04:**
+
 - **UCDP GED now returns 401** — `API token required. Add header: x-ucdp-access-token`. Every
   version (23.1/24.1/25.1). Set `UCDP_API_TOKEN` to enable the conflict layer; without it the
   layer reports the missing credential rather than showing zero events.
@@ -283,7 +291,7 @@ plotted; unplaceable records are counted and reported. Exact fixes render as poi
 coarser as a dashed uncertainty circle. `0,0` is rejected as a missing-value sentinel.
 
 **Sourcing discipline in `reports.ts`:** every judgement/finding cites numbered sources;
-citations are resolved against the real source list *after* generation; failure retries once
+citations are resolved against the real source list _after_ generation; failure retries once
 with the violations and then throws. Partial products are never returned.
 
 `export-helpers.ts` was deleted — exports.tsx now renders the same product object the analyst
@@ -294,13 +302,13 @@ reviewed, so a figure can no longer differ between screen and file.
 Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the
 workload-profile command until quota is granted.**
 
-| | |
-|---|---|
-| Status | **Not yet submitted** — no support ticket has been filed |
-| Documented | 2026-08-03 |
-| Date raised | _(fill in when submitted)_ |
-| Ticket ref | _(fill in)_ |
-| Date granted | _(fill in)_ |
+|              |                                                          |
+| ------------ | -------------------------------------------------------- |
+| Status       | **Not yet submitted** — no support ticket has been filed |
+| Documented   | 2026-08-03                                               |
+| Date raised  | _(fill in when submitted)_                               |
+| Ticket ref   | _(fill in)_                                              |
+| Date granted | _(fill in)_                                              |
 
 - Request: `Consumption-GPU-NC8as-T4`, Central India, subscription
   `8a8baea4-547c-4f55-b206-d6af16a24970`. Ask for **8 vCPU** of the

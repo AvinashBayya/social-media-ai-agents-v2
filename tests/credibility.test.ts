@@ -16,10 +16,7 @@ import {
   type Article,
   type CredibilityFactor,
 } from "../src/utils/credibility";
-import {
-  assessmentSummary,
-  type LanguageAssessmentBatch,
-} from "../src/utils/credibility-llm";
+import { assessmentSummary, type LanguageAssessmentBatch } from "../src/utils/credibility-llm";
 import type { LanguageAssessment } from "../src/utils/llm";
 
 const iso = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
@@ -76,7 +73,9 @@ describe("text + reputation primitives", () => {
   });
 
   test("same event matches, unrelated story does not", () => {
-    expect(titleSimilarity(CORPUS[0].title, CORPUS[1].title)).toBeGreaterThanOrEqual(SAME_STORY_THRESHOLD);
+    expect(titleSimilarity(CORPUS[0].title, CORPUS[1].title)).toBeGreaterThanOrEqual(
+      SAME_STORY_THRESHOLD,
+    );
     expect(titleSimilarity(CORPUS[0].title, CORPUS[3].title)).toBeLessThan(SAME_STORY_THRESHOLD);
   });
 
@@ -128,8 +127,20 @@ describe("corroboration", () => {
     const syndicated: Article[] = [
       CORPUS[0], // reuters.com, published earliest — the origin
       art({ id: "s1", title: wire, source: "MSN", url: "https://www.msn.com/s1", pubDate: iso(1) }),
-      art({ id: "s2", title: wire, source: "Yahoo", url: "https://news.yahoo.com/s2", pubDate: iso(1) }),
-      art({ id: "s3", title: wire, source: "Flipboard", url: "https://flipboard.com/s3", pubDate: iso(1) }),
+      art({
+        id: "s2",
+        title: wire,
+        source: "Yahoo",
+        url: "https://news.yahoo.com/s2",
+        pubDate: iso(1),
+      }),
+      art({
+        id: "s3",
+        title: wire,
+        source: "Flipboard",
+        url: "https://flipboard.com/s3",
+        pubDate: iso(1),
+      }),
     ];
     const c = analyseCorroboration(syndicated[0], syndicated);
 
@@ -243,7 +254,9 @@ describe("custom criterion", () => {
 
   test("skipped when enabled but no criterion is defined", () => {
     const s = scoreArticle(CORPUS[0], CORPUS, enableCustom());
-    expect(s.skipped.find((x) => x.id === "custom_keyword")?.reason).toBe("No keyword criterion defined.");
+    expect(s.skipped.find((x) => x.id === "custom_keyword")?.reason).toBe(
+      "No keyword criterion defined.",
+    );
   });
 
   test("lowering keywords reduce the factor score below neutral", () => {
@@ -286,7 +299,12 @@ describe("no-fabrication guarantees", () => {
   });
 
   test("unlisted domains are neutral, never penalised below a listed low-tier one", () => {
-    const unknown = art({ id: "u1", title: CORPUS[0].title, source: "x", url: "https://obscure-outlet.example/u1" });
+    const unknown = art({
+      id: "u1",
+      title: CORPUS[0].title,
+      source: "x",
+      url: "https://obscure-outlet.example/u1",
+    });
     const s = scoreArticle(unknown, [unknown, ...CORPUS], defaultFactors());
     const dt = s.breakdown.find((b) => b.id === "domain_tier")!;
     expect(dt.rawScore).toBe(0.5);
@@ -317,7 +335,10 @@ describe("profiles", () => {
       pubDate: iso(24 * 20),
     });
     const corpus = [...CORPUS, stale];
-    const breaking = applyProfile(defaultFactors(), builtinProfiles().find((p) => p.id === "breaking")!);
+    const breaking = applyProfile(
+      defaultFactors(),
+      builtinProfiles().find((p) => p.id === "breaking")!,
+    );
     const fresh = scoreArticle(CORPUS[0], corpus, breaking).score!;
     const old = scoreArticle(stale, corpus, breaking).score!;
     expect(fresh).toBeGreaterThan(old);
@@ -380,8 +401,12 @@ describe("linguistic markers factor", () => {
   });
 
   test("loaded language scores below measured language", () => {
-    const clean = scoreWith(assessment({ emotiveLoad: 0.05, absolutism: 0.05, sensationalism: 0.05 }));
-    const loaded = scoreWith(assessment({ emotiveLoad: 0.9, absolutism: 0.85, sensationalism: 0.95 }));
+    const clean = scoreWith(
+      assessment({ emotiveLoad: 0.05, absolutism: 0.05, sensationalism: 0.05 }),
+    );
+    const loaded = scoreWith(
+      assessment({ emotiveLoad: 0.9, absolutism: 0.85, sensationalism: 0.95 }),
+    );
     expect(clean.score!).toBeGreaterThan(loaded.score!);
     expect(loaded.score!).toBeLessThan(0.2);
   });
@@ -452,10 +477,7 @@ describe("language assessment batch reporting", () => {
   });
 
   test("reports coverage as a proportion, not a bare count", () => {
-    const summary = assessmentSummary(
-      batch({ assessments: { a1: {} as any, a2: {} as any } }),
-      12,
-    );
+    const summary = assessmentSummary(batch({ assessments: { a1: {} as any, a2: {} as any } }), 12);
     // "2 assessed" would hide that ten articles carry no linguistic factor.
     expect(summary).toContain("2 of 12");
   });

@@ -6,15 +6,31 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  Upload, Loader2, AlertTriangle, Film, Scissors, Type, Fingerprint, Info,
+  Upload,
+  Loader2,
+  AlertTriangle,
+  Film,
+  Scissors,
+  Type,
+  Fingerprint,
+  Info,
 } from "lucide-react";
 import {
-  findNearDuplicates, OCR_LANGUAGES, OCR_LOW_CONFIDENCE,
-  type DuplicateReport, type HashedImage, type OcrReport,
+  findNearDuplicates,
+  OCR_LANGUAGES,
+  OCR_LOW_CONFIDENCE,
+  type DuplicateReport,
+  type HashedImage,
+  type OcrReport,
 } from "@/utils/imaging";
 import {
-  dataUrlToBlob, extractKeyframes, loadImageCorpus, rememberImage, runOcr,
-  MediaError, type KeyframeResult,
+  dataUrlToBlob,
+  extractKeyframes,
+  loadImageCorpus,
+  rememberImage,
+  runOcr,
+  MediaError,
+  type KeyframeResult,
 } from "@/utils/imaging-client";
 import { NotImplementedPanel } from "@/components/not-implemented";
 
@@ -49,7 +65,11 @@ const DEFAULT_LANGS = ["eng"];
 const MAX_FRAMES = 60;
 
 const fmtTime = (s: number) =>
-  `${Math.floor(s / 60).toString().padStart(2, "0")}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+  `${Math.floor(s / 60)
+    .toString()
+    .padStart(2, "0")}:${Math.floor(s % 60)
+    .toString()
+    .padStart(2, "0")}`;
 
 function Page() {
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -97,7 +117,9 @@ function Page() {
       setMatches(found);
       setResult(res);
     } catch (err: any) {
-      setError(err instanceof MediaError ? `[${err.stage}] ${err.message}` : (err?.message ?? String(err)));
+      setError(
+        err instanceof MediaError ? `[${err.stage}] ${err.message}` : (err?.message ?? String(err)),
+      );
     } finally {
       setBusy(null);
       setProgress(null);
@@ -147,15 +169,27 @@ function Page() {
       <Card className={`${CARD} mb-4`}>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-end gap-2">
-            <Button size="sm" onClick={() => fileRef.current?.click()} disabled={busy !== null} className="h-8 gap-1.5">
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+            <Button
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy !== null}
+              className="h-8 gap-1.5"
+            >
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
               {busy ?? "Upload video"}
             </Button>
             <input
               ref={fileRef}
               type="file"
               accept="video/*"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) analyse(f); }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) analyse(f);
+              }}
               className="hidden"
             />
 
@@ -164,7 +198,10 @@ function Page() {
                 Sample interval (s)
               </label>
               <Input
-                type="number" min={0.5} max={30} step={0.5}
+                type="number"
+                min={0.5}
+                max={30}
+                step={0.5}
                 value={interval}
                 onChange={(e) => setIntervalSeconds(Math.max(0.5, Number(e.target.value) || 2))}
                 className="mt-1 h-8 w-24 border-[#263548] bg-[#0B1220] text-[11px] text-white"
@@ -183,8 +220,8 @@ function Page() {
 
           <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
             <Info className="mt-px size-3 shrink-0" />
-            Frames are sampled at a fixed interval, so a scene cut is located to within one
-            interval rather than to the exact frame. Sampling stops at {MAX_FRAMES} frames.
+            Frames are sampled at a fixed interval, so a scene cut is located to within one interval
+            rather than to the exact frame. Sampling stops at {MAX_FRAMES} frames.
           </p>
 
           {error && (
@@ -203,9 +240,9 @@ function Page() {
               <Film className="mx-auto size-8 text-[#263548]" />
               <p className="mt-3 text-sm text-[#94A3B8]">No video loaded.</p>
               <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-[#64748B]">
-                Upload a file to extract keyframes. Decoding, hashing and OCR all run in this
-                tab — nothing is sent to a server, and there is no server-side media pipeline
-                to send it to.
+                Upload a file to extract keyframes. Decoding, hashing and OCR all run in this tab —
+                nothing is sent to a server, and there is no server-side media pipeline to send it
+                to.
               </p>
             </CardContent>
           </Card>
@@ -245,7 +282,11 @@ function Page() {
                       }`}
                     >
                       {f.dataUrl && (
-                        <img src={f.dataUrl} alt={`frame at ${fmtTime(f.time)}`} className="h-16 w-full object-cover" />
+                        <img
+                          src={f.dataUrl}
+                          alt={`frame at ${fmtTime(f.time)}`}
+                          className="h-16 w-full object-cover"
+                        />
                       )}
                       <div className="flex items-center gap-1 px-1 py-0.5 font-mono text-[9px] text-[#94A3B8]">
                         {fmtTime(f.time)}
@@ -299,13 +340,16 @@ function Page() {
                     Keyframes matching previously seen images
                   </h3>
                   <p className="mt-1 text-[10px] leading-relaxed text-[#94A3B8]">
-                    A video reusing a still that already appeared elsewhere is a
-                    recontextualisation signal. It is a fact about where the image has been
-                    seen, not a claim about intent.
+                    A video reusing a still that already appeared elsewhere is a recontextualisation
+                    signal. It is a fact about where the image has been seen, not a claim about
+                    intent.
                   </p>
                   <div className="mt-2 space-y-1.5">
                     {Object.entries(matches).map(([idx, report]) => (
-                      <div key={idx} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
+                      <div
+                        key={idx}
+                        className="rounded border border-[#263548] bg-[#0B1220]/60 p-2"
+                      >
                         <button
                           onClick={() => setSelected(Number(idx))}
                           className="font-mono text-[10px] text-[#3B82F6] hover:underline"
@@ -350,7 +394,9 @@ function Page() {
                           key={l.code}
                           onClick={() =>
                             setLangs((prev) =>
-                              prev.includes(l.code) ? prev.filter((c) => c !== l.code) : [...prev, l.code],
+                              prev.includes(l.code)
+                                ? prev.filter((c) => c !== l.code)
+                                : [...prev, l.code],
                             )
                           }
                           title={l.accuracyNote}
@@ -368,16 +414,22 @@ function Page() {
 
                   <div className="mt-2 flex gap-1.5">
                     <Button
-                      size="sm" variant="outline"
+                      size="sm"
+                      variant="outline"
                       disabled={busy !== null || langs.length === 0}
                       onClick={() => ocrFrame(selected)}
                       className="h-7 gap-1 text-[10px]"
                     >
-                      {busy === "Running OCR" ? <Loader2 className="size-3 animate-spin" /> : <Type className="size-3" />}
+                      {busy === "Running OCR" ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Type className="size-3" />
+                      )}
                       OCR this frame
                     </Button>
                     <Button
-                      size="sm" variant="outline"
+                      size="sm"
+                      variant="outline"
                       onClick={() => addFrameToCorpus(selected)}
                       className="h-7 gap-1 text-[10px]"
                     >
@@ -405,14 +457,15 @@ function Page() {
                             {ocr[selected].text}
                           </pre>
                           <div className="font-mono text-[10px] text-[#94A3B8]">
-                            mean confidence{" "}
-                            {ocr[selected].meanConfidence?.toFixed(1) ?? "—"} ·{" "}
+                            mean confidence {ocr[selected].meanConfidence?.toFixed(1) ?? "—"} ·{" "}
                             {ocr[selected].lowConfidenceCount} word(s) below {OCR_LOW_CONFIDENCE}
                           </div>
                         </>
                       )}
                       {ocr[selected].accuracyNotes.map((n, i) => (
-                        <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">{n}</p>
+                        <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">
+                          {n}
+                        </p>
                       ))}
                     </div>
                   )}

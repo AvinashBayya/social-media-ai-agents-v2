@@ -19,14 +19,14 @@ from this document alone:
 A proposal that fails any gate is not a smaller version of a good idea; it is the
 wrong idea. Reject it and say why.
 
-| # | Gate | Fails if the proposal… |
-|---|---|---|
-| G1 | **Open-source models only** | uses Gemini, Azure OpenAI, or any hosted commercial LLM API; uses Llama or any derivative (Meta's AUP bans military use — this is an IAF system); uses DeepSeek R1 Distill (Llama-derived). Approved: Sarvam, Mistral 3, IndicTrans2, `openai/gpt-oss-*` open weights. |
-| G2 | **Never fabricate** | returns a placeholder score, a default confidence, seeded-looking output on failure, or `0` where the real answer is "not measured". Every failure path must surface an explicit error. |
-| G3 | **Free tier only** | requires a paid API, a licence, or always-on GPU. Zero budget. |
-| G4 | **Licence-clean dependencies** | pulls in AGPL (Ultralytics YOLO is the recorded trap — use Grounding DINO, Apache 2.0), or anything that would force open-sourcing the system. |
-| G5 | **No fabricated security controls** | adds a credential form, a permission check, or a "secure/nominal" status indicator that nothing behind it enforces. See `src/routes/login.tsx` for how a non-functional screen must disclose itself. |
-| G6 | **Additive-only contracts** | renames or removes a field in `src/types/core.ts` without a joint re-freeze with Dev 1 and Dev 2. |
+| #   | Gate                                | Fails if the proposal…                                                                                                                                                                                                                                                 |
+| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | **Open-source models only**         | uses Gemini, Azure OpenAI, or any hosted commercial LLM API; uses Llama or any derivative (Meta's AUP bans military use — this is an IAF system); uses DeepSeek R1 Distill (Llama-derived). Approved: Sarvam, Mistral 3, IndicTrans2, `openai/gpt-oss-*` open weights. |
+| G2  | **Never fabricate**                 | returns a placeholder score, a default confidence, seeded-looking output on failure, or `0` where the real answer is "not measured". Every failure path must surface an explicit error.                                                                                |
+| G3  | **Free tier only**                  | requires a paid API, a licence, or always-on GPU. Zero budget.                                                                                                                                                                                                         |
+| G4  | **Licence-clean dependencies**      | pulls in AGPL (Ultralytics YOLO is the recorded trap — use Grounding DINO, Apache 2.0), or anything that would force open-sourcing the system.                                                                                                                         |
+| G5  | **No fabricated security controls** | adds a credential form, a permission check, or a "secure/nominal" status indicator that nothing behind it enforces. See `src/routes/login.tsx` for how a non-functional screen must disclose itself.                                                                   |
+| G6  | **Additive-only contracts**         | renames or removes a field in `src/types/core.ts` without a joint re-freeze with Dev 1 and Dev 2.                                                                                                                                                                      |
 
 Two further constraints are structural rather than ethical, and kill more designs
 than the six above:
@@ -44,16 +44,16 @@ than the six above:
 
 ## 2. What exists today
 
-| Layer | Status |
-|---|---|
-| Frontend | Complete and worth keeping — 29 routes, 46 shadcn primitives, 15-language i18n |
-| Analysis logic | Real — ~9,000 lines of tested pure functions across Modules 1–5 |
-| LLM access | Real — provider-agnostic, cached, validated, fails loudly |
-| Collection | Real for Bluesky / Reddit / Telegram / RSS / USGS / GDELT |
-| **Persistence** | **localStorage only.** No database, no server-side state |
-| **Auth** | **None.** No session, no route gating, no user identity |
-| **HTTP API** | **None.** `createServerFn` only |
-| **Background work** | **None.** Scale-to-zero |
+| Layer               | Status                                                                         |
+| ------------------- | ------------------------------------------------------------------------------ |
+| Frontend            | Complete and worth keeping — 29 routes, 46 shadcn primitives, 15-language i18n |
+| Analysis logic      | Real — ~9,000 lines of tested pure functions across Modules 1–5                |
+| LLM access          | Real — provider-agnostic, cached, validated, fails loudly                      |
+| Collection          | Real for Bluesky / Reddit / Telegram / RSS / USGS / GDELT                      |
+| **Persistence**     | **localStorage only.** No database, no server-side state                       |
+| **Auth**            | **None.** No session, no route gating, no user identity                        |
+| **HTTP API**        | **None.** `createServerFn` only                                                |
+| **Background work** | **None.** Scale-to-zero                                                        |
 
 PS-18 coverage is roughly 15–20%. The gap is almost entirely infrastructure, not
 analysis.
@@ -113,15 +113,15 @@ of whether it compiles.
 
 ## 4. Ownership table — module → files
 
-| PS-18 module | Routes | Logic | Tests |
-|---|---|---|---|
-| **M1** source credibility | [sources.tsx](../src/routes/sources.tsx) | [credibility.ts](../src/utils/credibility.ts) 852 · [credibility-llm.ts](../src/utils/credibility-llm.ts) 116 · [social-credibility.ts](../src/utils/social-credibility.ts) 302 | `credibility.test.ts` |
+| PS-18 module               | Routes                                                                                                                                                                                                                                                                                                                                              | Logic                                                                                                                                                                                                                                                                                 | Tests                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **M1** source credibility  | [sources.tsx](../src/routes/sources.tsx)                                                                                                                                                                                                                                                                                                            | [credibility.ts](../src/utils/credibility.ts) 852 · [credibility-llm.ts](../src/utils/credibility-llm.ts) 116 · [social-credibility.ts](../src/utils/social-credibility.ts) 302                                                                                                       | `credibility.test.ts`                |
 | **M2** open-source content | [news.tsx](../src/routes/news.tsx) 1679 · [osint.tsx](../src/routes/osint.tsx) 1235 · [recon.tsx](../src/routes/recon.tsx) · [entities.tsx](../src/routes/entities.tsx) · [sentiment.tsx](../src/routes/sentiment.tsx) · [trends.tsx](../src/routes/trends.tsx) · [graph.tsx](../src/routes/graph.tsx) · [timeline.tsx](../src/routes/timeline.tsx) | [analysis.ts](../src/utils/analysis.ts) 471 · [analysis-llm.ts](../src/utils/analysis-llm.ts) 364 · [search.ts](../src/utils/search.ts) · [dorks.ts](../src/utils/dorks.ts) · [attack-surface.ts](../src/utils/attack-surface.ts) · [recon-sources.ts](../src/utils/recon-sources.ts) | `analysis.test.ts` · `recon.test.ts` |
-| **M3** social | [live.tsx](../src/routes/live.tsx) · [social.tsx](../src/routes/social.tsx) · [network.tsx](../src/routes/network.tsx) | [social.ts](../src/utils/social.ts) 903 · [cib.ts](../src/utils/cib.ts) 861 | `cib.test.ts` 902 |
-| **M4** image / video | [images.tsx](../src/routes/images.tsx) · [videos.tsx](../src/routes/videos.tsx) | [imaging.ts](../src/utils/imaging.ts) 983 · [imaging-client.ts](../src/utils/imaging-client.ts) 342 | `imaging.test.ts` 632 |
-| **M5** reports + GIS | [reports.tsx](../src/routes/reports.tsx) · [gis.tsx](../src/routes/gis.tsx) · [exports.tsx](../src/routes/exports.tsx) | [reports.ts](../src/utils/reports.ts) · [report-pdf.ts](../src/utils/report-pdf.ts) · [geo.ts](../src/utils/geo.ts) · [geo-sources.ts](../src/utils/geo-sources.ts) · [data/geo-map.ts](../src/data/geo-map.ts) 2796 | `reports.test.ts` · `gis.test.ts` |
-| Workspace | [investigations.tsx](../src/routes/investigations.tsx) · [vault.tsx](../src/routes/vault.tsx) · [tasks.tsx](../src/routes/tasks.tsx) · [subjects.tsx](../src/routes/subjects.tsx) · [agents.tsx](../src/routes/agents.tsx) | [investigations-store.ts](../src/utils/investigations-store.ts) · [watchlist-store.ts](../src/utils/watchlist-store.ts) | `investigations.test.ts` |
-| Cross-cutting | [__root.tsx](../src/routes/__root.tsx) · [settings.tsx](../src/routes/settings.tsx) | [llm.ts](../src/utils/llm.ts) 642 · [types/core.ts](../src/types/core.ts) · [types/core-adapters.ts](../src/types/core-adapters.ts) · [i18n/](../src/i18n/) | `core-contracts.test.ts` |
+| **M3** social              | [live.tsx](../src/routes/live.tsx) · [social.tsx](../src/routes/social.tsx) · [network.tsx](../src/routes/network.tsx)                                                                                                                                                                                                                              | [social.ts](../src/utils/social.ts) 903 · [cib.ts](../src/utils/cib.ts) 861                                                                                                                                                                                                           | `cib.test.ts` 902                    |
+| **M4** image / video       | [images.tsx](../src/routes/images.tsx) · [videos.tsx](../src/routes/videos.tsx)                                                                                                                                                                                                                                                                     | [imaging.ts](../src/utils/imaging.ts) 983 · [imaging-client.ts](../src/utils/imaging-client.ts) 342                                                                                                                                                                                   | `imaging.test.ts` 632                |
+| **M5** reports + GIS       | [reports.tsx](../src/routes/reports.tsx) · [gis.tsx](../src/routes/gis.tsx) · [exports.tsx](../src/routes/exports.tsx)                                                                                                                                                                                                                              | [reports.ts](../src/utils/reports.ts) · [report-pdf.ts](../src/utils/report-pdf.ts) · [geo.ts](../src/utils/geo.ts) · [geo-sources.ts](../src/utils/geo-sources.ts) · [data/geo-map.ts](../src/data/geo-map.ts) 2796                                                                  | `reports.test.ts` · `gis.test.ts`    |
+| Workspace                  | [investigations.tsx](../src/routes/investigations.tsx) · [vault.tsx](../src/routes/vault.tsx) · [tasks.tsx](../src/routes/tasks.tsx) · [subjects.tsx](../src/routes/subjects.tsx) · [agents.tsx](../src/routes/agents.tsx)                                                                                                                          | [investigations-store.ts](../src/utils/investigations-store.ts) · [watchlist-store.ts](../src/utils/watchlist-store.ts)                                                                                                                                                               | `investigations.test.ts`             |
+| Cross-cutting              | [\_\_root.tsx](../src/routes/__root.tsx) · [settings.tsx](../src/routes/settings.tsx)                                                                                                                                                                                                                                                               | [llm.ts](../src/utils/llm.ts) 642 · [types/core.ts](../src/types/core.ts) · [types/core-adapters.ts](../src/types/core-adapters.ts) · [i18n/](../src/i18n/)                                                                                                                           | `core-contracts.test.ts`             |
 
 **Stub routes with no logic behind them** — the cheapest places to add real work:
 [watchlists.tsx](../src/routes/watchlists.tsx) 58 · [threats.tsx](../src/routes/threats.tsx) 56 ·
@@ -134,24 +134,24 @@ of whether it compiles.
 To extend a capability, add an entry to one of these. Each is an array or record
 that something iterates; nothing else needs to change.
 
-| Seam | File | Add here to… |
-|---|---|---|
-| `defaultFactors()` | [credibility.ts:513](../src/utils/credibility.ts#L513) | add a credibility factor |
-| `DOMAIN_REPUTATION` | [credibility.ts:150](../src/utils/credibility.ts#L150) | rate a new publisher (data, not logic) |
-| `builtinProfiles()` | [credibility.ts:781](../src/utils/credibility.ts#L781) | ship a new weight profile |
-| `socialFactors()` | [social-credibility.ts:160](../src/utils/social-credibility.ts#L160) | add a social-specific factor |
-| `SignalId` + `assessCluster` | [cib.ts:131](../src/utils/cib.ts#L131), [cib.ts:792](../src/utils/cib.ts#L792) | add a CIB signal |
-| `GEO_LAYERS` | [geo.ts:64](../src/utils/geo.ts#L64) | declare a map layer |
-| `collectGeoLayers()` | [geo-sources.ts:175](../src/utils/geo-sources.ts#L175) | wire a geo collector |
-| `PRODUCT_TYPES` | [reports.ts:56](../src/utils/reports.ts#L56) | add an intelligence product type |
-| `DORK_TEMPLATES` | [dorks.ts:40](../src/utils/dorks.ts#L40) | add a search dork |
-| `OCR_LANGUAGES` | [imaging.ts:692](../src/utils/imaging.ts#L692) | add an OCR script |
-| `NOT_IMPLEMENTED` | [imaging.ts:935](../src/utils/imaging.ts#L935) | declare an M4 capability gap honestly |
-| `PLATFORM_NOTES` | [social.ts:831](../src/utils/social.ts#L831) | state why a platform is uncollectable (M3) |
-| `RECON_NOTES` | [recon-sources.ts](../src/utils/recon-sources.ts) | declare an external-recon capability gap (M2) |
-| `NAV_GROUPS` | [app-shell.tsx:64](../src/components/app-shell.tsx#L64) | put a page in the sidebar |
-| `LOCALES` | [i18n/dictionary.ts:19](../src/i18n/dictionary.ts#L19) | add a language |
-| Schemas + `parse*` | [types/core.ts](../src/types/core.ts) | extend a frozen contract (optional fields only) |
+| Seam                         | File                                                                           | Add here to…                                    |
+| ---------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `defaultFactors()`           | [credibility.ts:513](../src/utils/credibility.ts#L513)                         | add a credibility factor                        |
+| `DOMAIN_REPUTATION`          | [credibility.ts:150](../src/utils/credibility.ts#L150)                         | rate a new publisher (data, not logic)          |
+| `builtinProfiles()`          | [credibility.ts:781](../src/utils/credibility.ts#L781)                         | ship a new weight profile                       |
+| `socialFactors()`            | [social-credibility.ts:160](../src/utils/social-credibility.ts#L160)           | add a social-specific factor                    |
+| `SignalId` + `assessCluster` | [cib.ts:131](../src/utils/cib.ts#L131), [cib.ts:792](../src/utils/cib.ts#L792) | add a CIB signal                                |
+| `GEO_LAYERS`                 | [geo.ts:64](../src/utils/geo.ts#L64)                                           | declare a map layer                             |
+| `collectGeoLayers()`         | [geo-sources.ts:175](../src/utils/geo-sources.ts#L175)                         | wire a geo collector                            |
+| `PRODUCT_TYPES`              | [reports.ts:56](../src/utils/reports.ts#L56)                                   | add an intelligence product type                |
+| `DORK_TEMPLATES`             | [dorks.ts:40](../src/utils/dorks.ts#L40)                                       | add a search dork                               |
+| `OCR_LANGUAGES`              | [imaging.ts:692](../src/utils/imaging.ts#L692)                                 | add an OCR script                               |
+| `NOT_IMPLEMENTED`            | [imaging.ts:935](../src/utils/imaging.ts#L935)                                 | declare an M4 capability gap honestly           |
+| `PLATFORM_NOTES`             | [social.ts:831](../src/utils/social.ts#L831)                                   | state why a platform is uncollectable (M3)      |
+| `RECON_NOTES`                | [recon-sources.ts](../src/utils/recon-sources.ts)                              | declare an external-recon capability gap (M2)   |
+| `NAV_GROUPS`                 | [app-shell.tsx:64](../src/components/app-shell.tsx#L64)                        | put a page in the sidebar                       |
+| `LOCALES`                    | [i18n/dictionary.ts:19](../src/i18n/dictionary.ts#L19)                         | add a language                                  |
+| Schemas + `parse*`           | [types/core.ts](../src/types/core.ts)                                          | extend a frozen contract (optional fields only) |
 
 ---
 
@@ -215,7 +215,7 @@ Then:
    server functions cannot execute outside the Start runtime, so that separation is
    what makes it testable.
 4. Register in the relevant seam (`collectGeoLayers`, `GEO_LAYERS`, …).
-5. If a platform is *deliberately* not collected, add a `PLATFORM_NOTES` entry
+5. If a platform is _deliberately_ not collected, add a `PLATFORM_NOTES` entry
    instead of a scraper. Instagram, Facebook, X and CrowdTangle are settled — do not
    re-add them.
 
@@ -246,8 +246,8 @@ Then:
 4. Count nulls as `unplaceable` in the `LayerResult` and let the UI report the
    count. **Never approximate a record onto the map.** `0,0` is a missing-value
    sentinel, rejected by `isRealCoordinate`.
-5. A layer that needs a credential it does not have should be *declared and empty
-   with the reason*, like Shodan and UCDP — not omitted, not faked.
+5. A layer that needs a credential it does not have should be _declared and empty
+   with the reason_, like Shodan and UCDP — not omitted, not faked.
 6. Test in `tests/gis.test.ts`.
 
 ### F. Add a CIB signal (M3)
@@ -268,7 +268,7 @@ Then:
    canvas/WASM/workers → [imaging-client.ts](../src/utils/imaging-client.ts).
 2. **Do not build or claim a deepfake classifier** (G2). The system's position is
    that provenance beats classification: the only high-confidence AI finding is a
-   *signed C2PA manifest declaring* generative provenance.
+   _signed C2PA manifest declaring_ generative provenance.
 3. Absence is reported as absence. Every major platform strips EXIF on upload, so a
    missing block is the normal case, not evidence of tampering.
 4. If the capability is real but out of reach, add it to `NOT_IMPLEMENTED` with what
@@ -329,7 +329,7 @@ decisions in §7.
    never make an existing field required. Freeze date: 2026-08-06.
 2. Anything that can fail to be measured is `| null`. `null` means not measured; it
    never means zero.
-3. Add the field to the zod schema *and* the TS type (they are one — `z.infer`).
+3. Add the field to the zod schema _and_ the TS type (they are one — `z.infer`).
 4. Handle it in [core-adapters.ts](../src/types/core-adapters.ts). If the conversion
    is lossy, report what was lost — `toSocialPost` returns a `degraded[]` list
    naming every CIB input the contract could not supply.
@@ -345,18 +345,18 @@ decisions in §7.
 If a request lands in this table, the honest answer is a prerequisite, not an
 implementation.
 
-| Wanted | Blocked by | What it actually needs |
-|---|---|---|
-| Login, user accounts, RBAC, audit log | No DB, no session store | A complete system already exists on branch `backup/pre-auth-rollback` / tag `pre-auth-rollback-20260806` (commit `214f0df`) — Prisma/SQLite, Argon2id, sealed-cookie sessions, rate limiting, 7 test files. It was reverted out of `main`. Restoring needs `DATABASE_URL`, a ≥32-char `SESSION_SECRET`, and a persisted volume. **Current decision: not being restored.** |
-| Shared state between users, saved profiles, real persistence | No database | A DB + a persisted volume. localStorage cannot do it. |
-| Scheduled monitoring, alerting, digest emails | Scale-to-zero | An always-on process or an external scheduler. Browser-side monitoring only runs while a tab is open. |
-| Webhooks, OAuth callbacks, third-party integrations | No HTTP routes | A framework version exposing `createServerFileRoute`, or an external relay. |
-| Self-hosted model inference | No GPU quota | `Consumption-GPU-NC8as-T4` in Central India (A100 unavailable in any Indian region). **Not yet requested.** Roughly USD 0.5–0.8/hour against a USD 30/month alert — the funding conflict is unresolved. |
-| Historical keyword search on Bluesky | `searchPosts` returns 403 | An authenticated account. Monitoring runs forward from connection. |
-| Instagram / Facebook / X collection | Platform terms and pricing | Nothing. Settled — do not re-add scrapers. |
-| Precise event geolocation from news | GDELT GEO API retired (404) | GDELT DOC gives the *outlet's* country, not the event's. Plotted at country precision, labelled as such. |
-| Conflict-event layer | UCDP now 401s | `UCDP_API_TOKEN`. |
-| Host geolocation | Shodan InternetDB returns none | The paid Shodan API (fails G3). |
+| Wanted                                                       | Blocked by                     | What it actually needs                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login, user accounts, RBAC, audit log                        | No DB, no session store        | A complete system already exists on branch `backup/pre-auth-rollback` / tag `pre-auth-rollback-20260806` (commit `214f0df`) — Prisma/SQLite, Argon2id, sealed-cookie sessions, rate limiting, 7 test files. It was reverted out of `main`. Restoring needs `DATABASE_URL`, a ≥32-char `SESSION_SECRET`, and a persisted volume. **Current decision: not being restored.** |
+| Shared state between users, saved profiles, real persistence | No database                    | A DB + a persisted volume. localStorage cannot do it.                                                                                                                                                                                                                                                                                                                     |
+| Scheduled monitoring, alerting, digest emails                | Scale-to-zero                  | An always-on process or an external scheduler. Browser-side monitoring only runs while a tab is open.                                                                                                                                                                                                                                                                     |
+| Webhooks, OAuth callbacks, third-party integrations          | No HTTP routes                 | A framework version exposing `createServerFileRoute`, or an external relay.                                                                                                                                                                                                                                                                                               |
+| Self-hosted model inference                                  | No GPU quota                   | `Consumption-GPU-NC8as-T4` in Central India (A100 unavailable in any Indian region). **Not yet requested.** Roughly USD 0.5–0.8/hour against a USD 30/month alert — the funding conflict is unresolved.                                                                                                                                                                   |
+| Historical keyword search on Bluesky                         | `searchPosts` returns 403      | An authenticated account. Monitoring runs forward from connection.                                                                                                                                                                                                                                                                                                        |
+| Instagram / Facebook / X collection                          | Platform terms and pricing     | Nothing. Settled — do not re-add scrapers.                                                                                                                                                                                                                                                                                                                                |
+| Precise event geolocation from news                          | GDELT GEO API retired (404)    | GDELT DOC gives the _outlet's_ country, not the event's. Plotted at country precision, labelled as such.                                                                                                                                                                                                                                                                  |
+| Conflict-event layer                                         | UCDP now 401s                  | `UCDP_API_TOKEN`.                                                                                                                                                                                                                                                                                                                                                         |
+| Host geolocation                                             | Shodan InternetDB returns none | The paid Shodan API (fails G3).                                                                                                                                                                                                                                                                                                                                           |
 
 Shared cache across replicas, rate limiting, and anything else stateful hits the
 same wall: `llm.ts`'s LRU is per-process and lost on restart.
@@ -415,7 +415,7 @@ Azure CLI work runs in Git Bash and requires `export MSYS_NO_PATHCONV=1`, or eve
 4. [src/utils/llm.ts](../src/utils/llm.ts) — how failure is handled everywhere else.
 5. The one module you are changing, plus its test file.
 
-The header comment of each `src/utils/*.ts` file explains *why* it is shaped the way
+The header comment of each `src/utils/*.ts` file explains _why_ it is shaped the way
 it is, including several designs that were tried and rejected. Read it before
 proposing a restructure — the alternative you are about to suggest may already be
 documented there as a mistake.

@@ -5,7 +5,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Download, FileText, FileCode, FileSpreadsheet, Loader2, AlertTriangle, Info, Archive,
+  Download,
+  FileText,
+  FileCode,
+  FileSpreadsheet,
+  Loader2,
+  AlertTriangle,
+  Info,
+  Archive,
 } from "lucide-react";
 import { bandFor } from "@/utils/credibility";
 import { toMarkdown, type IntelligenceProduct } from "@/utils/reports";
@@ -48,9 +55,24 @@ function loadProducts(): IntelligenceProduct[] {
 type Format = "pdf" | "markdown" | "json" | "csv";
 
 const FORMATS: { id: Format; name: string; desc: string; icon: any }[] = [
-  { id: "pdf", name: "PDF", desc: "Laid-out product with numbered sources, page numbers and a provenance footer on every page", icon: FileText },
-  { id: "markdown", name: "Markdown", desc: "Full text for pasting into another system", icon: FileText },
-  { id: "json", name: "JSON", desc: "The product structure, including every source and citation", icon: FileCode },
+  {
+    id: "pdf",
+    name: "PDF",
+    desc: "Laid-out product with numbered sources, page numbers and a provenance footer on every page",
+    icon: FileText,
+  },
+  {
+    id: "markdown",
+    name: "Markdown",
+    desc: "Full text for pasting into another system",
+    icon: FileText,
+  },
+  {
+    id: "json",
+    name: "JSON",
+    desc: "The product structure, including every source and citation",
+    icon: FileCode,
+  },
   { id: "csv", name: "CSV", desc: "Source table with credibility scores", icon: FileSpreadsheet },
 ];
 
@@ -68,9 +90,21 @@ function download(blob: Blob, filename: string) {
 /** CSV of the source table. Quotes are doubled so a comma in a title cannot shift columns. */
 function toCsv(product: IntelligenceProduct): string {
   const esc = (v: string | number | null) =>
-    `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+    `"${String(v ?? "")
+      .replace(/"/g, '""')
+      .replace(/\r?\n/g, " ")}"`;
   const rows = [
-    ["citation", "title", "outlet", "published", "module", "credibility_pct", "credibility_band", "rationale", "url"].join(","),
+    [
+      "citation",
+      "title",
+      "outlet",
+      "published",
+      "module",
+      "credibility_pct",
+      "credibility_band",
+      "rationale",
+      "url",
+    ].join(","),
     ...product.sources.map((s) =>
       [
         esc(s.n),
@@ -119,7 +153,10 @@ function ExportsPage() {
     try {
       if (format === "pdf") {
         const bytes = await renderProductPdf(product);
-        download(new Blob([bytes as unknown as BlobPart], { type: "application/pdf" }), `${stem}.pdf`);
+        download(
+          new Blob([bytes as unknown as BlobPart], { type: "application/pdf" }),
+          `${stem}.pdf`,
+        );
       } else if (format === "markdown") {
         download(new Blob([toMarkdown(product)], { type: "text/markdown" }), `${stem}.md`);
       } else if (format === "json") {
@@ -181,8 +218,8 @@ function ExportsPage() {
                     </span>
                     <span className="block truncate text-[10px] text-[#94A3B8]">{p.subject}</span>
                     <span className="block font-mono text-[9px] text-[#64748B]">
-                      {p.provenance.generatedAt.slice(0, 16).replace("T", " ")} ·{" "}
-                      {p.sources.length} sources · {p.provenance.model}
+                      {p.provenance.generatedAt.slice(0, 16).replace("T", " ")} · {p.sources.length}{" "}
+                      sources · {p.provenance.model}
                     </span>
                   </button>
                 ))}
@@ -247,8 +284,8 @@ function ExportsPage() {
                   <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
                     <Info className="mt-px size-3 shrink-0" />
                     No subject risk score is exported. Nothing in this system computes one, and a
-                    number printed under a classification header reads as a measurement — which
-                    is exactly how `risk: 75` used to reach a downloadable dossier.
+                    number printed under a classification header reads as a measurement — which is
+                    exactly how `risk: 75` used to reach a downloadable dossier.
                   </p>
                 </CardContent>
               </Card>
@@ -260,7 +297,10 @@ function ExportsPage() {
                     {FORMATS.map((f) => {
                       const Icon = f.icon;
                       return (
-                        <Card key={f.id} className="flex flex-col justify-between border-[#263548] bg-[#0B1220] p-3">
+                        <Card
+                          key={f.id}
+                          className="flex flex-col justify-between border-[#263548] bg-[#0B1220] p-3"
+                        >
                           <div>
                             <Icon className="size-5 text-[#10B981]" />
                             <div className="mt-1.5 text-xs font-bold text-white">{f.name}</div>

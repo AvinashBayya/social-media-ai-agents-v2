@@ -16,7 +16,7 @@ export function setActiveTarget(query: string) {
   if (typeof window === "undefined") return;
   const trimmed = query.trim();
   if (!trimmed) return;
-  
+
   localStorage.setItem("sentinel_active_target", trimmed);
 
   const url = new URL(window.location.href);

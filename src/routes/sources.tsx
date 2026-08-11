@@ -9,21 +9,50 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
-  Gauge, ChevronDown, ChevronRight, Loader2, AlertTriangle, RotateCcw,
-  Save, Sparkles, Trash2, Info, X, Shield, Plus, Globe,
+  Gauge,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  AlertTriangle,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Trash2,
+  Info,
+  X,
+  Shield,
+  Plus,
+  Globe,
 } from "lucide-react";
 import { fetchNews } from "./news";
 import { getActiveTarget } from "@/utils/active-target";
 import {
-  applyProfile, bandFor, builtinProfiles, defaultFactors, domainOf,
-  loadCustomProfiles, saveCustomProfiles, scoreCorpus,
-  loadActiveFactorConfig, saveActiveFactorConfig,
-  loadCustomDomainOverrides, saveCustomDomainOverrides, reputationOf,
-  type Article, type CredibilityFactor, type CredibilityScore, type WeightProfile,
-  type DomainEntry, type SourceTier, type SourceType, TIER_SCORES,
+  applyProfile,
+  bandFor,
+  builtinProfiles,
+  defaultFactors,
+  domainOf,
+  loadCustomProfiles,
+  saveCustomProfiles,
+  scoreCorpus,
+  loadActiveFactorConfig,
+  saveActiveFactorConfig,
+  loadCustomDomainOverrides,
+  saveCustomDomainOverrides,
+  reputationOf,
+  type Article,
+  type CredibilityFactor,
+  type CredibilityScore,
+  type WeightProfile,
+  type DomainEntry,
+  type SourceTier,
+  type SourceType,
+  TIER_SCORES,
 } from "@/utils/credibility";
 import {
-  assessLanguageFor, assessmentSummary, type LanguageAssessment,
+  assessLanguageFor,
+  assessmentSummary,
+  type LanguageAssessment,
 } from "@/utils/credibility-llm";
 
 export const Route = createFileRoute("/sources")({
@@ -63,7 +92,9 @@ function SourcesPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // LLM tone assessment state
-  const [languageAssessments, setLanguageAssessments] = useState<Record<string, LanguageAssessment>>({});
+  const [languageAssessments, setLanguageAssessments] = useState<
+    Record<string, LanguageAssessment>
+  >({});
   const [assessingTone, setAssessingTone] = useState(false);
   const [toneSummaryText, setToneSummaryText] = useState("");
 
@@ -96,7 +127,9 @@ function SourcesPage() {
   useEffect(() => {
     saveActiveFactorConfig({
       activeProfileId,
-      settings: Object.fromEntries(factors.map((f) => [f.id, { weight: f.weight, enabled: f.enabled }])),
+      settings: Object.fromEntries(
+        factors.map((f) => [f.id, { weight: f.weight, enabled: f.enabled }]),
+      ),
       customKeywords: { raise: keywordsRaise, lower: keywordsLower },
     });
   }, [factors, activeProfileId, keywordsRaise, keywordsLower]);
@@ -127,7 +160,9 @@ function SourcesPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Live recompute with custom keywords & language assessments
@@ -166,7 +201,9 @@ function SourcesPage() {
         toast.success(summary);
       }
       // Ensure linguistic_markers factor is enabled
-      setFactors((prev) => prev.map((f) => (f.id === "linguistic_markers" ? { ...f, enabled: true } : f)));
+      setFactors((prev) =>
+        prev.map((f) => (f.id === "linguistic_markers" ? { ...f, enabled: true } : f)),
+      );
     } catch (err: any) {
       toast.error(`Tone assessment failed: ${err?.message ?? String(err)}`);
     } finally {
@@ -176,7 +213,11 @@ function SourcesPage() {
 
   const handleAddDomainOverride = () => {
     if (!newDomain.trim()) return;
-    const clean = newDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const clean = newDomain
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
     const updated = {
       ...domainOverrides,
       [clean]: { tier: newDomainTier, type: newDomainType },
@@ -210,7 +251,9 @@ function SourcesPage() {
     const next: WeightProfile = {
       id: `custom-${name.trim().toLowerCase().replace(/\s+/g, "-")}`,
       name: name.trim(),
-      settings: Object.fromEntries(factors.map((f) => [f.id, { weight: f.weight, enabled: f.enabled }])),
+      settings: Object.fromEntries(
+        factors.map((f) => [f.id, { weight: f.weight, enabled: f.enabled }]),
+      ),
       customKeywords: { raise: keywordsRaise, lower: keywordsLower },
     };
     const custom = [...profiles.filter((p) => !p.builtin && p.id !== next.id), next];
@@ -257,8 +300,8 @@ function SourcesPage() {
               </span>
             </div>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
-              Weights are normalised across whichever factors are enabled, so they always
-              sum to 1. Scores recompute as you drag — there is no apply step.
+              Weights are normalised across whichever factors are enabled, so they always sum to 1.
+              Scores recompute as you drag — there is no apply step.
             </p>
 
             {factors.map((f) => (
@@ -322,7 +365,10 @@ function SourcesPage() {
             <div className="flex gap-2 pt-1">
               <Button
                 size="sm"
-                onClick={() => { setFactors(defaultFactors()); setActiveProfileId("default"); }}
+                onClick={() => {
+                  setFactors(defaultFactors());
+                  setActiveProfileId("default");
+                }}
                 className="h-7 flex-1 rounded bg-[#1A2332] font-mono text-[9px] text-[#94A3B8] hover:bg-[#263548]"
               >
                 <RotateCcw className="mr-1 size-3" /> Reset
@@ -343,7 +389,8 @@ function SourcesPage() {
               <Globe className="size-4 text-[#06B6D4]" /> Custom Domain Ratings
             </span>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
-              Override editorial tiers for specific news domains or add regional sources to the reputation table.
+              Override editorial tiers for specific news domains or add regional sources to the
+              reputation table.
             </p>
             <div className="space-y-1.5">
               <div className="flex gap-1">
@@ -377,10 +424,15 @@ function SourcesPage() {
             {Object.keys(domainOverrides).length > 0 && (
               <div className="space-y-1 border-t border-[#263548] pt-2">
                 {Object.entries(domainOverrides).map(([domainKey, entry]) => (
-                  <div key={domainKey} className="flex items-center justify-between gap-1 rounded bg-[#0B1220] p-1.5">
+                  <div
+                    key={domainKey}
+                    className="flex items-center justify-between gap-1 rounded bg-[#0B1220] p-1.5"
+                  >
                     <div className="font-mono text-[9px] text-[#F3F4F6]">
                       <span className="font-bold">{domainKey}</span>{" "}
-                      <span className={DIM}>· {entry.tier} ({TIER_SCORES[entry.tier].toFixed(2)})</span>
+                      <span className={DIM}>
+                        · {entry.tier} ({TIER_SCORES[entry.tier].toFixed(2)})
+                      </span>
                     </div>
                     <Button
                       size="sm"
@@ -430,8 +482,8 @@ function SourcesPage() {
           <Card className={`${CARD} space-y-2 p-4`}>
             <span className="font-mono text-xs font-bold text-[#F3F4F6]">Custom criterion</span>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
-              PS-18 asks for user-defined criteria. Define keywords that raise or lower the
-              score. The factor stays skipped until at least one keyword exists.
+              PS-18 asks for user-defined criteria. Define keywords that raise or lower the score.
+              The factor stays skipped until at least one keyword exists.
             </p>
             <div className="flex gap-1">
               <select
@@ -493,9 +545,9 @@ function SourcesPage() {
             <Card className={`${CARD} flex items-start gap-2 p-3`}>
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#F59E0B]" />
               <span className="font-mono text-[10px] leading-relaxed text-[#F59E0B]">
-                <span className="font-bold">Partial scoring.</span>{" "}
-                {disabled.length} factor{disabled.length === 1 ? " is" : "s are"} disabled
-                ({disabled.map((f) => f.name).join(", ")}). Scores below are computed from the
+                <span className="font-bold">Partial scoring.</span> {disabled.length} factor
+                {disabled.length === 1 ? " is" : "s are"} disabled (
+                {disabled.map((f) => f.name).join(", ")}). Scores below are computed from the
                 remaining factors only.
               </span>
             </Card>
@@ -523,8 +575,8 @@ function SourcesPage() {
             <Card className={`${CARD} space-y-1 p-6 text-center`}>
               <div className="font-mono text-xs text-[#F3F4F6]">No articles ingested</div>
               <div className={`font-mono text-[10px] ${MUTED}`}>
-                The collectors returned nothing for the active target, so there is nothing to
-                score. This is an empty corpus, not a failure.
+                The collectors returned nothing for the active target, so there is nothing to score.
+                This is an empty corpus, not a failure.
               </div>
             </Card>
           )}
@@ -545,12 +597,17 @@ function SourcesPage() {
                   onClick={() => setExpanded(open ? null : s.article.id)}
                   className="flex w-full items-start gap-3 text-left"
                 >
-                  {open ? <ChevronDown className={`mt-0.5 size-4 shrink-0 ${DIM}`} />
-                        : <ChevronRight className={`mt-0.5 size-4 shrink-0 ${DIM}`} />}
+                  {open ? (
+                    <ChevronDown className={`mt-0.5 size-4 shrink-0 ${DIM}`} />
+                  ) : (
+                    <ChevronRight className={`mt-0.5 size-4 shrink-0 ${DIM}`} />
+                  )}
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="font-mono text-[11px] text-[#F3F4F6]">{s.article.title}</div>
                     <div className={`font-mono text-[9px] ${DIM}`}>{domain}</div>
-                    <p className={`font-mono text-[9px] leading-relaxed ${MUTED}`}>{s.explanation}</p>
+                    <p className={`font-mono text-[9px] leading-relaxed ${MUTED}`}>
+                      {s.explanation}
+                    </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <Badge className={`text-[10px] ${TONE[band.tone]}`}>
@@ -570,7 +627,9 @@ function SourcesPage() {
 
                 {open && (
                   <div className="mt-3 space-y-2 border-t border-[#263548] pt-3">
-                    <div className={`font-mono text-[9px] font-bold uppercase tracking-wider ${DIM}`}>
+                    <div
+                      className={`font-mono text-[9px] font-bold uppercase tracking-wider ${DIM}`}
+                    >
                       Contributing factors
                     </div>
                     {s.breakdown.map((b) => (
@@ -579,16 +638,22 @@ function SourcesPage() {
                           <span className="font-mono text-[10px] text-[#F3F4F6]">{b.name}</span>
                           <span className={`font-mono text-[9px] ${MUTED}`}>
                             raw {b.rawScore.toFixed(2)} × weight {b.weight.toFixed(2)} ={" "}
-                            <span className="font-bold text-[#06B6D4]">{b.contribution.toFixed(3)}</span>
+                            <span className="font-bold text-[#06B6D4]">
+                              {b.contribution.toFixed(3)}
+                            </span>
                           </span>
                         </div>
-                        <p className={`font-mono text-[9px] leading-relaxed ${MUTED}`}>{b.evidence}</p>
+                        <p className={`font-mono text-[9px] leading-relaxed ${MUTED}`}>
+                          {b.evidence}
+                        </p>
                       </div>
                     ))}
 
                     {s.skipped.length > 0 && (
                       <>
-                        <div className={`pt-1 font-mono text-[9px] font-bold uppercase tracking-wider ${DIM}`}>
+                        <div
+                          className={`pt-1 font-mono text-[9px] font-bold uppercase tracking-wider ${DIM}`}
+                        >
                           Skipped — excluded from the score, not counted as zero
                         </div>
                         {s.skipped.map((sk) => (

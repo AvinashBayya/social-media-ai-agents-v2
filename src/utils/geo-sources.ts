@@ -65,7 +65,8 @@ export async function collectSeismic(): Promise<LayerResult> {
     let unplaceable = 0;
     for (const f of features) {
       const r = fromUsgsFeature(f);
-      if (r) records.push(r); else unplaceable += 1;
+      if (r) records.push(r);
+      else unplaceable += 1;
     }
     return { layer: "seismic", records, unplaceable, error: null };
   } catch (err: any) {
@@ -100,16 +101,16 @@ export async function collectConflict(): Promise<LayerResult> {
   }
 
   try {
-    const data = await getJson(
-      "https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=200",
-      { "x-ucdp-access-token": token },
-    );
+    const data = await getJson("https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=200", {
+      "x-ucdp-access-token": token,
+    });
     const events: any[] = data?.Result ?? [];
     const records: GeoRecord[] = [];
     let unplaceable = 0;
     for (const e of events) {
       const r = fromUcdpEvent(e);
-      if (r) records.push(r); else unplaceable += 1;
+      if (r) records.push(r);
+      else unplaceable += 1;
     }
     return { layer: "conflict", records, unplaceable, error: null };
   } catch (err: any) {
@@ -144,7 +145,8 @@ export async function collectNewsGeo(query: string): Promise<LayerResult> {
       const r = fromGdeltArticle(a);
       // Null here means the outlet country was absent or not in the centroid
       // table — the article is real, we just cannot place it.
-      if (r) records.push(r); else unplaceable += 1;
+      if (r) records.push(r);
+      else unplaceable += 1;
     }
     return { layer: "news", records, unplaceable, error: null };
   } catch (err: any) {

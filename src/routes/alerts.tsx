@@ -26,7 +26,10 @@ function AlertsPage() {
       />
       <div className="p-6 space-y-3 font-mono text-xs">
         {ALERTS.map((a, i) => (
-          <Card key={i} className="bg-[#111827] border-[#263548] p-4 flex items-center justify-between">
+          <Card
+            key={i}
+            className="bg-[#111827] border-[#263548] p-4 flex items-center justify-between"
+          >
             <div className="flex items-center gap-3">
               <Bell className="size-4 text-[#EF4444]" />
               <div>

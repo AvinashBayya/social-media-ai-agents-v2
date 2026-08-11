@@ -152,8 +152,7 @@ export function sourcesFromArticles(
       module: "Module 1 · credibility" as const,
       credibility: score?.score ?? null,
       credibilityRationale:
-        score?.explanation ??
-        "Not scored — no credibility factor could be computed for this item.",
+        score?.explanation ?? "Not scored — no credibility factor could be computed for this item.",
       excerpt: (a.body || a.title).slice(0, EXCERPT_CHARS),
     };
   });
@@ -161,7 +160,14 @@ export function sourcesFromArticles(
 
 /** Social posts, carrying their Module 3 context. */
 export function sourcesFromSocial(
-  posts: { id: string; author: string; text: string; url: string; createdAt: string; platform: string }[],
+  posts: {
+    id: string;
+    author: string;
+    text: string;
+    url: string;
+    createdAt: string;
+    platform: string;
+  }[],
   context: Record<string, { cibScore: number | null; maturityConcern: number | null }> = {},
   startAt = 1,
 ): SourceRef[] {
@@ -169,7 +175,8 @@ export function sourcesFromSocial(
     const c = context[p.id];
     const notes: string[] = [];
     if (c?.cibScore != null) notes.push(`coordination signals ${c.cibScore.toFixed(2)}`);
-    if (c?.maturityConcern != null) notes.push(`account maturity concern ${c.maturityConcern.toFixed(2)}`);
+    if (c?.maturityConcern != null)
+      notes.push(`account maturity concern ${c.maturityConcern.toFixed(2)}`);
     return {
       n: startAt + i,
       title: p.text.slice(0, 120),
@@ -318,7 +325,12 @@ export function buildSourceContext(sources: SourceRef[]): string {
     .join("\n\n");
 }
 
-function buildPrompt(spec: ProductSpec, subject: string, sources: SourceRef[], corrections?: string[]): string {
+function buildPrompt(
+  spec: ProductSpec,
+  subject: string,
+  sources: SourceRef[],
+  corrections?: string[],
+): string {
   const base = `${spec.brief}
 
 SUBJECT: ${subject}
@@ -459,10 +471,14 @@ export async function generateProduct(input: GenerateInput): Promise<Intelligenc
   let lastProblems: ValidationProblem[] = [];
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const out = await chatJson(buildPrompt(spec, input.subject, sources, corrections), ProductSchema, {
-      system: ANALYST_SYSTEM,
-      maxTokens: spec.maxTokens,
-    });
+    const out = await chatJson(
+      buildPrompt(spec, input.subject, sources, corrections),
+      ProductSchema,
+      {
+        system: ANALYST_SYSTEM,
+        maxTokens: spec.maxTokens,
+      },
+    );
 
     const problems = validateCitations(out.value, sources);
     if (problems.length === 0) {

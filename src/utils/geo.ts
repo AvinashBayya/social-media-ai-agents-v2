@@ -164,24 +164,60 @@ const iso = (v: unknown): string | null => {
 // Used ONLY for country-precision layers, and always with an uncertainty circle.
 
 export const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
-  "United States": [39.83, -98.58], "Russia": [61.52, 105.32], "China": [35.86, 104.2],
-  "India": [22.35, 78.67], "Pakistan": [30.38, 69.35], "Iran": [32.43, 53.69],
-  "Ukraine": [48.38, 31.17], "Germany": [51.17, 10.45], "United Kingdom": [55.38, -3.44],
-  "France": [46.23, 2.21], "Israel": [31.05, 34.85], "Syria": [34.8, 38.997],
-  "North Korea": [40.34, 127.51], "South Korea": [35.91, 127.77], "Japan": [36.2, 138.25],
-  "Taiwan": [23.7, 120.96], "Turkey": [38.96, 35.24], "Saudi Arabia": [23.89, 45.08],
-  "Bangladesh": [23.68, 90.36], "Sri Lanka": [7.87, 80.77], "Nepal": [28.39, 84.12],
-  "Myanmar": [21.91, 95.96], "Afghanistan": [33.94, 67.71], "Iraq": [33.22, 43.68],
-  "Yemen": [15.55, 48.52], "Egypt": [26.82, 30.8], "Nigeria": [9.08, 8.68],
-  "Ethiopia": [9.15, 40.49], "Sudan": [12.86, 30.22], "Somalia": [5.15, 46.2],
-  "Brazil": [-14.24, -51.93], "Canada": [56.13, -106.35], "Australia": [-25.27, 133.78],
-  "Indonesia": [-0.79, 113.92], "Philippines": [12.88, 121.77], "Vietnam": [14.06, 108.28],
-  "Thailand": [15.87, 100.99], "Malaysia": [4.21, 101.98], "Singapore": [1.35, 103.82],
-  "Italy": [41.87, 12.57], "Spain": [40.46, -3.75], "Poland": [51.92, 19.15],
-  "Netherlands": [52.13, 5.29], "Sweden": [60.13, 18.64], "Norway": [60.47, 8.47],
-  "Switzerland": [46.82, 8.23], "Belgium": [50.5, 4.47], "Austria": [47.52, 14.55],
-  "Mexico": [23.63, -102.55], "Argentina": [-38.42, -63.62], "South Africa": [-30.56, 22.94],
-  "Kenya": [-0.02, 37.91], "Qatar": [25.35, 51.18], "United Arab Emirates": [23.42, 53.85],
+  "United States": [39.83, -98.58],
+  Russia: [61.52, 105.32],
+  China: [35.86, 104.2],
+  India: [22.35, 78.67],
+  Pakistan: [30.38, 69.35],
+  Iran: [32.43, 53.69],
+  Ukraine: [48.38, 31.17],
+  Germany: [51.17, 10.45],
+  "United Kingdom": [55.38, -3.44],
+  France: [46.23, 2.21],
+  Israel: [31.05, 34.85],
+  Syria: [34.8, 38.997],
+  "North Korea": [40.34, 127.51],
+  "South Korea": [35.91, 127.77],
+  Japan: [36.2, 138.25],
+  Taiwan: [23.7, 120.96],
+  Turkey: [38.96, 35.24],
+  "Saudi Arabia": [23.89, 45.08],
+  Bangladesh: [23.68, 90.36],
+  "Sri Lanka": [7.87, 80.77],
+  Nepal: [28.39, 84.12],
+  Myanmar: [21.91, 95.96],
+  Afghanistan: [33.94, 67.71],
+  Iraq: [33.22, 43.68],
+  Yemen: [15.55, 48.52],
+  Egypt: [26.82, 30.8],
+  Nigeria: [9.08, 8.68],
+  Ethiopia: [9.15, 40.49],
+  Sudan: [12.86, 30.22],
+  Somalia: [5.15, 46.2],
+  Brazil: [-14.24, -51.93],
+  Canada: [56.13, -106.35],
+  Australia: [-25.27, 133.78],
+  Indonesia: [-0.79, 113.92],
+  Philippines: [12.88, 121.77],
+  Vietnam: [14.06, 108.28],
+  Thailand: [15.87, 100.99],
+  Malaysia: [4.21, 101.98],
+  Singapore: [1.35, 103.82],
+  Italy: [41.87, 12.57],
+  Spain: [40.46, -3.75],
+  Poland: [51.92, 19.15],
+  Netherlands: [52.13, 5.29],
+  Sweden: [60.13, 18.64],
+  Norway: [60.47, 8.47],
+  Switzerland: [46.82, 8.23],
+  Belgium: [50.5, 4.47],
+  Austria: [47.52, 14.55],
+  Mexico: [23.63, -102.55],
+  Argentina: [-38.42, -63.62],
+  "South Africa": [-30.56, 22.94],
+  Kenya: [-0.02, 37.91],
+  Qatar: [25.35, 51.18],
+  "United Arab Emirates": [23.42, 53.85],
 };
 
 // ─── Adapters: upstream record -> GeoRecord | null ─────────────────────────
@@ -203,7 +239,8 @@ export function fromUsgsFeature(feature: any): GeoRecord | null {
   return {
     id: `usgs-${feature.id ?? `${lat},${lon},${p.time}`}`,
     layer: "seismic",
-    lat, lon,
+    lat,
+    lon,
     precision: "exact",
     locates: "the instrument-derived epicentre",
     title: String(p.title ?? p.place ?? "Seismic event"),
@@ -236,8 +273,7 @@ export function fromUcdpEvent(event: any): GeoRecord | null {
   if (!time) return null;
 
   const wherePrec = Number(event?.where_prec);
-  const precision: GeoPrecision =
-    wherePrec <= 2 ? "exact" : wherePrec === 3 ? "city" : "country";
+  const precision: GeoPrecision = wherePrec <= 2 ? "exact" : wherePrec === 3 ? "city" : "country";
 
   const deaths =
     (Number(event?.deaths_a) || 0) +
@@ -249,7 +285,8 @@ export function fromUcdpEvent(event: any): GeoRecord | null {
   return {
     id: `ucdp-${event.id}`,
     layer: "conflict",
-    lat, lon,
+    lat,
+    lon,
     precision,
     locates:
       precision === "exact"
@@ -281,7 +318,10 @@ export function fromUcdpEvent(event: any): GeoRecord | null {
  * carries sourcecountry "China". This is therefore plotted at COUNTRY precision
  * and explicitly labelled as the outlet's country, never as an event location.
  */
-export function fromGdeltArticle(article: any, credibility: number | null = null): GeoRecord | null {
+export function fromGdeltArticle(
+  article: any,
+  credibility: number | null = null,
+): GeoRecord | null {
   const country = String(article?.sourcecountry ?? "").trim();
   const centroid = COUNTRY_CENTROIDS[country];
   if (!centroid) return null;
@@ -379,7 +419,8 @@ export function clusterByGrid(records: GeoRecord[], cellDegrees: number): GeoClu
   for (const r of records) {
     const key = `${Math.floor(r.lat / cellDegrees)}:${Math.floor(r.lon / cellDegrees)}`;
     const list = cells.get(key);
-    if (list) list.push(r); else cells.set(key, [r]);
+    if (list) list.push(r);
+    else cells.set(key, [r]);
   }
 
   return Array.from(cells.values()).map((members) => {
@@ -452,7 +493,9 @@ export function summarise(results: LayerResult[]): GeoSummary {
     );
   }
   if (failed.length > 0) {
-    parts.push(`${failed.length} layer(s) could not be collected: ${failed.map((f) => f.layer).join(", ")}.`);
+    parts.push(
+      `${failed.length} layer(s) could not be collected: ${failed.map((f) => f.layer).join(", ")}.`,
+    );
   }
 
   return {

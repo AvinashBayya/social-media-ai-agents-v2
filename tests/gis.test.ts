@@ -116,8 +116,12 @@ describe("no coordinate is ever synthesised", () => {
   });
 
   test("a record without a usable timestamp is rejected — the time slider must not lie either", () => {
-    expect(fromUsgsFeature({ ...USGS_FEATURE, properties: { ...USGS_FEATURE.properties, time: null } })).toBeNull();
-    expect(fromUcdpEvent({ ...UCDP_EVENT, date_start: "not-a-date", date_end: undefined })).toBeNull();
+    expect(
+      fromUsgsFeature({ ...USGS_FEATURE, properties: { ...USGS_FEATURE.properties, time: null } }),
+    ).toBeNull();
+    expect(
+      fromUcdpEvent({ ...UCDP_EVENT, date_start: "not-a-date", date_end: undefined }),
+    ).toBeNull();
     expect(fromExifImage({ ...EXIF_IMAGE, capturedAt: null })).toBeNull();
   });
 });
@@ -177,7 +181,10 @@ describe("magnitude", () => {
   });
 
   test("a seismic event without a reported magnitude says so", () => {
-    const r = fromUsgsFeature({ ...USGS_FEATURE, properties: { ...USGS_FEATURE.properties, mag: null } })!;
+    const r = fromUsgsFeature({
+      ...USGS_FEATURE,
+      properties: { ...USGS_FEATURE.properties, mag: null },
+    })!;
     expect(r.magnitude).toBeNull();
     expect(r.magnitudeLabel).toContain("not reported");
   });

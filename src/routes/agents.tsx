@@ -22,7 +22,7 @@ import {
   Activity,
   Layers,
   ArrowRightLeft,
-  Pin
+  Pin,
 } from "lucide-react";
 
 export const Route = createFileRoute("/agents")({
@@ -31,22 +31,62 @@ export const Route = createFileRoute("/agents")({
 });
 
 const CAPABILITIES = [
-  { id: "SUMMARIZE_CASE", name: "Summarize Case Files", desc: "Compile dossier evidence into cohesive case summaries." },
-  { id: "EXEC_SUMMARY", name: "Generate Executive Summary", desc: "Construct high-level briefing memo for directors." },
-  { id: "TIMELINE", name: "Generate Timeline Log", desc: "Chronologically sort geocodes, social posts, and logs." },
-  { id: "EXPLAIN_ENTITY", name: "Explain Entity Attributes", desc: "Outline known aliases, IP mappings, and profiles." },
-  { id: "COMPARE_ENTITIES", name: "Compare Threat Entities", desc: "Evaluate overlap indices between two profiles." },
-  { id: "FIND_RELATIONSHIPS", name: "Find Node Relationships", desc: "Map correlation strings between CIB accounts." },
-  { id: "RECOMMENDATIONS", name: "Generate Containment Plans", desc: "Draft strategic risk mitigation and counter-measures." },
-  { id: "INTEL_REPORT", name: "Assemble Intelligence Report", desc: "Structure formal A4 analytical intelligence briefs." },
-  { id: "BRIEFING", name: "Generate Operational Briefing", desc: "Condense last 24h threat vectors into key bullet highlights." },
-  { id: "RISK_ASSESSMENT", name: "Perform Risk Assessment", desc: "Compute quantitative impact indices and risk curves." }
+  {
+    id: "SUMMARIZE_CASE",
+    name: "Summarize Case Files",
+    desc: "Compile dossier evidence into cohesive case summaries.",
+  },
+  {
+    id: "EXEC_SUMMARY",
+    name: "Generate Executive Summary",
+    desc: "Construct high-level briefing memo for directors.",
+  },
+  {
+    id: "TIMELINE",
+    name: "Generate Timeline Log",
+    desc: "Chronologically sort geocodes, social posts, and logs.",
+  },
+  {
+    id: "EXPLAIN_ENTITY",
+    name: "Explain Entity Attributes",
+    desc: "Outline known aliases, IP mappings, and profiles.",
+  },
+  {
+    id: "COMPARE_ENTITIES",
+    name: "Compare Threat Entities",
+    desc: "Evaluate overlap indices between two profiles.",
+  },
+  {
+    id: "FIND_RELATIONSHIPS",
+    name: "Find Node Relationships",
+    desc: "Map correlation strings between CIB accounts.",
+  },
+  {
+    id: "RECOMMENDATIONS",
+    name: "Generate Containment Plans",
+    desc: "Draft strategic risk mitigation and counter-measures.",
+  },
+  {
+    id: "INTEL_REPORT",
+    name: "Assemble Intelligence Report",
+    desc: "Structure formal A4 analytical intelligence briefs.",
+  },
+  {
+    id: "BRIEFING",
+    name: "Generate Operational Briefing",
+    desc: "Condense last 24h threat vectors into key bullet highlights.",
+  },
+  {
+    id: "RISK_ASSESSMENT",
+    name: "Perform Risk Assessment",
+    desc: "Compute quantitative impact indices and risk curves.",
+  },
 ];
 
 function AgentsPage() {
   const [cases, setCases] = useState<any[]>([]);
   const [watchlists, setWatchlists] = useState<any[]>([]);
-  
+
   // Selection states
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [selectedWatchlistId, setSelectedWatchlistId] = useState("");
@@ -74,19 +114,25 @@ function AgentsPage() {
 
   // Compute entities from active cases and watchlists
   const availableEntities = useMemo(() => {
-    const set = new Set(["Vector-17", "Aster Motors", "Meridian Capital", "channel_9821", "Northwind Logistics"]);
-    cases.forEach(c => {
+    const set = new Set([
+      "Vector-17",
+      "Aster Motors",
+      "Meridian Capital",
+      "channel_9821",
+      "Northwind Logistics",
+    ]);
+    cases.forEach((c) => {
       if (c.target) set.add(c.target);
       c.entities?.forEach((e: string) => set.add(e));
     });
-    watchlists.forEach(w => {
+    watchlists.forEach((w) => {
       w.filters?.people?.forEach((p: string) => set.add(p));
       w.filters?.organizations?.forEach((o: string) => set.add(o));
     });
     return Array.from(set);
   }, [cases, watchlists]);
 
-  const activeCaseObj = cases.find(c => c.id === selectedCaseId);
+  const activeCaseObj = cases.find((c) => c.id === selectedCaseId);
 
   // Execute analysis against the configured open-weight LLM provider
   const handleExecuteTask = async () => {
@@ -100,7 +146,7 @@ function AgentsPage() {
       "[SYS] Fetching workspace telemetry...",
       `[CRAWLER] Case: ${selectedCaseId || "GLOBAL"} | Target: ${activeTarget}`,
       `[ANALYSER] Capability: ${cap}`,
-      "[LLM] Dispatching prompt..."
+      "[LLM] Dispatching prompt...",
     ]);
 
     try {
@@ -112,42 +158,54 @@ function AgentsPage() {
 
       if (cap === "SUMMARIZE_CASE") {
         title = `INVESTIGATION DOSSIER: ${activeCaseObj?.title || "GENERAL"}`;
-        const res = await llmCaseSummary({ data: {
-          title: activeCaseObj?.title || "General Investigation",
-          target: activeTarget,
-          description: activeCaseObj?.description || "No description recorded for this case.",
-          // Negative means unassigned; llm.ts renders that as "not assigned by
-          // the analyst - do not infer or estimate one".
-          risk: -1,
-        }});
+        const res = await llmCaseSummary({
+          data: {
+            title: activeCaseObj?.title || "General Investigation",
+            target: activeTarget,
+            description: activeCaseObj?.description || "No description recorded for this case.",
+            // Negative means unassigned; llm.ts renders that as "not assigned by
+            // the analyst - do not infer or estimate one".
+            risk: -1,
+          },
+        });
         blocks = [{ heading: `AI-Generated Intelligence Summary (${res.model})`, text: res.text }];
-
       } else if (cap === "EXEC_SUMMARY") {
         title = `EXECUTIVE BRIEF: ${activeTarget}`;
-        const res = await llmExecutiveBrief({ data: {
-          target: activeTarget,
-          context: activeCaseObj?.description || `Senior command brief for subject ${activeTarget}.`
-        }});
-        blocks = [{ heading: `Director-Level Intelligence Briefing (${res.model})`, text: res.text }];
-
+        const res = await llmExecutiveBrief({
+          data: {
+            target: activeTarget,
+            context:
+              activeCaseObj?.description || `Senior command brief for subject ${activeTarget}.`,
+          },
+        });
+        blocks = [
+          { heading: `Director-Level Intelligence Briefing (${res.model})`, text: res.text },
+        ];
       } else if (cap === "EXPLAIN_ENTITY") {
         title = `ENTITY DEEP DIVE: "${selectedEntityA}"`;
-        const res = await llmExtractEntities({ data: {
-          text: `Provide a detailed intelligence analysis of entity: ${selectedEntityA}. Associated with case: ${activeTarget}. Include aliases, threat classification, network footprint, and recommended action.`
-        }});
-        const entitiesText = Array.isArray(res.entities) && res.entities.length > 0
-          ? res.entities.map((e: any) => `${e.type}: ${e.entity} (confidence: ${e.confidence})`).join("\n")
-          : "No entities were extracted from the supplied text.";
-        blocks = [{ heading: `NER Entity Extraction (${res.model})`, text: entitiesText, monospace: true }];
-
+        const res = await llmExtractEntities({
+          data: {
+            text: `Provide a detailed intelligence analysis of entity: ${selectedEntityA}. Associated with case: ${activeTarget}. Include aliases, threat classification, network footprint, and recommended action.`,
+          },
+        });
+        const entitiesText =
+          Array.isArray(res.entities) && res.entities.length > 0
+            ? res.entities
+                .map((e: any) => `${e.type}: ${e.entity} (confidence: ${e.confidence})`)
+                .join("\n")
+            : "No entities were extracted from the supplied text.";
+        blocks = [
+          { heading: `NER Entity Extraction (${res.model})`, text: entitiesText, monospace: true },
+        ];
       } else if (cap === "COMPARE_ENTITIES") {
         title = `CORRELATION INDEX: "${selectedEntityA}" vs "${selectedEntityB}"`;
-        const res = await llmExecutiveBrief({ data: {
-          target: `${selectedEntityA} compared to ${selectedEntityB}`,
-          context: `Perform an intelligence correlation analysis between ${selectedEntityA} and ${selectedEntityB}. Include shared infrastructure, coordinated behaviors, hashtag overlaps, and interaction strength.`
-        }});
+        const res = await llmExecutiveBrief({
+          data: {
+            target: `${selectedEntityA} compared to ${selectedEntityB}`,
+            context: `Perform an intelligence correlation analysis between ${selectedEntityA} and ${selectedEntityB}. Include shared infrastructure, coordinated behaviors, hashtag overlaps, and interaction strength.`,
+          },
+        });
         blocks = [{ heading: `Comparative Threat Intelligence (${res.model})`, text: res.text }];
-
       } else {
         const capLabels: Record<string, string> = {
           FIND_RELATIONSHIPS: "Relationship & Node Mapping Report",
@@ -155,29 +213,32 @@ function AgentsPage() {
           RECOMMENDATIONS: "Containment & Mitigation Plan",
           INTEL_REPORT: "Full Analytical Intelligence Report",
           BRIEFING: "24-Hour Operational Briefing",
-          RISK_ASSESSMENT: "Quantitative Risk Assessment"
+          RISK_ASSESSMENT: "Quantitative Risk Assessment",
         };
         title = `${capLabels[cap] || cap}: ${activeTarget}`;
-        const res = await llmReport({ data: {
-          type: capLabels[cap] || cap,
-          target: activeTarget,
-          data: `Case: ${activeCaseObj?.title || "General"}. Description: ${activeCaseObj?.description || "No description recorded."}. Evidence pinned to this case: ${activeCaseObj?.evidence?.length ?? 0} item(s). Keywords: ${activeCaseObj?.keywords?.join(", ") || "none"}.`
-        }});
+        const res = await llmReport({
+          data: {
+            type: capLabels[cap] || cap,
+            target: activeTarget,
+            data: `Case: ${activeCaseObj?.title || "General"}. Description: ${activeCaseObj?.description || "No description recorded."}. Evidence pinned to this case: ${activeCaseObj?.evidence?.length ?? 0} item(s). Keywords: ${activeCaseObj?.keywords?.join(", ") || "none"}.`,
+          },
+        });
         blocks = [{ heading: `${capLabels[cap] || cap} (${res.model})`, text: res.text }];
       }
 
       setOutputResult({
         title,
         classification: "UNCLASSIFIED // DEMONSTRATOR",
-        blocks
+        blocks,
       });
-      setTerminalLog(prev => [...prev,
+      setTerminalLog((prev) => [
+        ...prev,
         "[LLM] Response received.",
-        "[SYS] Compilation complete. Output rendered in intel workspace."
+        "[SYS] Compilation complete. Output rendered in intel workspace.",
       ]);
       toast.success("AI analysis complete.");
     } catch (err: any) {
-      setTerminalLog(prev => [...prev, `[ERROR] ${err?.message || "LLM call failed."}`]);
+      setTerminalLog((prev) => [...prev, `[ERROR] ${err?.message || "LLM call failed."}`]);
       toast.error("AI unavailable — no result produced.");
     } finally {
       setLoading(false);
@@ -187,15 +248,13 @@ function AgentsPage() {
   // Pin generated briefing directly to the investigation case
   const handlePinReport = () => {
     if (!outputResult || !selectedCaseId) return;
-    
+
     const success = pinToInvestigation(selectedCaseId, {
       kind: "note",
       title: outputResult.title,
       source: `AI briefing — ${outputResult.model ?? "configured model"}`,
       publishedAt: new Date().toISOString(),
-      excerpt: outputResult.blocks
-        .map((b: any) => [b.heading, b.text].join("\n"))
-        .join("\n\n"),
+      excerpt: outputResult.blocks.map((b: any) => [b.heading, b.text].join("\n")).join("\n\n"),
       credibility: null,
       credibilityRationale:
         "AI-generated briefing, not a collected source. Requires analyst review before it is " +
@@ -230,30 +289,38 @@ function AgentsPage() {
             <CardContent className="p-3 space-y-3">
               {/* Select Case */}
               <div className="space-y-1">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">1. Target Investigation</label>
+                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                  1. Target Investigation
+                </label>
                 <select
                   value={selectedCaseId}
                   onChange={(e) => setSelectedCaseId(e.target.value)}
                   className="w-full h-8 px-2 border border-[#263548] bg-[#0B1220] rounded text-[10px] text-white font-mono outline-none"
                 >
                   <option value="">-- Global Query Context --</option>
-                  {cases.map(c => (
-                    <option key={c.id} value={c.id}>{c.id} · {c.title.substring(0, 18)}</option>
+                  {cases.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.id} · {c.title.substring(0, 18)}
+                    </option>
                   ))}
                 </select>
               </div>
 
               {/* Select Watchlist */}
               <div className="space-y-1">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">2. Correlated Watchlist</label>
+                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                  2. Correlated Watchlist
+                </label>
                 <select
                   value={selectedWatchlistId}
                   onChange={(e) => setSelectedWatchlistId(e.target.value)}
                   className="w-full h-8 px-2 border border-[#263548] bg-[#0B1220] rounded text-[10px] text-white font-mono outline-none"
                 >
                   <option value="">-- No Watchlist Link --</option>
-                  {watchlists.map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
+                  {watchlists.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -267,8 +334,10 @@ function AgentsPage() {
                     onChange={(e) => setSelectedEntityA(e.target.value)}
                     className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#06B6D4] font-mono outline-none"
                   >
-                    {availableEntities.map(ent => (
-                      <option key={ent} value={ent}>{ent}</option>
+                    {availableEntities.map((ent) => (
+                      <option key={ent} value={ent}>
+                        {ent}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -279,8 +348,10 @@ function AgentsPage() {
                     onChange={(e) => setSelectedEntityB(e.target.value)}
                     className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#F59E0B] font-mono outline-none"
                   >
-                    {availableEntities.map(ent => (
-                      <option key={ent} value={ent}>{ent}</option>
+                    {availableEntities.map((ent) => (
+                      <option key={ent} value={ent}>
+                        {ent}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -288,7 +359,9 @@ function AgentsPage() {
 
               {/* Select Capability Task */}
               <div className="space-y-1 pt-1.5 border-t border-[#263548]/30">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">3. Target Task Capability</label>
+                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                  3. Target Task Capability
+                </label>
                 <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
                   {CAPABILITIES.map((cap) => (
                     <button
@@ -297,7 +370,9 @@ function AgentsPage() {
                       className={`w-full text-left px-2 py-1.5 border rounded text-[10px] transition-all flex flex-col ${selectedCapability === cap.id ? "border-[#3B82F6] bg-[#3B82F6]/5 text-white" : "border-[#263548]/40 bg-[#0B1220]/60 hover:bg-[#1A2332]"}`}
                     >
                       <span className="font-bold uppercase text-[9px]">{cap.name}</span>
-                      <span className="text-[8px] text-[#94A3B8]/50 mt-0.5 leading-normal">{cap.desc}</span>
+                      <span className="text-[8px] text-[#94A3B8]/50 mt-0.5 leading-normal">
+                        {cap.desc}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -310,7 +385,11 @@ function AgentsPage() {
                   disabled={loading}
                   className="w-full h-8 bg-[#3B82F6] hover:bg-[#3B82F6]/90 disabled:bg-[#1E293B] text-white font-mono text-[9px] uppercase tracking-wider gap-1.5 rounded"
                 >
-                  {loading ? <RefreshCw className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                  {loading ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Send className="size-3.5" />
+                  )}
                   Execute Analytical Model
                 </Button>
               </div>
@@ -319,12 +398,18 @@ function AgentsPage() {
 
           {/* Terminal telemetry panel */}
           <Card className="bg-[#0B1220] border-[#263548] p-3 text-[9px] text-green-400 font-mono space-y-1.5 h-36 overflow-y-auto rounded">
-            <div className="flex items-center gap-1 text-[#94A3B8] border-b border-[#263548]/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest"><Terminal className="size-3" /> Console Logs</div>
+            <div className="flex items-center gap-1 text-[#94A3B8] border-b border-[#263548]/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest">
+              <Terminal className="size-3" /> Console Logs
+            </div>
             {terminalLog.length === 0 ? (
-              <div className="text-green-400/30">Llm kernel ready. Select parameters and click Execute.</div>
+              <div className="text-green-400/30">
+                Llm kernel ready. Select parameters and click Execute.
+              </div>
             ) : (
               terminalLog.map((log, idx) => (
-                <div key={idx} className="leading-relaxed">{log}</div>
+                <div key={idx} className="leading-relaxed">
+                  {log}
+                </div>
               ))
             )}
           </Card>
@@ -334,13 +419,17 @@ function AgentsPage() {
         <div className="space-y-4">
           <Card className="bg-[#111827] border-[#263548] rounded min-h-[480px] flex flex-col relative overflow-hidden">
             <div className="absolute top-0 left-0 h-full w-0.5 bg-[#EF4444]" />
-            
+
             <CardHeader className="p-4 border-b border-[#263548] bg-[#0B1220]/20 flex flex-wrap justify-between items-center gap-3">
               <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
-                <ShieldCheck className="size-4 text-[#EF4444]" /> Analytical Intelligence Briefing Card
+                <ShieldCheck className="size-4 text-[#EF4444]" /> Analytical Intelligence Briefing
+                Card
               </CardTitle>
               {outputResult && (
-                <Badge variant="outline" className="text-red-500 border-red-500/20 bg-red-500/5 text-[8px] font-mono tracking-wider font-bold">
+                <Badge
+                  variant="outline"
+                  className="text-red-500 border-red-500/20 bg-red-500/5 text-[8px] font-mono tracking-wider font-bold"
+                >
                   {outputResult.classification}
                 </Badge>
               )}
@@ -353,11 +442,17 @@ function AgentsPage() {
                     {/* Header Details */}
                     <div className="border-b border-[#263548]/40 pb-3 flex justify-between items-start flex-wrap gap-4">
                       <div>
-                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">REPORT TITLE</span>
-                        <h2 className="text-sm font-bold text-white uppercase tracking-wide mt-0.5">{outputResult.title}</h2>
+                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                          REPORT TITLE
+                        </span>
+                        <h2 className="text-sm font-bold text-white uppercase tracking-wide mt-0.5">
+                          {outputResult.title}
+                        </h2>
                       </div>
                       <div className="text-right">
-                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">THREAT INDEX</span>
+                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                          THREAT INDEX
+                        </span>
                       </div>
                     </div>
 
@@ -384,7 +479,9 @@ function AgentsPage() {
 
                   {/* Actions footer */}
                   <div className="pt-4 border-t border-[#263548]/40 flex justify-between items-center flex-wrap gap-3 mt-auto">
-                    <span className="text-[8px] text-[#94A3B8]/40 uppercase tracking-widest font-mono">Verified cryptographic output · Sentinel AI</span>
+                    <span className="text-[8px] text-[#94A3B8]/40 uppercase tracking-widest font-mono">
+                      Verified cryptographic output · Sentinel AI
+                    </span>
                     <div className="flex gap-2">
                       <Button
                         onClick={handlePinReport}
@@ -399,8 +496,13 @@ function AgentsPage() {
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8]/40 py-24">
                   <Bot className="size-10 text-[#263548] mb-3 animate-pulse" />
-                  <h3 className="text-white text-xs font-bold uppercase tracking-wider">Analyst Briefing Card Empty</h3>
-                  <p className="text-[10px] text-[#94A3B8]/60 mt-1 max-w-sm leading-normal">Configure target investigation case parameters and select capability model on the left to generate classified reports.</p>
+                  <h3 className="text-white text-xs font-bold uppercase tracking-wider">
+                    Analyst Briefing Card Empty
+                  </h3>
+                  <p className="text-[10px] text-[#94A3B8]/60 mt-1 max-w-sm leading-normal">
+                    Configure target investigation case parameters and select capability model on
+                    the left to generate classified reports.
+                  </p>
                 </div>
               )}
             </CardContent>

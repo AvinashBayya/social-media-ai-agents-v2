@@ -6,28 +6,37 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect } from "react";
 import { createServerFn } from "@tanstack/react-start";
-import { 
-  Key, Shield, Settings as SettingsIcon, Plus, Trash2, Eye, EyeOff, Save, CheckCircle2, AlertTriangle, RefreshCw
+import {
+  Key,
+  Shield,
+  Settings as SettingsIcon,
+  Plus,
+  Trash2,
+  Eye,
+  EyeOff,
+  Save,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 
-export const getCredentials = createServerFn({ method: "GET" })
-  .handler(async () => {
-    // An absent credential store means NO credentials are configured.
-    //
-    // This previously fabricated three "Active" accounts on a cache miss —
-    // sentinel_ops_01 / pass_sec_instagram_99, a fake Meta token, a fake GitHub
-    // PAT — and WROTE THEM TO DISK, so the next read returned them as though
-    // they had been configured by an operator. The container never ships data/,
-    // so this fired on every cold start in production, presenting an operator
-    // with a vault of credentials that do not exist.
-    try {
-      const fs = (await import("fs")).promises;
-      const data = await fs.readFile("./data/credentials.json", "utf-8");
-      return JSON.parse(data);
-    } catch {
-      return { instagram: [], facebook: [], github: [] };
-    }
-  });
+export const getCredentials = createServerFn({ method: "GET" }).handler(async () => {
+  // An absent credential store means NO credentials are configured.
+  //
+  // This previously fabricated three "Active" accounts on a cache miss —
+  // sentinel_ops_01 / pass_sec_instagram_99, a fake Meta token, a fake GitHub
+  // PAT — and WROTE THEM TO DISK, so the next read returned them as though
+  // they had been configured by an operator. The container never ships data/,
+  // so this fired on every cold start in production, presenting an operator
+  // with a vault of credentials that do not exist.
+  try {
+    const fs = (await import("fs")).promises;
+    const data = await fs.readFile("./data/credentials.json", "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return { instagram: [], facebook: [], github: [] };
+  }
+});
 
 export const saveCredentials = createServerFn({ method: "POST" })
   .validator((data: any) => data)
@@ -88,7 +97,7 @@ function SettingsPage() {
       username: username.trim(),
       secret: secret.trim(),
       status: "Active",
-      lastUsed: "Never"
+      lastUsed: "Never",
     };
 
     const updatedVault = { ...vault };
@@ -118,7 +127,7 @@ function SettingsPage() {
   const handleDelete = async (platformName: string, id: string) => {
     const updatedVault = { ...vault };
     if (updatedVault[platformName]) {
-      updatedVault[platformName] = updatedVault[platformName].filter(item => item.id !== id);
+      updatedVault[platformName] = updatedVault[platformName].filter((item) => item.id !== id);
     }
 
     setIsSaving(true);
@@ -137,7 +146,7 @@ function SettingsPage() {
   };
 
   const toggleShowSecret = (id: string) => {
-    setShowSecret(prev => ({ ...prev, [id]: !prev[id] }));
+    setShowSecret((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   return (
@@ -145,7 +154,12 @@ function SettingsPage() {
       <PageHeader
         title="Settings"
         description="Manage platform configurations, API integrations, and credentials vault for Sentinel AI crawlers."
-        badge={<Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary"><Shield className="size-3.5" />Security Vault</Badge>}
+        badge={
+          <Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary">
+            <Shield className="size-3.5" />
+            Security Vault
+          </Badge>
+        }
       />
 
       {successMsg && (
@@ -161,10 +175,21 @@ function SettingsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-base flex items-center gap-2"><Key className="size-4 text-primary" />Credentials Vault</CardTitle>
-                <CardDescription className="text-xs">Active session credentials stored locally in your workspace.</CardDescription>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Key className="size-4 text-primary" />
+                  Credentials Vault
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Active session credentials stored locally in your workspace.
+                </CardDescription>
               </div>
-              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={loadVault} disabled={isLoading}>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={loadVault}
+                disabled={isLoading}
+              >
                 <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
               </Button>
             </CardHeader>
@@ -173,7 +198,8 @@ function SettingsPage() {
                 <div className="flex justify-center items-center py-10">
                   <RefreshCw className="size-6 animate-spin text-primary" />
                 </div>
-              ) : Object.keys(vault).length === 0 || Object.values(vault).every(arr => arr.length === 0) ? (
+              ) : Object.keys(vault).length === 0 ||
+                Object.values(vault).every((arr) => arr.length === 0) ? (
                 <div className="p-8 text-center text-muted-foreground text-xs">
                   No credentials saved in the vault. Use the form on the right to add some.
                 </div>
@@ -188,29 +214,45 @@ function SettingsPage() {
                       </h4>
                       <div className="grid gap-2">
                         {items.map((item) => (
-                          <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 text-xs border-primary/10 hover:border-primary/20 transition-all">
+                          <div
+                            key={item.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 text-xs border-primary/10 hover:border-primary/20 transition-all"
+                          >
                             <div className="space-y-1 min-w-[200px]">
                               <div className="font-semibold text-foreground flex items-center gap-1.5">
                                 {item.label}
-                                <Badge variant={item.status === "Active" ? "default" : "secondary"} className="h-4 px-1.5 text-[9px] font-medium scale-90">
+                                <Badge
+                                  variant={item.status === "Active" ? "default" : "secondary"}
+                                  className="h-4 px-1.5 text-[9px] font-medium scale-90"
+                                >
                                   {item.status}
                                 </Badge>
                               </div>
                               <div className="text-[10px] text-muted-foreground">
-                                ID / Account: <span className="font-mono text-foreground">{item.username}</span>
+                                ID / Account:{" "}
+                                <span className="font-mono text-foreground">{item.username}</span>
                               </div>
                               <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                Secret / Token: 
+                                Secret / Token:
                                 <span className="font-mono text-foreground bg-muted px-1.5 py-0.5 rounded flex items-center gap-1">
                                   {showSecret[item.id] ? item.secret : "••••••••••••••••"}
-                                  <button onClick={() => toggleShowSecret(item.id)} className="hover:text-primary ml-1">
-                                    {showSecret[item.id] ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                                  <button
+                                    onClick={() => toggleShowSecret(item.id)}
+                                    className="hover:text-primary ml-1"
+                                  >
+                                    {showSecret[item.id] ? (
+                                      <EyeOff className="size-3" />
+                                    ) : (
+                                      <Eye className="size-3" />
+                                    )}
                                   </button>
                                 </span>
                               </div>
                             </div>
                             <div className="flex items-center gap-4">
-                              <span className="text-[10px] text-muted-foreground">Last used: {item.lastUsed}</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                Last used: {item.lastUsed}
+                              </span>
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -235,13 +277,20 @@ function SettingsPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Plus className="size-4 text-primary" />Add Credentials</CardTitle>
-              <CardDescription className="text-xs">Securely register a new integration target.</CardDescription>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Plus className="size-4 text-primary" />
+                Add Credentials
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Securely register a new integration target.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleAdd} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground">Target Platform</label>
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Target Platform
+                  </label>
                   <select
                     className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     value={platform}
@@ -256,7 +305,9 @@ function SettingsPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground">Identifier Label</label>
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Identifier Label
+                  </label>
                   <Input
                     placeholder="e.g. Primary Scraper Token"
                     value={label}
@@ -265,7 +316,9 @@ function SettingsPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground">Username / Account Name</label>
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Username / Account Name
+                  </label>
                   <Input
                     placeholder="Username or Key Name"
                     value={username}
@@ -275,7 +328,9 @@ function SettingsPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground">Secret Token / Password</label>
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Secret Token / Password
+                  </label>
                   <Input
                     type="password"
                     placeholder="API Secret or Password"
@@ -299,7 +354,8 @@ function SettingsPage() {
               <div className="space-y-1">
                 <span className="font-semibold">Local Storage Policy</span>
                 <p className="text-muted-foreground leading-relaxed">
-                  API keys and password secrets are stored in your local workspace directory in `data/credentials.json` with restricted access permissions.
+                  API keys and password secrets are stored in your local workspace directory in
+                  `data/credentials.json` with restricted access permissions.
                 </p>
               </div>
             </CardContent>

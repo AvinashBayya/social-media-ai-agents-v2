@@ -295,9 +295,7 @@ export async function chat(prompt: string, opts: ChatOptions = {}): Promise<Chat
     }
   }
 
-  throw lastErr instanceof LlmUnavailableError
-    ? lastErr
-    : new LlmUnavailableError(String(lastErr));
+  throw lastErr instanceof LlmUnavailableError ? lastErr : new LlmUnavailableError(String(lastErr));
 }
 
 // ─── JSON handling ─────────────────────────────────────────────────────────
@@ -378,10 +376,10 @@ const ANALYST_SYSTEM =
   "no markdown fences and no commentary.";
 
 export async function summariseText(data: { text: string; source?: string }) {
-    const text = (data?.text || "").trim();
-    if (!text) throw new LlmUnavailableError("No text supplied to summarise.");
+  const text = (data?.text || "").trim();
+  if (!text) throw new LlmUnavailableError("No text supplied to summarise.");
 
-    const prompt = `Summarise the article below for an intelligence briefing.
+  const prompt = `Summarise the article below for an intelligence briefing.
 
 Rules:
 - 2-3 sentences, factual, no embellishment.
@@ -395,15 +393,15 @@ ${data?.source ? `Source: ${data.source}\n` : ""}Article:
 ${text.slice(0, 6000)}
 """`;
 
-    const out = await chatJson(prompt, SummarySchema, { system: ANALYST_SYSTEM, maxTokens: 1500 });
-    return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
-  }
+  const out = await chatJson(prompt, SummarySchema, { system: ANALYST_SYSTEM, maxTokens: 1500 });
+  return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
+}
 
 export async function extractEntitiesFrom(data: { text: string }) {
-    const text = (data?.text || "").trim();
-    if (!text) throw new LlmUnavailableError("No text supplied for entity extraction.");
+  const text = (data?.text || "").trim();
+  if (!text) throw new LlmUnavailableError("No text supplied for entity extraction.");
 
-    const prompt = `Extract named entities from the text below.
+  const prompt = `Extract named entities from the text below.
 
 Rules:
 - Only entities explicitly present in the text.
@@ -417,20 +415,20 @@ Text:
 ${text.slice(0, 6000)}
 """`;
 
-    const out = await chatJson(prompt, EntitiesSchema, { system: ANALYST_SYSTEM, maxTokens: 2200 });
-    return {
-      entities: out.value.entities,
-      model: out.model,
-      provider: out.provider,
-      cacheHit: out.cacheHit,
-    };
-  }
+  const out = await chatJson(prompt, EntitiesSchema, { system: ANALYST_SYSTEM, maxTokens: 2200 });
+  return {
+    entities: out.value.entities,
+    model: out.model,
+    provider: out.provider,
+    cacheHit: out.cacheHit,
+  };
+}
 
 export async function assessLanguageOf(data: { text: string }) {
-    const text = (data?.text || "").trim();
-    if (!text) throw new LlmUnavailableError("No text supplied for language assessment.");
+  const text = (data?.text || "").trim();
+  if (!text) throw new LlmUnavailableError("No text supplied for language assessment.");
 
-    const prompt = `Assess the LANGUAGE of the text below. Judge how it is written, not
+  const prompt = `Assess the LANGUAGE of the text below. Judge how it is written, not
 whether its claims are true.
 
 Score each 0-1 (0 = absent, 1 = extreme):
@@ -449,17 +447,22 @@ Text:
 ${text.slice(0, 4000)}
 """`;
 
-    const out = await chatJson(prompt, LanguageAssessmentSchema, {
-      system: ANALYST_SYSTEM,
-      maxTokens: 1400,
-    });
-    return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
-  }
+  const out = await chatJson(prompt, LanguageAssessmentSchema, {
+    system: ANALYST_SYSTEM,
+    maxTokens: 1400,
+  });
+  return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
+}
 
 export const ContentAnalysisSchema = z.object({
   topic: z.enum([
-    "Cyber Threat", "Military Operations", "Disinformation", "Political",
-    "Economic", "Natural Disaster", "Other",
+    "Cyber Threat",
+    "Military Operations",
+    "Disinformation",
+    "Political",
+    "Economic",
+    "Natural Disaster",
+    "Other",
   ]),
   sentiment: z.enum(["positive", "neutral", "negative", "critical"]),
   threatLevel: z.enum(["low", "medium", "high", "critical"]),
@@ -469,10 +472,10 @@ export const ContentAnalysisSchema = z.object({
 export type ContentAnalysis = z.infer<typeof ContentAnalysisSchema>;
 
 export async function analyseContentOf(data: { text: string }) {
-    const text = (data?.text || "").trim();
-    if (!text) throw new LlmUnavailableError("No text supplied for content analysis.");
+  const text = (data?.text || "").trim();
+  if (!text) throw new LlmUnavailableError("No text supplied for content analysis.");
 
-    const prompt = `Classify the text below.
+  const prompt = `Classify the text below.
 
 Return JSON:
 {"topic": one of [Cyber Threat, Military Operations, Disinformation, Political, Economic, Natural Disaster, Other],
@@ -488,12 +491,12 @@ Text:
 ${text.slice(0, 6000)}
 """`;
 
-    const out = await chatJson(prompt, ContentAnalysisSchema, {
-      system: ANALYST_SYSTEM,
-      maxTokens: 1600,
-    });
-    return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
-  }
+  const out = await chatJson(prompt, ContentAnalysisSchema, {
+    system: ANALYST_SYSTEM,
+    maxTokens: 1600,
+  });
+  return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
+}
 
 // ─── Narrative generation ──────────────────────────────────────────────────
 // These return prose rather than JSON, so they are validated only for non-empty
@@ -505,8 +508,13 @@ const NARRATIVE_SYSTEM =
   "information supplied. Where evidence is absent, say so explicitly rather than " +
   "inferring. Never invent figures, dates, names or confidence values.";
 
-export async function caseSummaryOf(data: { title: string; target: string; description: string; risk: number }) {
-    const prompt = `Write an intelligence dossier summary for this investigation.
+export async function caseSummaryOf(data: {
+  title: string;
+  target: string;
+  description: string;
+  risk: number;
+}) {
+  const prompt = `Write an intelligence dossier summary for this investigation.
 
 Structure: Executive Overview, Key Findings, Threat Assessment, Recommendations.
 Under 300 words. If a section lacks supporting information, state that plainly.
@@ -514,21 +522,21 @@ Under 300 words. If a section lacks supporting information, state that plainly.
 Case Title: ${data.title}
 Target Subject: ${data.target}
 Analyst-assigned Risk Score: ${
-      // A negative value means the analyst never assigned one. Saying so keeps
-      // the model from reasoning off a number nobody set — callers used to
-      // substitute a default of 70, which the brief then treated as a finding.
-      typeof data.risk === "number" && data.risk >= 0
-        ? `${data.risk}/100`
-        : "not assigned by the analyst — do not infer or estimate one"
-    }
+    // A negative value means the analyst never assigned one. Saying so keeps
+    // the model from reasoning off a number nobody set — callers used to
+    // substitute a default of 70, which the brief then treated as a finding.
+    typeof data.risk === "number" && data.risk >= 0
+      ? `${data.risk}/100`
+      : "not assigned by the analyst — do not infer or estimate one"
+  }
 Description: ${data.description}`;
 
-    const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2200 });
-    return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
-  }
+  const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2200 });
+  return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
+}
 
 export async function executiveBriefOf(data: { target: string; context: string }) {
-    const prompt = `Write a concise executive intelligence brief.
+  const prompt = `Write a concise executive intelligence brief.
 
 Cover: Strategic Profile, Known Capabilities, Risk Assessment, Recommended Action.
 Under 250 words, bullet points where useful. Where the supplied context does not
@@ -537,12 +545,12 @@ support a section, say "insufficient collected information" rather than speculat
 Target: ${data.target}
 Collected context: ${data.context}`;
 
-    const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2000 });
-    return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
-  }
+  const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2000 });
+  return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
+}
 
 export async function reportOf(data: { type: string; target: string; data: string }) {
-    const prompt = `Generate a structured ${data.type} intelligence report.
+  const prompt = `Generate a structured ${data.type} intelligence report.
 
 Sections: Executive Summary, Key Findings, Threat Assessment, Entity Analysis,
 Recommendations, Conclusion. Under 500 words.
@@ -555,9 +563,9 @@ Target: ${data.target}
 Collected data:
 ${data.data}`;
 
-    const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2800 });
-    return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
-  }
+  const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2800 });
+  return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
+}
 
 // ─── Observability ─────────────────────────────────────────────────────────
 
@@ -639,4 +647,6 @@ export const llmReport = createServerFn({ method: "POST" })
   .validator((d: { type: string; target: string; data: string }) => d)
   .handler(async ({ data }) => reportOf(data));
 
-export const getLlmStats = createServerFn({ method: "GET" }).handler(async () => llmStatsSnapshot());
+export const getLlmStats = createServerFn({ method: "GET" }).handler(async () =>
+  llmStatsSnapshot(),
+);

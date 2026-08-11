@@ -9,8 +9,12 @@ import { TrendingUp, Loader2, AlertTriangle, Search, Info, Layers } from "lucide
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchNews } from "./news";
 import {
-  clusterStories, corpusTerms, detectLanguage,
-  type Article, type Keyword, type StoryCluster,
+  clusterStories,
+  corpusTerms,
+  detectLanguage,
+  type Article,
+  type Keyword,
+  type StoryCluster,
 } from "@/utils/analysis";
 
 /**
@@ -74,7 +78,9 @@ function Page() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   const terms = useMemo<Keyword[]>(() => corpusTerms(corpus, 20), [corpus]);
@@ -130,10 +136,10 @@ function Page() {
 
           <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
             <Info className="mt-px size-3 shrink-0" />
-            No growth percentage is shown. That would need a previous collection to compare
-            against and nothing stores one — an invented delta is the most convincing-looking
-            number on a page like this and the least defensible. No engagement volume either:
-            this collects articles, not impressions.
+            No growth percentage is shown. That would need a previous collection to compare against
+            and nothing stores one — an invented delta is the most convincing-looking number on a
+            page like this and the least defensible. No engagement volume either: this collects
+            articles, not impressions.
           </p>
 
           {error && (
@@ -159,9 +165,9 @@ function Page() {
               </div>
             ) : terms.length === 0 ? (
               <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
-                Not enough collected documents to rank terms. TF-IDF needs at least two
-                documents to have anything to be inverse-frequent against, and a term appearing
-                in only one document says nothing about the collection.
+                Not enough collected documents to rank terms. TF-IDF needs at least two documents to
+                have anything to be inverse-frequent against, and a term appearing in only one
+                document says nothing about the collection.
               </p>
             ) : (
               <>
@@ -188,8 +194,8 @@ function Page() {
                 </div>
                 <p className="mt-3 text-[10px] leading-relaxed text-[#64748B]">
                   Ranked by TF-IDF across this collection; the bar shows how many collected
-                  documents contain the term, which is the part an analyst can check. Hover a
-                  row for the raw score.
+                  documents contain the term, which is the part an analyst can check. Hover a row
+                  for the raw score.
                 </p>
               </>
             )}
@@ -237,9 +243,9 @@ function Page() {
                 </div>
               )}
               <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                Reach measured as distinct outlets carrying one story, after collapsing
-                syndicated copies — counting wire pickups separately is how one story is made
-                to look like five.
+                Reach measured as distinct outlets carrying one story, after collapsing syndicated
+                copies — counting wire pickups separately is how one story is made to look like
+                five.
               </p>
             </CardContent>
           </Card>
@@ -252,7 +258,10 @@ function Page() {
               ) : (
                 <div className="mt-2 space-y-1">
                   {languages.map(([name, count]) => (
-                    <div key={name} className="flex items-center justify-between font-mono text-[10px]">
+                    <div
+                      key={name}
+                      className="flex items-center justify-between font-mono text-[10px]"
+                    >
                       <span className="truncate text-[#94A3B8]">{name}</span>
                       <span className="shrink-0 tabular-nums text-white">{count}</span>
                     </div>
@@ -260,9 +269,9 @@ function Page() {
                 </div>
               )}
               <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                Detected from Unicode script ranges — deterministic, no model call. Scripts
-                carrying several languages (Devanagari, Bengali) are reported at script level
-                rather than guessed.
+                Detected from Unicode script ranges — deterministic, no model call. Scripts carrying
+                several languages (Devanagari, Bengali) are reported at script level rather than
+                guessed.
               </p>
             </CardContent>
           </Card>

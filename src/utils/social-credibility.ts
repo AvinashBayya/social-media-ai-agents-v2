@@ -20,12 +20,7 @@
 
 import type { Article } from "./analysis";
 import { clusterStories, sourceKeyOf, type StoryCluster } from "./analysis";
-import {
-  accountMaturity,
-  analyseCib,
-  type AnalyseOptions,
-  type CibCluster,
-} from "./cib";
+import { accountMaturity, analyseCib, type AnalyseOptions, type CibCluster } from "./cib";
 import type { BlueskyProfile, SocialPost } from "./social";
 import type {
   CredibilityFactor,
@@ -218,10 +213,7 @@ const timeOf = (a: Article): number => {
  *                       indicator or a seeded narrative, and the timing is the
  *                       first thing you would want to know either way
  */
-export function clusterAcrossModes(
-  news: Article[],
-  posts: SocialPost[],
-): CrossModalCluster[] {
+export function clusterAcrossModes(news: Article[], posts: SocialPost[]): CrossModalCluster[] {
   const socialArticles = postsToArticles(posts);
   const socialIds = new Set(socialArticles.map((a) => a.id));
   const clusters = clusterStories([...news, ...socialArticles]);
@@ -231,8 +223,14 @@ export function clusterAcrossModes(
     const newsMembers = cluster.members.filter((m) => !socialIds.has(m.id));
     const crossModal = socialMembers.length > 0 && newsMembers.length > 0;
 
-    const firstSocial = socialMembers.map(timeOf).filter(Number.isFinite).sort((a, b) => a - b)[0];
-    const firstNews = newsMembers.map(timeOf).filter(Number.isFinite).sort((a, b) => a - b)[0];
+    const firstSocial = socialMembers
+      .map(timeOf)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)[0];
+    const firstNews = newsMembers
+      .map(timeOf)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)[0];
     const socialLeadMinutes =
       firstSocial !== undefined && firstNews !== undefined
         ? Math.round((firstNews - firstSocial) / 60_000)

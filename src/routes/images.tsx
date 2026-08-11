@@ -6,16 +6,41 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  Upload, Loader2, AlertTriangle, ShieldCheck, ShieldAlert, ShieldQuestion,
-  Camera, MapPin, Type, Copy, Fingerprint, ChevronDown, ChevronRight, Info, Tags,
+  Upload,
+  Loader2,
+  AlertTriangle,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
+  Camera,
+  MapPin,
+  Type,
+  Copy,
+  Fingerprint,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Tags,
 } from "lucide-react";
 import {
-  assessProvenance, findNearDuplicates,
-  C2PA_ABSENCE_NOTE, OCR_LANGUAGES, OCR_LOW_CONFIDENCE,
-  type C2paReport, type DuplicateReport, type ExifReport, type HashedImage, type OcrReport,
+  assessProvenance,
+  findNearDuplicates,
+  C2PA_ABSENCE_NOTE,
+  OCR_LANGUAGES,
+  OCR_LOW_CONFIDENCE,
+  type C2paReport,
+  type DuplicateReport,
+  type ExifReport,
+  type HashedImage,
+  type OcrReport,
 } from "@/utils/imaging";
 import {
-  decodeImage, loadImageCorpus, readC2pa, readExif, rememberImage, runOcr,
+  decodeImage,
+  loadImageCorpus,
+  readC2pa,
+  readExif,
+  rememberImage,
+  runOcr,
   MediaError,
 } from "@/utils/imaging-client";
 import { hashRgba } from "@/utils/imaging";
@@ -62,7 +87,11 @@ interface Analysis {
 }
 
 function Section({
-  icon, title, subtitle, children, defaultOpen = true,
+  icon,
+  title,
+  subtitle,
+  children,
+  defaultOpen = true,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -195,7 +224,9 @@ function Page() {
         duplicates,
       });
     } catch (err: any) {
-      setError(err instanceof MediaError ? `[${err.stage}] ${err.message}` : (err?.message ?? String(err)));
+      setError(
+        err instanceof MediaError ? `[${err.stage}] ${err.message}` : (err?.message ?? String(err)),
+      );
     } finally {
       setBusy(null);
     }
@@ -255,13 +286,21 @@ function Page() {
   };
 
   const provenance = analysis
-    ? assessProvenance({ exif: analysis.exif, c2pa: analysis.c2pa, duplicates: analysis.duplicates })
+    ? assessProvenance({
+        exif: analysis.exif,
+        c2pa: analysis.c2pa,
+        duplicates: analysis.duplicates,
+      })
     : null;
 
   const statusIcon = (s: C2paReport["status"] | undefined) =>
-    s === "valid" ? <ShieldCheck className="size-3.5 text-[#10B981]" />
-    : s === "invalid" ? <ShieldAlert className="size-3.5 text-[#EF4444]" />
-    : <ShieldQuestion className="size-3.5 text-[#64748B]" />;
+    s === "valid" ? (
+      <ShieldCheck className="size-3.5 text-[#10B981]" />
+    ) : s === "invalid" ? (
+      <ShieldAlert className="size-3.5 text-[#EF4444]" />
+    ) : (
+      <ShieldQuestion className="size-3.5 text-[#64748B]" />
+    );
 
   return (
     <AppShell>
@@ -273,23 +312,41 @@ function Page() {
       <Card className={`${CARD} mb-4`}>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-end gap-2">
-            <Button size="sm" onClick={() => fileRef.current?.click()} disabled={busy !== null} className="h-8 gap-1.5">
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+            <Button
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy !== null}
+              className="h-8 gap-1.5"
+            >
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
               {busy ?? "Upload image"}
             </Button>
-            <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden" />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={onFile}
+              className="hidden"
+            />
 
             <div className="min-w-[220px] flex-1">
               <Input
                 value={urlDraft}
                 onChange={(e) => setUrlDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && urlDraft.trim() && analyse(urlDraft.trim(), urlDraft.trim())}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && urlDraft.trim() && analyse(urlDraft.trim(), urlDraft.trim())
+                }
                 placeholder="…or paste an image URL"
                 className="h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
               />
             </div>
             <Button
-              size="sm" variant="outline"
+              size="sm"
+              variant="outline"
               disabled={busy !== null || !urlDraft.trim()}
               onClick={() => analyse(urlDraft.trim(), urlDraft.trim())}
               className="h-8"
@@ -303,9 +360,9 @@ function Page() {
 
           <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
             <Info className="mt-px size-3 shrink-0" />
-            Provenance beats classification. A C2PA signature either verifies or it does not —
-            no threshold, no false positives. A deepfake score is a guess, so this system does
-            not produce one; see "Not implemented" below for exactly what that means.
+            Provenance beats classification. A C2PA signature either verifies or it does not — no
+            threshold, no false positives. A deepfake score is a guess, so this system does not
+            produce one; see "Not implemented" below for exactly what that means.
           </p>
 
           {error && (
@@ -324,9 +381,9 @@ function Page() {
               <Camera className="mx-auto size-8 text-[#263548]" />
               <p className="mt-3 text-sm text-[#94A3B8]">No image loaded.</p>
               <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-[#64748B]">
-                Upload a file or paste a URL. Nothing is analysed until you do, and nothing is
-                sent anywhere — EXIF parsing, C2PA verification, OCR and hashing all run as
-                WebAssembly in this tab.
+                Upload a file or paste a URL. Nothing is analysed until you do, and nothing is sent
+                anywhere — EXIF parsing, C2PA verification, OCR and hashing all run as WebAssembly
+                in this tab.
               </p>
             </CardContent>
           </Card>
@@ -345,7 +402,9 @@ function Page() {
                 />
                 <div className="flex flex-wrap items-center gap-2 border-t border-[#263548] p-3 font-mono text-[10px] text-[#94A3B8]">
                   <span className="truncate font-semibold text-white">{analysis.name}</span>
-                  <span>{analysis.width}×{analysis.height}</span>
+                  <span>
+                    {analysis.width}×{analysis.height}
+                  </span>
                   {analysis.sizeBytes !== null && (
                     <span>{(analysis.sizeBytes / 1024).toFixed(0)} KB</span>
                   )}
@@ -364,11 +423,15 @@ function Page() {
                         kind: "image",
                         title: analysis.name,
                         source: analysis.exif?.camera.model
-                          ? [analysis.exif.camera.make, analysis.exif.camera.model].filter(Boolean).join(" ")
+                          ? [analysis.exif.camera.make, analysis.exif.camera.model]
+                              .filter(Boolean)
+                              .join(" ")
                           : "uploaded image",
-                        url: typeof analysis.previewUrl === "string" && analysis.previewUrl.startsWith("http")
-                          ? analysis.previewUrl
-                          : "",
+                        url:
+                          typeof analysis.previewUrl === "string" &&
+                          analysis.previewUrl.startsWith("http")
+                            ? analysis.previewUrl
+                            : "",
                         publishedAt: analysis.exif?.captureTime ?? "",
                         // The forensic findings ARE the evidence — a filename on
                         // its own tells a case nothing.
@@ -378,10 +441,10 @@ function Page() {
                           analysis.exif
                             ? analysis.exif.findings.map((f) => `${f.label}: ${f.value}`).join("; ")
                             : "EXIF was not read for this item.",
-                          analysis.duplicates?.matches.length
-                            ? analysis.duplicates.summary
-                            : "",
-                        ].filter(Boolean).join("\n"),
+                          analysis.duplicates?.matches.length ? analysis.duplicates.summary : "",
+                        ]
+                          .filter(Boolean)
+                          .join("\n"),
                         credibility: null,
                         credibilityRationale:
                           "Forensic findings from the image itself. C2PA results are " +
@@ -429,7 +492,9 @@ function Page() {
                             {f.strength}
                           </Badge>
                         </div>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">{f.detail}</p>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                          {f.detail}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -439,14 +504,16 @@ function Page() {
                       What this system could NOT determine about this file
                     </div>
                     <ul className="mt-1 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-[#94A3B8]">
-                      {provenance.cannotDetermine.map((c, i) => <li key={i}>{c}</li>)}
+                      {provenance.cannotDetermine.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
                     </ul>
                   </div>
 
                   <p className="mt-2 text-[10px] italic text-[#64748B]">
                     This is a summary of findings, not a verdict. There is deliberately no
-                    authenticity score — any single number here would be read as one, and we
-                    have no basis for it.
+                    authenticity score — any single number here would be read as one, and we have no
+                    basis for it.
                   </p>
                 </CardContent>
               </Card>
@@ -460,7 +527,9 @@ function Page() {
             >
               {analysis.c2pa && (
                 <>
-                  <p className="text-[11px] leading-relaxed text-[#F3F4F6]">{analysis.c2pa.summary}</p>
+                  <p className="text-[11px] leading-relaxed text-[#F3F4F6]">
+                    {analysis.c2pa.summary}
+                  </p>
 
                   {analysis.c2pa.aiGenerated && (
                     <div className="mt-2 rounded border border-[#8B5CF6]/40 bg-[#8B5CF6]/10 p-2">
@@ -468,8 +537,8 @@ function Page() {
                         Declared AI-generated — high confidence
                       </div>
                       <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
-                        {analysis.c2pa.aiEvidence} This is the only high-confidence AI finding
-                        this system produces, because it is declared by the producing tool and
+                        {analysis.c2pa.aiEvidence} This is the only high-confidence AI finding this
+                        system produces, because it is declared by the producing tool and
                         cryptographically signed rather than inferred from the pixels.
                       </p>
                     </div>
@@ -477,7 +546,9 @@ function Page() {
 
                   {analysis.c2pa.validationIssues.length > 0 && (
                     <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[10px] text-[#EF4444]">
-                      {analysis.c2pa.validationIssues.map((v, i) => <li key={i}>{v}</li>)}
+                      {analysis.c2pa.validationIssues.map((v, i) => (
+                        <li key={i}>{v}</li>
+                      ))}
                     </ul>
                   )}
 
@@ -488,7 +559,10 @@ function Page() {
                       </div>
                       <ol className="mt-1 space-y-1">
                         {analysis.c2pa.actions.map((a, i) => (
-                          <li key={i} className="rounded border border-[#263548] bg-[#0B1220]/60 p-1.5 text-[10px]">
+                          <li
+                            key={i}
+                            className="rounded border border-[#263548] bg-[#0B1220]/60 p-1.5 text-[10px]"
+                          >
                             <span className="font-mono text-white">{a.action}</span>
                             {a.agent && <span className="text-[#94A3B8]"> · {a.agent}</span>}
                             {a.when && <span className="text-[#64748B]"> · {a.when}</span>}
@@ -537,7 +611,9 @@ function Page() {
               {analysis.exifError && (
                 <div className="mb-2 flex items-start gap-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2">
                   <AlertTriangle className="size-3.5 shrink-0 text-[#F59E0B]" />
-                  <span className="text-[10px] leading-relaxed text-[#F59E0B]">{analysis.exifError}</span>
+                  <span className="text-[10px] leading-relaxed text-[#F59E0B]">
+                    {analysis.exifError}
+                  </span>
                 </div>
               )}
 
@@ -557,7 +633,9 @@ function Page() {
                           <span className="text-[11px] font-semibold text-white">{f.label}</span>
                           <span className="font-mono text-[10px] text-[#94A3B8]">{f.value}</span>
                         </div>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">{f.note}</p>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                          {f.note}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -579,7 +657,9 @@ function Page() {
                     </>
                   )}
 
-                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">{analysis.exif.method}</p>
+                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                    {analysis.exif.method}
+                  </p>
                 </>
               )}
             </Section>
@@ -593,9 +673,9 @@ function Page() {
               >
                 <ExifMap gps={analysis.exif.gps} label={analysis.name} />
                 <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                  Written by the capturing device. Among the highest-value signals in image
-                  OSINT because it places the camera — and forgeable with ordinary tools, so
-                  treat it as a strong lead rather than a fact.
+                  Written by the capturing device. Among the highest-value signals in image OSINT
+                  because it places the camera — and forgeable with ordinary tools, so treat it as a
+                  strong lead rather than a fact.
                 </p>
               </Section>
             )}
@@ -614,7 +694,9 @@ function Page() {
                       key={l.code}
                       onClick={() =>
                         setLangs((prev) =>
-                          prev.includes(l.code) ? prev.filter((c) => c !== l.code) : [...prev, l.code],
+                          prev.includes(l.code)
+                            ? prev.filter((c) => c !== l.code)
+                            : [...prev, l.code],
                         )
                       }
                       title={l.accuracyNote}
@@ -631,8 +713,18 @@ function Page() {
               </div>
 
               <div className="mt-2 flex items-center gap-2">
-                <Button size="sm" variant="outline" disabled={busy !== null || langs.length === 0} onClick={doOcr} className="h-7 gap-1 text-[10px]">
-                  {busy === "Running OCR" ? <Loader2 className="size-3 animate-spin" /> : <Type className="size-3" />}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null || langs.length === 0}
+                  onClick={doOcr}
+                  className="h-7 gap-1 text-[10px]"
+                >
+                  {busy === "Running OCR" ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Type className="size-3" />
+                  )}
                   Run OCR
                 </Button>
                 {ocrProgress && (
@@ -653,8 +745,8 @@ function Page() {
                 <div className="mt-2 space-y-2">
                   {ocr.words.length === 0 ? (
                     <p className="text-[11px] text-[#64748B]">
-                      Tesseract found no text in this image with the selected languages. That is
-                      an absence of recognised text, not a finding that the image contains none.
+                      Tesseract found no text in this image with the selected languages. That is an
+                      absence of recognised text, not a finding that the image contains none.
                     </p>
                   ) : (
                     <>
@@ -687,14 +779,17 @@ function Page() {
 
                   <p className="text-[10px] leading-relaxed text-[#64748B]">{ocr.method}</p>
                   {ocr.accuracyNotes.map((n, i) => (
-                    <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">{n}</p>
+                    <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">
+                      {n}
+                    </p>
                   ))}
 
                   {/* ── OCR text into Module 2's entity extraction ────────── */}
                   {ocr.text.trim() && (
                     <div className="border-t border-[#263548] pt-2">
                       <Button
-                        size="sm" variant="outline"
+                        size="sm"
+                        variant="outline"
                         disabled={busy !== null || entities !== null}
                         onClick={runEntities}
                         className="h-7 gap-1 text-[10px]"
@@ -708,8 +803,8 @@ function Page() {
                       </Button>
                       <p className="mt-1 text-[10px] leading-relaxed text-[#64748B]">
                         Runs Module 2's extractor over the recognised text. Note it inherits OCR's
-                        errors: a mis-recognised name is extracted as a mis-spelled entity, and
-                        the model has no way to know the text came from an image.
+                        errors: a mis-recognised name is extracted as a mis-spelled entity, and the
+                        model has no way to know the text came from an image.
                       </p>
 
                       {entityError && (
@@ -761,7 +856,10 @@ function Page() {
                   {analysis.duplicates.matches.length > 0 && (
                     <div className="mt-2 space-y-1.5">
                       {analysis.duplicates.matches.map((m) => (
-                        <div key={m.image.id} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
+                        <div
+                          key={m.image.id}
+                          className="rounded border border-[#263548] bg-[#0B1220]/60 p-2"
+                        >
                           <div className="flex flex-wrap items-center gap-2 text-[10px]">
                             <span className="font-mono text-white">{m.image.source}</span>
                             {m.identical && (
@@ -771,7 +869,8 @@ function Page() {
                             )}
                             <span className="ml-auto font-mono text-[#94A3B8]">
                               distance {m.distance}/64
-                              {m.daysEarlier !== null && m.daysEarlier > 0 &&
+                              {m.daysEarlier !== null &&
+                                m.daysEarlier > 0 &&
                                 ` · ${m.daysEarlier.toFixed(0)}d earlier`}
                             </span>
                           </div>

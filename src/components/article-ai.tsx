@@ -91,7 +91,11 @@ export function ArticleAiPanel({ title, body, source }: Props) {
           onClick={runSummary}
           className="h-7 gap-1 text-xs"
         >
-          {busy === "summary" ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+          {busy === "summary" ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Sparkles className="size-3" />
+          )}
           Summarise
         </Button>
         <Button
@@ -101,12 +105,17 @@ export function ArticleAiPanel({ title, body, source }: Props) {
           onClick={runEntities}
           className="h-7 gap-1 text-xs"
         >
-          {busy === "entities" ? <Loader2 className="size-3 animate-spin" /> : <Tags className="size-3" />}
+          {busy === "entities" ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Tags className="size-3" />
+          )}
           Extract entities
         </Button>
         {model && (
           <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-            {cached ? "cached · " : ""}{model}
+            {cached ? "cached · " : ""}
+            {model}
           </span>
         )}
       </div>
@@ -132,7 +141,9 @@ export function ArticleAiPanel({ title, body, source }: Props) {
           <p className="text-sm leading-relaxed">{summary}</p>
           {keyPoints.length > 0 && (
             <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-              {keyPoints.map((k, i) => <li key={i}>{k}</li>)}
+              {keyPoints.map((k, i) => (
+                <li key={i}>{k}</li>
+              ))}
             </ul>
           )}
         </div>

@@ -6,7 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  AreaChart, Area, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip,
+  AreaChart,
+  Area,
+  ResponsiveContainer,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip,
 } from "recharts";
 import { Search, Loader2, AlertTriangle, Info, Sparkles, BarChart3 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
@@ -109,7 +115,9 @@ function Page() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   /** Real publication counts per day, from the feed's own timestamps. */
@@ -204,9 +212,9 @@ function Page() {
           <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
             <Info className="mt-px size-3 shrink-0" />
             No multi-day sentiment history, week-on-week delta, emotion wheel or per-country
-            breakdown is shown. Nothing persists a previous collection to compare against, no
-            model here scores emotion categories, and a feed's region tag is where the outlet
-            publishes — not where an audience reacted.
+            breakdown is shown. Nothing persists a previous collection to compare against, no model
+            here scores emotion categories, and a feed's region tag is where the outlet publishes —
+            not where an audience reacted.
           </p>
 
           {error && (
@@ -240,13 +248,35 @@ function Page() {
                     <ResponsiveContainer>
                       <AreaChart data={volume} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#263548" vertical={false} />
-                        <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                        <XAxis
+                          dataKey="day"
+                          tick={{ fontSize: 10, fill: "#94A3B8" }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          allowDecimals={false}
+                          tick={{ fontSize: 10, fill: "#94A3B8" }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
                         <Tooltip
-                          contentStyle={{ background: "#0B1220", border: "1px solid #263548", borderRadius: 6, fontSize: 11 }}
+                          contentStyle={{
+                            background: "#0B1220",
+                            border: "1px solid #263548",
+                            borderRadius: 6,
+                            fontSize: 11,
+                          }}
                           labelStyle={{ color: "#94A3B8" }}
                         />
-                        <Area type="monotone" dataKey="count" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.25} name="articles" />
+                        <Area
+                          type="monotone"
+                          dataKey="count"
+                          stroke="#3B82F6"
+                          fill="#3B82F6"
+                          fillOpacity={0.25}
+                          name="articles"
+                        />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -304,14 +334,15 @@ function Page() {
                   </div>
                 )}
                 {!loading && stories.length === 0 && !error && (
-                  <p className="text-[11px] text-[#64748B]">
-                    Nothing collected for this subject.
-                  </p>
+                  <p className="text-[11px] text-[#64748B]">Nothing collected for this subject.</p>
                 )}
                 {stories.map((s) => {
                   const a = assessed[s.id];
                   return (
-                    <div key={s.id} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5">
+                    <div
+                      key={s.id}
+                      className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5"
+                    >
                       <div className="flex items-center gap-2 font-mono text-[10px] text-[#64748B]">
                         <span className="truncate">{s.source}</span>
                         {a && (
@@ -328,8 +359,7 @@ function Page() {
                       </p>
                       {a ? (
                         <p className="mt-1 text-[10px] leading-relaxed text-[#94A3B8]">
-                          {a.summary}{" "}
-                          <span className="text-[#64748B]">— {a.model}</span>
+                          {a.summary} <span className="text-[#64748B]">— {a.model}</span>
                         </p>
                       ) : (
                         <Button
@@ -353,10 +383,9 @@ function Page() {
               </div>
 
               <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                One model call per article, on request — assessing a whole feed automatically
-                would exhaust a request-limited free tier on a single page load. Aggregate
-                counts above are over assessed articles only, and the denominator is shown for
-                that reason.
+                One model call per article, on request — assessing a whole feed automatically would
+                exhaust a request-limited free tier on a single page load. Aggregate counts above
+                are over assessed articles only, and the denominator is shown for that reason.
               </p>
             </CardContent>
           </Card>
@@ -391,9 +420,8 @@ function Page() {
                 </div>
               )}
               <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                Deterministic keyword classifier, matched on word boundaries. Coarse by design
-                and no model is involved — an article can only fall in the first bucket that
-                matches.
+                Deterministic keyword classifier, matched on word boundaries. Coarse by design and
+                no model is involved — an article can only fall in the first bucket that matches.
               </p>
             </CardContent>
           </Card>

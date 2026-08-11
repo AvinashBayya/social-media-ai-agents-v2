@@ -66,7 +66,7 @@ function Page() {
           <>
             <Button variant="outline" size="sm" className="gap-1.5">
               <RouteIcon className="size-3.5" />
-      <SampleDataBanner detail="The entity graph is a fixed topology, not derived from collected entities." />
+              <SampleDataBanner detail="The entity graph is a fixed topology, not derived from collected entities." />
               Path finding
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5">

@@ -218,7 +218,11 @@ export interface CaseMetrics {
 }
 
 const EMPTY_KINDS: Record<EvidenceKind, number> = {
-  news: 0, social: 0, image: 0, geo: 0, note: 0,
+  news: 0,
+  social: 0,
+  image: 0,
+  geo: 0,
+  note: 0,
 };
 
 /**
@@ -235,9 +239,7 @@ export function caseMetrics(investigation: Investigation): CaseMetrics {
   for (const e of evidence) byKind[e.kind] = (byKind[e.kind] ?? 0) + 1;
 
   const scored = evidence.map((e) => e.credibility).filter((c): c is number => c !== null);
-  const meanCredibility = scored.length
-    ? scored.reduce((a, b) => a + b, 0) / scored.length
-    : null;
+  const meanCredibility = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
 
   const dates = evidence
     .map((e) => new Date(e.publishedAt).getTime())

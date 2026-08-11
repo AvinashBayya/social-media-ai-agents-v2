@@ -47,17 +47,29 @@ const rational = (tag: number, num: number, den: number): Entry => ({
   type: TYPE_RATIONAL,
   count: 1,
   data: [
-    (num >>> 24) & 0xff, (num >>> 16) & 0xff, (num >>> 8) & 0xff, num & 0xff,
-    (den >>> 24) & 0xff, (den >>> 16) & 0xff, (den >>> 8) & 0xff, den & 0xff,
+    (num >>> 24) & 0xff,
+    (num >>> 16) & 0xff,
+    (num >>> 8) & 0xff,
+    num & 0xff,
+    (den >>> 24) & 0xff,
+    (den >>> 16) & 0xff,
+    (den >>> 8) & 0xff,
+    den & 0xff,
   ],
 });
 
 const byteEntry = (tag: number, value: number): Entry => ({
-  tag, type: TYPE_BYTE, count: 1, inline: value << 24,
+  tag,
+  type: TYPE_BYTE,
+  count: 1,
+  inline: value << 24,
 });
 
 const longEntry = (tag: number, value: number): Entry => ({
-  tag, type: TYPE_LONG, count: 1, inline: value,
+  tag,
+  type: TYPE_LONG,
+  count: 1,
+  inline: value,
 });
 
 /**
@@ -79,7 +91,12 @@ function buildIfd(entries: Entry[], base: number, nextIfd = 0): { bytes: number[
   for (const e of sorted) {
     dir.push((e.tag >> 8) & 0xff, e.tag & 0xff);
     dir.push((e.type >> 8) & 0xff, e.type & 0xff);
-    dir.push((e.count >>> 24) & 0xff, (e.count >>> 16) & 0xff, (e.count >>> 8) & 0xff, e.count & 0xff);
+    dir.push(
+      (e.count >>> 24) & 0xff,
+      (e.count >>> 16) & 0xff,
+      (e.count >>> 8) & 0xff,
+      e.count & 0xff,
+    );
 
     if (e.data) {
       if (e.data.length <= 4) {
@@ -87,8 +104,10 @@ function buildIfd(entries: Entry[], base: number, nextIfd = 0): { bytes: number[
         dir.push(...padded);
       } else {
         dir.push(
-          (overflowAt >>> 24) & 0xff, (overflowAt >>> 16) & 0xff,
-          (overflowAt >>> 8) & 0xff, overflowAt & 0xff,
+          (overflowAt >>> 24) & 0xff,
+          (overflowAt >>> 16) & 0xff,
+          (overflowAt >>> 8) & 0xff,
+          overflowAt & 0xff,
         );
         overflow.push(...e.data);
         // Values must start on a word boundary.
@@ -101,7 +120,12 @@ function buildIfd(entries: Entry[], base: number, nextIfd = 0): { bytes: number[
     }
   }
 
-  dir.push((nextIfd >>> 24) & 0xff, (nextIfd >>> 16) & 0xff, (nextIfd >>> 8) & 0xff, nextIfd & 0xff);
+  dir.push(
+    (nextIfd >>> 24) & 0xff,
+    (nextIfd >>> 16) & 0xff,
+    (nextIfd >>> 8) & 0xff,
+    nextIfd & 0xff,
+  );
   return { bytes: [...dir, ...overflow], end: overflowAt };
 }
 
@@ -114,7 +138,13 @@ export interface FixtureOptions {
   /** EXIF format: "YYYY:MM:DD HH:MM:SS". */
   dateTimeOriginal?: string;
   modifyDate?: string;
-  gps?: { lat: [number, number, number]; latRef: "N" | "S"; lon: [number, number, number]; lonRef: "E" | "W"; altitude?: number };
+  gps?: {
+    lat: [number, number, number];
+    latRef: "N" | "S";
+    lon: [number, number, number];
+    lonRef: "E" | "W";
+    altitude?: number;
+  };
 }
 
 /** A JPEG carrying a real EXIF APP1 segment. */
@@ -151,19 +181,32 @@ export function buildJpegWithExif(opts: FixtureOptions): Uint8Array {
 
   const TIFF_BASE = 8;
   // Pass 1: measure IFD0 with placeholder pointers so its length is known.
-  const measured = buildIfd(ifd0Entries(exifEntries.length ? 1 : 0, gpsEntries.length ? 1 : 0), TIFF_BASE);
+  const measured = buildIfd(
+    ifd0Entries(exifEntries.length ? 1 : 0, gpsEntries.length ? 1 : 0),
+    TIFF_BASE,
+  );
   const exifOffset = exifEntries.length ? TIFF_BASE + measured.bytes.length : 0;
-  const exifIfd = exifEntries.length ? buildIfd(exifEntries, exifOffset) : { bytes: [], end: exifOffset };
+  const exifIfd = exifEntries.length
+    ? buildIfd(exifEntries, exifOffset)
+    : { bytes: [], end: exifOffset };
   const gpsOffset = gpsEntries.length ? exifIfd.end : 0;
-  const gpsIfd = gpsEntries.length ? buildIfd(gpsEntries, gpsOffset) : { bytes: [], end: gpsOffset };
+  const gpsIfd = gpsEntries.length
+    ? buildIfd(gpsEntries, gpsOffset)
+    : { bytes: [], end: gpsOffset };
 
   // Pass 2: same entry set, real pointers. Entry count and layout are unchanged,
   // so IFD0's length is identical to the measured pass.
   const ifd0 = buildIfd(ifd0Entries(exifOffset, gpsOffset), TIFF_BASE);
 
   const tiff = [
-    0x4d, 0x4d, 0x00, 0x2a, // "MM" + 42
-    0x00, 0x00, 0x00, 0x08, // IFD0 at offset 8
+    0x4d,
+    0x4d,
+    0x00,
+    0x2a, // "MM" + 42
+    0x00,
+    0x00,
+    0x00,
+    0x08, // IFD0 at offset 8
     ...ifd0.bytes,
     ...exifIfd.bytes,
     ...gpsIfd.bytes,
@@ -173,8 +216,12 @@ export function buildJpegWithExif(opts: FixtureOptions): Uint8Array {
   const app1Length = app1Payload.length + 2;
 
   return new Uint8Array([
-    0xff, 0xd8,                                        // SOI
-    0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff,
+    0xff,
+    0xd8, // SOI
+    0xff,
+    0xe1,
+    (app1Length >> 8) & 0xff,
+    app1Length & 0xff,
     ...app1Payload,
     ...MINIMAL_JPEG_BODY,
   ]);
@@ -192,22 +239,98 @@ export function buildJpegWithoutExif(): Uint8Array {
  */
 const MINIMAL_JPEG_BODY: number[] = [
   // DQT — flat table
-  0xff, 0xdb, 0x00, 0x43, 0x00, ...new Array(64).fill(0x10),
+  0xff,
+  0xdb,
+  0x00,
+  0x43,
+  0x00,
+  ...new Array(64).fill(0x10),
   // SOF0 — 8x8, one component
-  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x08, 0x00, 0x08, 0x01, 0x01, 0x11, 0x00,
+  0xff,
+  0xc0,
+  0x00,
+  0x0b,
+  0x08,
+  0x00,
+  0x08,
+  0x00,
+  0x08,
+  0x01,
+  0x01,
+  0x11,
+  0x00,
   // DHT — DC table, one code
-  0xff, 0xc4, 0x00, 0x1f, 0x00,
-  0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+  0xff,
+  0xc4,
+  0x00,
+  0x1f,
+  0x00,
+  0x00,
+  0x01,
+  0x05,
+  0x01,
+  0x01,
+  0x01,
+  0x01,
+  0x01,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x02,
+  0x03,
+  0x04,
+  0x05,
+  0x06,
+  0x07,
+  0x08,
+  0x09,
+  0x0a,
+  0x0b,
   // DHT — AC table, minimal
-  0xff, 0xc4, 0x00, 0x14, 0x10,
-  0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xff,
+  0xc4,
+  0x00,
+  0x14,
+  0x10,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
   0x00,
   // SOS
-  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
+  0xff,
+  0xda,
+  0x00,
+  0x08,
+  0x01,
+  0x01,
+  0x00,
+  0x00,
+  0x3f,
+  0x00,
   0x00,
   // EOI
-  0xff, 0xd9,
+  0xff,
+  0xd9,
 ];
 
 // ─── Synthetic images for perceptual-hash tests ────────────────────────────
@@ -226,7 +349,10 @@ export function syntheticImage(
     for (let x = 0; x < width; x += 1) {
       const v = Math.max(0, Math.min(255, pattern(x, y)));
       const i = (y * width + x) * 4;
-      data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
     }
   }
   return { data, width, height };
@@ -245,7 +371,8 @@ export function resample(
     for (let x = 0; x < width; x += 1) {
       const sx0 = Math.floor((x * src.width) / width);
       const sx1 = Math.max(sx0 + 1, Math.floor(((x + 1) * src.width) / width));
-      let sum = 0, n = 0;
+      let sum = 0,
+        n = 0;
       for (let sy = sy0; sy < sy1 && sy < src.height; sy += 1) {
         for (let sx = sx0; sx < sx1 && sx < src.width; sx += 1) {
           sum += src.data[(sy * src.width + sx) * 4];
@@ -254,7 +381,10 @@ export function resample(
       }
       const v = n ? sum / n : 0;
       const i = (y * width + x) * 4;
-      data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
     }
   }
   return { data, width, height };
@@ -272,7 +402,8 @@ export function requantise(
   const out = new Uint8ClampedArray(src.data);
   for (let by = 0; by < src.height; by += 8) {
     for (let bx = 0; bx < src.width; bx += 8) {
-      let sum = 0, n = 0;
+      let sum = 0,
+        n = 0;
       for (let y = by; y < Math.min(by + 8, src.height); y += 1) {
         for (let x = bx; x < Math.min(bx + 8, src.width); x += 1) {
           sum += src.data[(y * src.width + x) * 4];
@@ -284,7 +415,9 @@ export function requantise(
         for (let x = bx; x < Math.min(bx + 8, src.width); x += 1) {
           const i = (y * src.width + x) * 4;
           const v = src.data[i] * (1 - strength) + mean * strength;
-          out[i] = v; out[i + 1] = v; out[i + 2] = v;
+          out[i] = v;
+          out[i + 1] = v;
+          out[i + 2] = v;
         }
       }
     }

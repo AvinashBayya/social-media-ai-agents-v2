@@ -78,7 +78,10 @@ export function shingles(text: string, k = SHINGLE_SIZE): Set<string> {
   const w = words(text);
   const out = new Set<string>();
   if (w.length === 0) return out;
-  if (w.length < k) { out.add(w.join(" ")); return out; }
+  if (w.length < k) {
+    out.add(w.join(" "));
+    return out;
+  }
   for (let i = 0; i + k <= w.length; i += 1) out.add(w.slice(i, i + k).join(" "));
   return out;
 }
@@ -203,18 +206,26 @@ function stdDevMinutes(posts: SocialPost[]): number | null {
 
 function fmtTime(iso: string): string {
   const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? new Date(t).toISOString().replace("T", " ").slice(0, 19) + "Z" : "undated";
+  return Number.isFinite(t)
+    ? new Date(t).toISOString().replace("T", " ").slice(0, 19) + "Z"
+    : "undated";
 }
 
 class UnionFind {
   private parent: number[];
-  constructor(n: number) { this.parent = Array.from({ length: n }, (_, i) => i); }
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+  }
   find(x: number): number {
-    while (this.parent[x] !== x) { this.parent[x] = this.parent[this.parent[x]]; x = this.parent[x]; }
+    while (this.parent[x] !== x) {
+      this.parent[x] = this.parent[this.parent[x]];
+      x = this.parent[x];
+    }
     return x;
   }
   union(a: number, b: number): void {
-    const ra = this.find(a), rb = this.find(b);
+    const ra = this.find(a),
+      rb = this.find(b);
     if (ra !== rb) this.parent[rb] = ra;
   }
 }
@@ -343,7 +354,8 @@ export function contentDuplication(posts: SocialPost[]): {
   posts.forEach((p, i) => {
     const r = uf.find(i);
     const list = byRoot.get(r);
-    if (list) list.push(p); else byRoot.set(r, [p]);
+    if (list) list.push(p);
+    else byRoot.set(r, [p]);
   });
 
   const groups: DuplicateGroup[] = [];
@@ -385,7 +397,10 @@ export function contentDuplication(posts: SocialPost[]): {
       evidence:
         `${duplicated} of ${posts.length} posts fall into ${groups.length} near-duplicate ` +
         `group(s). Largest: ${biggest.members.length} accounts posting the same text — ` +
-        `${biggest.members.slice(0, 5).map((m) => `${m.account} at ${fmtTime(m.createdAt)}`).join("; ")}. ` +
+        `${biggest.members
+          .slice(0, 5)
+          .map((m) => `${m.account} at ${fmtTime(m.createdAt)}`)
+          .join("; ")}. ` +
         `Text: "${biggest.text.slice(0, 120)}${biggest.text.length > 120 ? "…" : ""}".`,
     },
     groups,
@@ -504,7 +519,8 @@ export function accountMaturity(
       evidence:
         `Profiles resolved for ${findings.length} of ${accounts.length} accounts` +
         `${unresolved > 0 ? ` (${unresolved} unresolved and excluded from the mean)` : ""}. ` +
-        worst.map((f) => `${f.account}: ${f.note}`).join("; ") + ".",
+        worst.map((f) => `${f.account}: ${f.note}`).join("; ") +
+        ".",
     },
     findings,
   };
@@ -538,7 +554,10 @@ function splitHandle(handle: string): { stem: string; suffix: string } | null {
  * DID looks like a random-suffix family, so running this on unresolved DIDs would
  * flag the entire network. It returns null in that case rather than a score.
  */
-export function handlePatterns(posts: SocialPost[]): { signal: CibSignal; families: HandleFamily[] } {
+export function handlePatterns(posts: SocialPost[]): {
+  signal: CibSignal;
+  families: HandleFamily[];
+} {
   const accounts = distinctAccounts(posts);
   const base: CibSignal = {
     id: "handle_patterns",
@@ -581,7 +600,10 @@ export function handlePatterns(posts: SocialPost[]): { signal: CibSignal; famili
   const families: HandleFamily[] = [];
   for (const [stem, entry] of byStem) {
     if (entry.members.length < 3) continue;
-    const numeric = entry.suffixes.filter((s) => /^\d+$/.test(s)).map(Number).sort((a, b) => a - b);
+    const numeric = entry.suffixes
+      .filter((s) => /^\d+$/.test(s))
+      .map(Number)
+      .sort((a, b) => a - b);
     // Sequential means the numbers occupy a tight range, not that they are exactly
     // consecutive — operators skip taken handles.
     const sequential =
@@ -658,7 +680,8 @@ export function amplification(posts: SocialPost[]): {
       const key = link.split("?")[0].replace(/\/+$/, "");
       if (!key) continue;
       const list = byUri.get(key);
-      if (list) list.push(p); else byUri.set(key, [p]);
+      if (list) list.push(p);
+      else byUri.set(key, [p]);
     }
   }
 
@@ -707,9 +730,7 @@ export function amplification(posts: SocialPost[]): {
 
   const strongest = [...targets].sort((a, b) => b.accounts.length - a.accounts.length)[0];
   // Scale against the group: every account pushing one link is the maximum.
-  const score = accounts.length > 0
-    ? Math.min(1, strongest.accounts.length / accounts.length)
-    : 0;
+  const score = accounts.length > 0 ? Math.min(1, strongest.accounts.length / accounts.length) : 0;
 
   return {
     signal: {
@@ -741,7 +762,8 @@ export function clusterPosts(posts: SocialPost[], threshold = CLUSTER_THRESHOLD)
   posts.forEach((p, i) => {
     const r = uf.find(i);
     const list = byRoot.get(r);
-    if (list) list.push(p); else byRoot.set(r, [p]);
+    if (list) list.push(p);
+    else byRoot.set(r, [p]);
   });
   return Array.from(byRoot.values());
 }
@@ -772,7 +794,10 @@ export interface AnalyseOptions {
  * outcome is a false positive.
  */
 export function observationWindowOf(posts: SocialPost[]): number {
-  const times = posts.map(timeOf).filter((t) => Number.isFinite(t)).sort((a, b) => a - b);
+  const times = posts
+    .map(timeOf)
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
   if (times.length < 2) return 0;
   if (times.length < 20) return (times[times.length - 1] - times[0]) / 60_000;
   const lo = times[Math.floor(times.length * 0.05)];
@@ -792,7 +817,8 @@ export function observationWindowOf(posts: SocialPost[]): number {
 export function assessCluster(posts: SocialPost[], options: AnalyseOptions = {}): CibCluster {
   const now = options.now ?? Date.now();
   const ordered = [...posts].sort((a, b) => {
-    const ta = timeOf(a), tb = timeOf(b);
+    const ta = timeOf(a),
+      tb = timeOf(b);
     if (!Number.isFinite(ta)) return 1;
     if (!Number.isFinite(tb)) return -1;
     return ta - tb;
@@ -855,7 +881,6 @@ export function analyseCib(posts: SocialPost[], options: AnalyseOptions = {}): C
     .map((group) => assessCluster(group, withWindow))
     .sort(
       (a, b) =>
-        (b.compositeScore ?? -1) - (a.compositeScore ?? -1) ||
-        b.posts.length - a.posts.length,
+        (b.compositeScore ?? -1) - (a.compositeScore ?? -1) || b.posts.length - a.posts.length,
     );
 }

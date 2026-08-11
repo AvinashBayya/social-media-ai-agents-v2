@@ -13,11 +13,7 @@ import {
   SYNDICATION_THRESHOLD,
   type Article,
 } from "../src/utils/analysis";
-import {
-  analyseCorroboration,
-  defaultFactors,
-  scoreCorpus,
-} from "../src/utils/credibility";
+import { analyseCorroboration, defaultFactors, scoreCorpus } from "../src/utils/credibility";
 
 const iso = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
 
@@ -99,7 +95,9 @@ describe("domain extraction", () => {
   });
 
   test("falls back to the publisher name so grouping never loses an article", () => {
-    expect(sourceKeyOf(art({ id: "x", source: "All India Radio", url: "" }))).toBe("All India Radio");
+    expect(sourceKeyOf(art({ id: "x", source: "All India Radio", url: "" }))).toBe(
+      "All India Radio",
+    );
   });
 });
 
@@ -173,8 +171,16 @@ describe("clusterStories", () => {
   test("clustering is transitive: A~B and B~C groups all three", () => {
     // A and C share only "missile" and fall below the threshold on their own.
     const chain: Article[] = [
-      art({ id: "c1", title: "Rafale squadron deployed to Ambala airbase", url: "https://a.com/1" }),
-      art({ id: "c2", title: "Rafale squadron deployed at Ambala airbase, IAF confirms", url: "https://b.com/2" }),
+      art({
+        id: "c1",
+        title: "Rafale squadron deployed to Ambala airbase",
+        url: "https://a.com/1",
+      }),
+      art({
+        id: "c2",
+        title: "Rafale squadron deployed at Ambala airbase, IAF confirms",
+        url: "https://b.com/2",
+      }),
       art({ id: "c3", title: "IAF confirms Ambala airbase deployment", url: "https://c.com/3" }),
     ];
     expect(titleSimilarity(chain[0].title, chain[2].title)).toBeLessThan(SAME_STORY_THRESHOLD);
@@ -185,8 +191,16 @@ describe("clusterStories", () => {
 
   test("two articles from one domain count that domain once", () => {
     const dupes: Article[] = [
-      art({ id: "d1", title: "Cyclone warning issued for Andhra coast", url: "https://ndtv.com/1" }),
-      art({ id: "d2", title: "Cyclone warning issued for the Andhra coastline", url: "https://ndtv.com/2" }),
+      art({
+        id: "d1",
+        title: "Cyclone warning issued for Andhra coast",
+        url: "https://ndtv.com/1",
+      }),
+      art({
+        id: "d2",
+        title: "Cyclone warning issued for the Andhra coastline",
+        url: "https://ndtv.com/2",
+      }),
     ];
     const clusters = clusterStories(dupes);
     expect(clusters[0].independentDomains).toEqual(["ndtv.com"]);
@@ -245,15 +259,51 @@ describe("Module 1 and Module 2 agree on cluster membership", () => {
 
 describe("language detection across Indic scripts", () => {
   const cases: { script: string; code: string; title: string }[] = [
-    { script: "devanagari", code: "deva", title: "भारत ने ओडिशा तट से हाइपरसोनिक मिसाइल का परीक्षण किया" },
-    { script: "tamil", code: "ta", title: "ஒடிசா கடற்கரையில் இந்தியா ஹைப்பர்சோனிக் ஏவுகணையை சோதித்தது" },
-    { script: "telugu", code: "te", title: "ఒడిశా తీరంలో భారత్ హైపర్‌సోనిక్ క్షిపణిని పరీక్షించింది" },
-    { script: "bengali", code: "bn", title: "ওড়িশা উপকূলে ভারত হাইপারসনিক ক্ষেপণাস্ত্র পরীক্ষা করেছে" },
-    { script: "kannada", code: "kn", title: "ಒಡಿಶಾ ಕರಾವಳಿಯಲ್ಲಿ ಭಾರತ ಹೈಪರ್‌ಸಾನಿಕ್ ಕ್ಷಿಪಣಿ ಪರೀಕ್ಷಿಸಿತು" },
-    { script: "malayalam", code: "ml", title: "ഒഡീഷ തീരത്ത് ഇന്ത്യ ഹൈപ്പർസോണിക് മിസൈൽ പരീക്ഷിച്ചു" },
-    { script: "gujarati", code: "gu", title: "ઓડિશા કિનારે ભારતે હાઇપરસોનિક મિસાઇલનું પરીક્ષણ કર્યું" },
-    { script: "gurmukhi", code: "pa", title: "ਭਾਰਤ ਨੇ ਓਡੀਸ਼ਾ ਤੱਟ ਤੋਂ ਹਾਈਪਰਸੋਨਿਕ ਮਿਜ਼ਾਈਲ ਦਾ ਪ੍ਰੀਖਣ ਕੀਤਾ" },
-    { script: "odia", code: "or", title: "ଓଡ଼ିଶା ଉପକୂଳରୁ ଭାରତ ହାଇପରସୋନିକ୍ କ୍ଷେପଣାସ୍ତ୍ର ପରୀକ୍ଷା କଲା" },
+    {
+      script: "devanagari",
+      code: "deva",
+      title: "भारत ने ओडिशा तट से हाइपरसोनिक मिसाइल का परीक्षण किया",
+    },
+    {
+      script: "tamil",
+      code: "ta",
+      title: "ஒடிசா கடற்கரையில் இந்தியா ஹைப்பர்சோனிக் ஏவுகணையை சோதித்தது",
+    },
+    {
+      script: "telugu",
+      code: "te",
+      title: "ఒడిశా తీరంలో భారత్ హైపర్‌సోనిక్ క్షిపణిని పరీక్షించింది",
+    },
+    {
+      script: "bengali",
+      code: "bn",
+      title: "ওড়িশা উপকূলে ভারত হাইপারসনিক ক্ষেপণাস্ত্র পরীক্ষা করেছে",
+    },
+    {
+      script: "kannada",
+      code: "kn",
+      title: "ಒಡಿಶಾ ಕರಾವಳಿಯಲ್ಲಿ ಭಾರತ ಹೈಪರ್‌ಸಾನಿಕ್ ಕ್ಷಿಪಣಿ ಪರೀಕ್ಷಿಸಿತು",
+    },
+    {
+      script: "malayalam",
+      code: "ml",
+      title: "ഒഡീഷ തീരത്ത് ഇന്ത്യ ഹൈപ്പർസോണിക് മിസൈൽ പരീക്ഷിച്ചു",
+    },
+    {
+      script: "gujarati",
+      code: "gu",
+      title: "ઓડિશા કિનારે ભારતે હાઇપરસોનિક મિસાઇલનું પરીક્ષણ કર્યું",
+    },
+    {
+      script: "gurmukhi",
+      code: "pa",
+      title: "ਭਾਰਤ ਨੇ ਓਡੀਸ਼ਾ ਤੱਟ ਤੋਂ ਹਾਈਪਰਸੋਨਿਕ ਮਿਜ਼ਾਈਲ ਦਾ ਪ੍ਰੀਖਣ ਕੀਤਾ",
+    },
+    {
+      script: "odia",
+      code: "or",
+      title: "ଓଡ଼ିଶା ଉପକୂଳରୁ ଭାରତ ହାଇପରସୋନିକ୍ କ୍ଷେପଣାସ୍ତ୍ର ପରୀକ୍ଷା କଲା",
+    },
   ];
 
   for (const c of cases) {
@@ -295,7 +345,8 @@ describe("language detection across Indic scripts", () => {
   test("a stray Devanagari glyph in English text does not flip the detection", () => {
     const res = detectLanguage({
       title: "India tests hypersonic missile off the Odisha coast",
-      body: "The programme is known locally as अग्नि but the report is in English and the " +
+      body:
+        "The programme is known locally as अग्नि but the report is in English and the " +
         "remainder of the body text carries no further Devanagari characters at all.",
     });
     expect(res.script).toBe("latin");
@@ -375,7 +426,12 @@ describe("timeline", () => {
   test("undated members produce an explicit statement, not a fabricated ordering", () => {
     const undated = clusterStories([
       art({ id: "u1", title: "Undated report on border movement", pubDate: "not-a-date" }),
-      art({ id: "u2", title: "Undated report on border movements", pubDate: "", url: "https://x.com/2" }),
+      art({
+        id: "u2",
+        title: "Undated report on border movements",
+        pubDate: "",
+        url: "https://x.com/2",
+      }),
     ]);
     const t = buildTimeline(undated[0]);
     expect(t.brokenBy).toBeNull();

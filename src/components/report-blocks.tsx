@@ -1,5 +1,14 @@
 import React from "react";
-import { ShieldAlert, Compass, Sparkles, MapPin, RefreshCw, AlertTriangle, FileText, ClipboardList } from "lucide-react";
+import {
+  ShieldAlert,
+  Compass,
+  Sparkles,
+  MapPin,
+  RefreshCw,
+  AlertTriangle,
+  FileText,
+  ClipboardList,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 // Tactical container block
@@ -28,9 +37,7 @@ export function ReportBlock({
         </div>
         {badge}
       </div>
-      <div className="text-xs text-[#94A3B8] leading-relaxed space-y-2">
-        {children}
-      </div>
+      <div className="text-xs text-[#94A3B8] leading-relaxed space-y-2">{children}</div>
     </div>
   );
 }
@@ -40,8 +47,12 @@ export function ReportSectionHeader({ title, subtitle }: { title: string; subtit
   return (
     <div className="flex items-center gap-2 border-b border-[#263548] pb-1 my-4 font-mono">
       <span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6] animate-pulse" />
-      <span className="text-[10px] font-bold uppercase tracking-widest text-[#06B6D4]">{title}</span>
-      {subtitle && <span className="text-[8px] text-[#94A3B8]/60 uppercase ml-auto">({subtitle})</span>}
+      <span className="text-[10px] font-bold uppercase tracking-widest text-[#06B6D4]">
+        {title}
+      </span>
+      {subtitle && (
+        <span className="text-[8px] text-[#94A3B8]/60 uppercase ml-auto">({subtitle})</span>
+      )}
     </div>
   );
 }
@@ -61,7 +72,11 @@ export function ReportMetaGrid({ items }: { items: { label: string; value: React
 }
 
 // Bounding box threat level badge
-export function ThreatLevelBadge({ level }: { level: "low" | "medium" | "high" | "critical" | string }) {
+export function ThreatLevelBadge({
+  level,
+}: {
+  level: "low" | "medium" | "high" | "critical" | string;
+}) {
   const styles: Record<string, string> = {
     low: "bg-[#22C55E]/10 border-[#22C55E]/20 text-[#22C55E]",
     medium: "bg-[#3B82F6]/10 border-[#3B82F6]/20 text-[#3B82F6]",
@@ -70,7 +85,10 @@ export function ThreatLevelBadge({ level }: { level: "low" | "medium" | "high" |
   };
   const label = (level || "low").toUpperCase();
   return (
-    <Badge variant="outline" className={`font-mono text-[9px] h-4 py-0 ${styles[level] || styles.low}`}>
+    <Badge
+      variant="outline"
+      className={`font-mono text-[9px] h-4 py-0 ${styles[level] || styles.low}`}
+    >
       {label}
     </Badge>
   );

@@ -7,14 +7,30 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
-  Globe, Loader2, AlertTriangle, Info, Search, Layers as LayersIcon, MapPin, Camera,
+  Globe,
+  Loader2,
+  AlertTriangle,
+  Info,
+  Search,
+  Layers as LayersIcon,
+  MapPin,
+  Camera,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchGeoLayers } from "@/utils/geo-sources";
 import {
-  cellSizeForZoom, clusterByGrid, filterByTime, fromExifImage, summarise, timeExtent,
-  GEO_LAYERS, PRECISION_LABEL, PRECISION_RADIUS_M,
-  type GeoLayerId, type GeoRecord, type LayerResult,
+  cellSizeForZoom,
+  clusterByGrid,
+  filterByTime,
+  fromExifImage,
+  summarise,
+  timeExtent,
+  GEO_LAYERS,
+  PRECISION_LABEL,
+  PRECISION_RADIUS_M,
+  type GeoLayerId,
+  type GeoRecord,
+  type LayerResult,
 } from "@/utils/geo";
 import { loadImageCorpus } from "@/utils/imaging-client";
 
@@ -66,7 +82,11 @@ function GISPage() {
   const [selected, setSelected] = useState<GeoRecord | null>(null);
 
   const [enabled, setEnabled] = useState<Record<GeoLayerId, boolean>>({
-    conflict: true, seismic: true, news: true, imagery: true, infrastructure: true,
+    conflict: true,
+    seismic: true,
+    news: true,
+    imagery: true,
+    infrastructure: true,
   });
   const [timeWindow, setTimeWindow] = useState<[number, number] | null>(null);
 
@@ -85,7 +105,9 @@ function GISPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   // ── Image GPS comes from the Module 4 corpus, which lives in this browser ──
@@ -105,7 +127,10 @@ function GISPage() {
   }, []);
 
   const allResults = useMemo<LayerResult[]>(
-    () => [...results, { layer: "imagery" as const, records: imageRecords, unplaceable: 0, error: null }],
+    () => [
+      ...results,
+      { layer: "imagery" as const, records: imageRecords, unplaceable: 0, error: null },
+    ],
     [results, imageRecords],
   );
 
@@ -160,7 +185,10 @@ function GISPage() {
 
     return () => {
       cancelled = true;
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, []);
 
@@ -420,7 +448,10 @@ function GISPage() {
                   const count = result?.records.length ?? 0;
                   const on = enabled[layer.id];
                   return (
-                    <div key={layer.id} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
+                    <div
+                      key={layer.id}
+                      className="rounded border border-[#263548] bg-[#0B1220]/60 p-2"
+                    >
                       <button
                         onClick={() => setEnabled((p) => ({ ...p, [layer.id]: !p[layer.id] }))}
                         className="flex w-full items-center gap-2 text-left"
@@ -429,7 +460,9 @@ function GISPage() {
                           className="size-2.5 shrink-0 rounded-full"
                           style={{ background: on ? layer.colour : "#334155" }}
                         />
-                        <span className={`text-[11px] font-medium ${on ? "text-white" : "text-[#64748B]"}`}>
+                        <span
+                          className={`text-[11px] font-medium ${on ? "text-white" : "text-[#64748B]"}`}
+                        >
                           {layer.label}
                         </span>
                         <span className="ml-auto shrink-0 font-mono text-[10px] text-[#94A3B8]">
@@ -438,15 +471,19 @@ function GISPage() {
                       </button>
 
                       {result?.error && (
-                        <p className="mt-1 text-[9px] leading-relaxed text-[#F59E0B]">{result.error}</p>
+                        <p className="mt-1 text-[9px] leading-relaxed text-[#F59E0B]">
+                          {result.error}
+                        </p>
                       )}
                       {!result?.error && (result?.unplaceable ?? 0) > 0 && (
                         <p className="mt-1 text-[9px] leading-relaxed text-[#F59E0B]">
-                          {result!.unplaceable} collected record(s) carried no usable coordinate
-                          and were excluded rather than approximated.
+                          {result!.unplaceable} collected record(s) carried no usable coordinate and
+                          were excluded rather than approximated.
                         </p>
                       )}
-                      <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">{layer.provenance}</p>
+                      <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">
+                        {layer.provenance}
+                      </p>
                     </div>
                   );
                 })}
@@ -459,20 +496,26 @@ function GISPage() {
               <h3 className="text-xs font-bold uppercase text-white">Collection integrity</h3>
               <p className="mt-2 text-[10px] leading-relaxed text-[#94A3B8]">{summary.note}</p>
               <div className="mt-2 flex flex-wrap gap-1">
-                <Badge variant="outline" className="border-[#10B981]/40 bg-[#10B981]/10 text-[9px] font-normal text-[#10B981]">
+                <Badge
+                  variant="outline"
+                  className="border-[#10B981]/40 bg-[#10B981]/10 text-[9px] font-normal text-[#10B981]"
+                >
                   {summary.plotted} plotted
                 </Badge>
                 {summary.unplaceable > 0 && (
-                  <Badge variant="outline" className="border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[9px] font-normal text-[#F59E0B]">
+                  <Badge
+                    variant="outline"
+                    className="border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[9px] font-normal text-[#F59E0B]"
+                  >
                     {summary.unplaceable} excluded
                   </Badge>
                 )}
               </div>
               <p className="mt-2 flex items-start gap-1.5 text-[9px] leading-relaxed text-[#64748B]">
                 <Info className="mt-px size-3 shrink-0" />
-                Exact fixes render as filled points sized by magnitude. Anything coarser renders
-                as a dashed circle at its true uncertainty radius — a country-level record can
-                never be read as a located event.
+                Exact fixes render as filled points sized by magnitude. Anything coarser renders as
+                a dashed circle at its true uncertainty radius — a country-level record can never be
+                read as a located event.
               </p>
             </CardContent>
           </Card>
@@ -497,8 +540,8 @@ function GISPage() {
               <p className="text-[9px] leading-relaxed text-[#94A3B8]">
                 This map previously placed news at a country centroid plus up to ±2.25° of random
                 jitter, cyber threats at a fixed point in central Europe and Telegram posts at a
-                fixed point in Ukraine — roughly 250 km of fabricated displacement per pin,
-                rendered as geolocation. All of it is removed.
+                fixed point in Ukraine — roughly 250 km of fabricated displacement per pin, rendered
+                as geolocation. All of it is removed.
               </p>
             </CardContent>
           </Card>

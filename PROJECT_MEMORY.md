@@ -7,24 +7,27 @@
 ## 1. Active Task State & Progress Roadmap
 
 ### Current Focus
+
 - **Task:** Module 3 collection integrity — Reddit OAuth migration, Mastodon added, fabricated Meta feed removed (Complete)
 - **Phase:** PS-18 Pre-selection Demo Integrity & Memory Infrastructure
 - **Last Verified:** 2026-08-10 — 438 unit tests passing (`bun test`), export audit clean, `bun run build` green.
 
 ### Live collection status — verified 2026-08-10
+
 Re-verify with the `/crawlers` probe rather than trusting this table; it is a snapshot.
 
-| Source | State | Note |
-|---|---|---|
-| Bluesky Jetstream | Working | Browser-side WS; 5 posts in ~2s |
-| Bluesky AppView | Working | `getProfile` / `getProfiles` / `getAuthorFeed` |
-| Mastodon | Working | Keyless hashtag timelines; per-instance, some return 422 |
-| Telegram | Working | `t.me/s/{channel}` previews |
-| **Reddit** | **Blocked** | **All unauthenticated endpoints now 403. Needs `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` from a free script app.** |
-| crt.sh | Flaky | Same URL gave 404 / timeout / 200-in-43s. Retries once; 50s budget |
-| GDELT | Rate limited | 429 at 1 req/5s, as documented |
+| Source            | State        | Note                                                                                                                 |
+| ----------------- | ------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Bluesky Jetstream | Working      | Browser-side WS; 5 posts in ~2s                                                                                      |
+| Bluesky AppView   | Working      | `getProfile` / `getProfiles` / `getAuthorFeed`                                                                       |
+| Mastodon          | Working      | Keyless hashtag timelines; per-instance, some return 422                                                             |
+| Telegram          | Working      | `t.me/s/{channel}` previews                                                                                          |
+| **Reddit**        | **Blocked**  | **All unauthenticated endpoints now 403. Needs `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` from a free script app.** |
+| crt.sh            | Flaky        | Same URL gave 404 / timeout / 200-in-43s. Retries once; 50s budget                                                   |
+| GDELT             | Rate limited | 429 at 1 req/5s, as documented                                                                                       |
 
 ### Completed Milestones
+
 - [x] **Container & Azure Deployment Drift Resolution (2026-08-10)**: `sentinel-web` running `v13` from `main` (`sentinel-web--0000011`). Replaced broken v10 auth drift with demo session (`src/utils/demo-session.ts`).
 - [x] **Data Contract Freeze (2026-08-06)**: Six inter-developer boundary types frozen in `src/types/core.ts` (Article, Post, Entity, Finding, MediaAsset, VideoAsset) + adapters in `src/types/core-adapters.ts`.
 - [x] **Module 1 (Source Credibility)**: Synchronous scoring in `credibility.ts`, 7 PS-18 factors, language marker assessment in `credibility-llm.ts`.
@@ -36,6 +39,7 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 - [x] **Project Memory & Preservation System (2026-08-10)**: Created `PROJECT_MEMORY.md`, `.claude/rules/memory-and-preservation.md`, updated `CLAUDE.md`, and added `scripts/check-exports.ts`.
 
 ### Pending Backlog / Roadmap
+
 0. **Obtain the Reddit credential** — free script app at reddit.com/prefs/apps. Reddit collection is dead without it, and it is the only blocker on a third live platform.
 1. **Module 1 Enhancement**: Persist custom weight profiles to a backend API (currently localStorage `sentinel_credibility_profiles`).
 2. **Module 5 GIS Enhancement**: Add UCDP API Token configuration UI for conflict event layer.
@@ -50,10 +54,12 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 > Partial updates using snippet views frequently lead AI models to replace entire files with small code snippets, wiping out existing functions. Follow these rules on EVERY edit.
 
 ### Rule 1: Full Context Verification Before Editing
+
 - Before editing any file in `src/utils/`, `src/types/`, `src/routes/`, or `tests/`, view the entire file or target function block.
 - Identify all existing `export function`, `export const`, `export type`, and `export interface` statements.
 
 ### Rule 2: Additive-Only Extensions
+
 - **Never rename or remove an exported symbol** without explicit user instruction and project-wide refactoring.
 - When expanding functionality:
   - Add optional parameters to existing signatures (e.g. `opts?: NewOptions`).
@@ -61,9 +67,11 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
   - Wrap logic rather than replacing existing function signatures.
 
 ### Rule 3: Export Registry Audit
+
 - Run `bun scripts/check-exports.ts` before committing code updates to ensure no public exports were dropped.
 
 ### Rule 4: Mandatory Post-Edit Verification
+
 - Run `bun test` after EVERY modification. If any of the 415+ tests fail, fix the breakage immediately before reporting completion.
 
 ---
@@ -73,10 +81,12 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 This registry lists key files and their exported symbols. When adding features, verify that these exports remain intact.
 
 ### Core Types & Seams (`src/types/`)
+
 - **[core.ts](file:///d:/social_media_research/src/types/core.ts)**: Frozen boundary contracts (`ArticleSchema`, `PostSchema`, `EntitySchema`, `FindingSchema`, `MediaAssetSchema`, `VideoAssetSchema`, `ContractViolationError`, `parseMany`).
 - **[core-adapters.ts](file:///d:/social_media_research/src/types/core-adapters.ts)**: Seam adapters (`toAnalysisArticle`, `fromAnalysisArticle`, `toSocialPost`, `fromSocialPost`, `toGeoPoint`, `PostDegradation`).
 
 ### Intelligence & LLM Layer (`src/utils/`)
+
 - **[llm.ts](file:///d:/social_media_research/src/utils/llm.ts)**: Open-source LLM client speaking OpenAI format.
   - Exports: `chat`, `chatJson`, `summariseText`, `extractEntitiesFrom`, `assessLanguageOf`, `getLlmStats`, `llmStatsSnapshot`, `LlmUnavailableError`.
 - **[credibility.ts](file:///d:/social_media_research/src/utils/credibility.ts)**: Module 1 deterministic scoring.

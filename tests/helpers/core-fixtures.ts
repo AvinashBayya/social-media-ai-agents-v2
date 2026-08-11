@@ -13,14 +13,7 @@
  * fixture that leaks into a screenshot is recognisable as a fixture.
  */
 
-import type {
-  Article,
-  Entity,
-  Finding,
-  MediaAsset,
-  Post,
-  VideoAsset,
-} from "../../src/types/core";
+import type { Article, Entity, Finding, MediaAsset, Post, VideoAsset } from "../../src/types/core";
 
 // ─── Article ───────────────────────────────────────────────────────────────
 

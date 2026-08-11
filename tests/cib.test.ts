@@ -116,15 +116,60 @@ const COORDINATED_PROFILES: BlueskyProfile[] = COORDINATED.map((p, i) =>
 // detector, because an analyst will learn to ignore it.
 
 const ORGANIC: SocialPost[] = [
-  post({ authorId: "did:plc:org1", author: "meera.bsky.social", text: "The ministry report on the suppressed findings is out today and the coverage of it has been remarkably thin across the wires", createdAt: at(0) }),
-  post({ authorId: "did:plc:org2", author: "ravi-kumar.bsky.social", text: "Reading the ministry report now. Thin coverage of the suppressed findings today, which is odd given how much noise there was last week", createdAt: at(1800) }),
-  post({ authorId: "did:plc:org3", author: "anitanews.bsky.social", text: "Anyone else find it strange the ministry findings report got almost no coverage today? The suppressed sections are the interesting part", createdAt: at(4200) }),
-  post({ authorId: "did:plc:org4", author: "d-sharma.bsky.social", text: "The suppressed findings in the ministry report today deserve far more coverage than they are getting from the wires", createdAt: at(7200) }),
-  post({ authorId: "did:plc:org5", author: "kavya.bsky.social", text: "Coverage of the ministry report is thin today. The suppressed findings section is the one that actually matters here", createdAt: at(9600) }),
-  post({ authorId: "did:plc:org6", author: "arjun-writes.bsky.social", text: "Ministry report today: the suppressed findings got no coverage at all and that is the story, not the report itself", createdAt: at(12600) }),
-  post({ authorId: "did:plc:org7", author: "priyareads.bsky.social", text: "Thin coverage today of the ministry report. Those suppressed findings should be front page across every outlet", createdAt: at(14400) }),
-  post({ authorId: "did:plc:org8", author: "sanjay.bsky.social", text: "Today the ministry report landed with thin coverage. The suppressed findings are what everyone should be reading", createdAt: at(16200) }),
-  post({ authorId: "did:plc:org9", author: "lakshmi-n.bsky.social", text: "The ministry report and its suppressed findings got thin coverage today across the wires, which is telling", createdAt: at(18000) }),
+  post({
+    authorId: "did:plc:org1",
+    author: "meera.bsky.social",
+    text: "The ministry report on the suppressed findings is out today and the coverage of it has been remarkably thin across the wires",
+    createdAt: at(0),
+  }),
+  post({
+    authorId: "did:plc:org2",
+    author: "ravi-kumar.bsky.social",
+    text: "Reading the ministry report now. Thin coverage of the suppressed findings today, which is odd given how much noise there was last week",
+    createdAt: at(1800),
+  }),
+  post({
+    authorId: "did:plc:org3",
+    author: "anitanews.bsky.social",
+    text: "Anyone else find it strange the ministry findings report got almost no coverage today? The suppressed sections are the interesting part",
+    createdAt: at(4200),
+  }),
+  post({
+    authorId: "did:plc:org4",
+    author: "d-sharma.bsky.social",
+    text: "The suppressed findings in the ministry report today deserve far more coverage than they are getting from the wires",
+    createdAt: at(7200),
+  }),
+  post({
+    authorId: "did:plc:org5",
+    author: "kavya.bsky.social",
+    text: "Coverage of the ministry report is thin today. The suppressed findings section is the one that actually matters here",
+    createdAt: at(9600),
+  }),
+  post({
+    authorId: "did:plc:org6",
+    author: "arjun-writes.bsky.social",
+    text: "Ministry report today: the suppressed findings got no coverage at all and that is the story, not the report itself",
+    createdAt: at(12600),
+  }),
+  post({
+    authorId: "did:plc:org7",
+    author: "priyareads.bsky.social",
+    text: "Thin coverage today of the ministry report. Those suppressed findings should be front page across every outlet",
+    createdAt: at(14400),
+  }),
+  post({
+    authorId: "did:plc:org8",
+    author: "sanjay.bsky.social",
+    text: "Today the ministry report landed with thin coverage. The suppressed findings are what everyone should be reading",
+    createdAt: at(16200),
+  }),
+  post({
+    authorId: "did:plc:org9",
+    author: "lakshmi-n.bsky.social",
+    text: "The ministry report and its suppressed findings got thin coverage today across the wires, which is telling",
+    createdAt: at(18000),
+  }),
 ];
 
 const ORGANIC_PROFILES: BlueskyProfile[] = ORGANIC.map((p) =>
@@ -188,7 +233,9 @@ describe("shingles", () => {
     // shared text. Every organic pair must fall under it.
     for (let i = 0; i < ORGANIC.length; i += 1) {
       for (let j = i + 1; j < ORGANIC.length; j += 1) {
-        expect(shingleSimilarity(ORGANIC[i].text, ORGANIC[j].text)).toBeLessThan(DUPLICATE_THRESHOLD);
+        expect(shingleSimilarity(ORGANIC[i].text, ORGANIC[j].text)).toBeLessThan(
+          DUPLICATE_THRESHOLD,
+        );
       }
     }
   });
@@ -336,7 +383,10 @@ describe("account maturity", () => {
   });
 
   test("accounts without a resolvable createdAt are excluded and the count stated", () => {
-    const partial = [COORDINATED_PROFILES[0], profile({ handle: "x", did: "did:plc:coord1", createdAt: null })];
+    const partial = [
+      COORDINATED_PROFILES[0],
+      profile({ handle: "x", did: "did:plc:coord1", createdAt: null }),
+    ];
     const { signal, findings } = accountMaturity(COORDINATED, partial, T0);
     expect(findings.length).toBe(1);
     expect(signal.evidence).toContain("1 of 9 accounts");
@@ -443,7 +493,11 @@ describe("clusterPosts", () => {
 });
 
 describe("assessCluster — coordinated fixture", () => {
-  const cluster = assessCluster(COORDINATED, { profiles: COORDINATED_PROFILES, now: T0, observationWindowMinutes: WINDOW });
+  const cluster = assessCluster(COORDINATED, {
+    profiles: COORDINATED_PROFILES,
+    now: T0,
+    observationWindowMinutes: WINDOW,
+  });
 
   test("is flagged for review", () => {
     expect(cluster.compositeScore).not.toBeNull();
@@ -470,7 +524,11 @@ describe("assessCluster — coordinated fixture", () => {
 });
 
 describe("assessCluster — organic fixture (false-positive guard)", () => {
-  const cluster = assessCluster(ORGANIC, { profiles: ORGANIC_PROFILES, now: T0, observationWindowMinutes: WINDOW });
+  const cluster = assessCluster(ORGANIC, {
+    profiles: ORGANIC_PROFILES,
+    now: T0,
+    observationWindowMinutes: WINDOW,
+  });
 
   test("is NOT flagged", () => {
     // The single most important assertion in this file. Nine real people
@@ -501,7 +559,10 @@ describe("assessCluster — organic fixture (false-positive guard)", () => {
 });
 
 describe("assessCluster — single account posting rapidly", () => {
-  const cluster = assessCluster(SINGLE_ACCOUNT_BURST, { now: T0, observationWindowMinutes: WINDOW });
+  const cluster = assessCluster(SINGLE_ACCOUNT_BURST, {
+    now: T0,
+    observationWindowMinutes: WINDOW,
+  });
 
   test("is NOT flagged", () => {
     expect(cluster.flagged).toBe(false);
@@ -528,7 +589,9 @@ describe("analyseCib", () => {
   });
 
   test("drops groups below the minimum cluster size", () => {
-    const lone = [post({ authorId: "solo", text: "an entirely unrelated observation about weather" })];
+    const lone = [
+      post({ authorId: "solo", text: "an entirely unrelated observation about weather" }),
+    ];
     const clusters = analyseCib([...COORDINATED, ...lone], { now: T0 });
     expect(clusters.some((c) => c.posts.some((p) => p.authorId === "solo"))).toBe(false);
   });
@@ -581,8 +644,12 @@ describe("eventToPost", () => {
   });
 
   test("ignores deletes, non-post collections and non-commit events", () => {
-    expect(eventToPost({ ...commit, commit: { ...commit.commit, operation: "delete" } })).toBeNull();
-    expect(eventToPost({ ...commit, commit: { ...commit.commit, collection: "app.bsky.graph.follow" } })).toBeNull();
+    expect(
+      eventToPost({ ...commit, commit: { ...commit.commit, operation: "delete" } }),
+    ).toBeNull();
+    expect(
+      eventToPost({ ...commit, commit: { ...commit.commit, collection: "app.bsky.graph.follow" } }),
+    ).toBeNull();
     expect(eventToPost({ ...commit, kind: "identity" })).toBeNull();
   });
 
@@ -600,7 +667,9 @@ describe("keyword monitors", () => {
   });
 
   test("matches a multi-word term as a phrase", () => {
-    expect(monitorMatches(p("A hypersonic missile test off Odisha"), "hypersonic missile")).toBe(true);
+    expect(monitorMatches(p("A hypersonic missile test off Odisha"), "hypersonic missile")).toBe(
+      true,
+    );
     expect(monitorMatches(p("A missile that is hypersonic"), "hypersonic missile")).toBe(false);
   });
 
@@ -669,7 +738,11 @@ describe("readMonitor", () => {
     const monitor = { id: "m1", term: "missile", createdAt: at(0) };
     const posts = [
       post({ authorId: "a", text: "A missile test today", createdAt: new Date(T0).toISOString() }),
-      post({ authorId: "b", text: "Unrelated weather chatter", createdAt: new Date(T0).toISOString() }),
+      post({
+        authorId: "b",
+        text: "Unrelated weather chatter",
+        createdAt: new Date(T0).toISOString(),
+      }),
     ];
     const reading = readMonitor(monitor, posts, T0);
     expect(reading.matches.length).toBe(1);
@@ -744,14 +817,16 @@ describe("Module 3 → Module 1 integration", () => {
   });
 
   test("the social factors do not fire on a published article", () => {
-    const news = [{
-      id: "n1",
-      title: "Ministry publishes report on suppressed findings",
-      source: "Reuters",
-      url: "https://www.reuters.com/world/india/n1",
-      pubDate: at(0),
-      body: "The ministry published its report.",
-    }];
+    const news = [
+      {
+        id: "n1",
+        title: "Ministry publishes report on suppressed findings",
+        source: "Reuters",
+        url: "https://www.reuters.com/world/india/n1",
+        pubDate: at(0),
+        body: "The ministry published its report.",
+      },
+    ];
     const newsScored = scoreCorpus(news, factors, {});
     const ids = newsScored[0].breakdown.map((b) => b.id);
     expect(ids).toContain("domain_tier");
@@ -768,14 +843,16 @@ describe("Module 3 → Module 1 integration", () => {
 });
 
 describe("cross-modal clustering", () => {
-  const NEWS = [{
-    id: "n1",
-    title: "Ministry report on suppressed findings receives thin coverage",
-    source: "The Hindu",
-    url: "https://www.thehindu.com/news/n1",
-    pubDate: at(20000),
-    body: "The ministry report and its suppressed findings received thin coverage.",
-  }];
+  const NEWS = [
+    {
+      id: "n1",
+      title: "Ministry report on suppressed findings receives thin coverage",
+      source: "The Hindu",
+      url: "https://www.thehindu.com/news/n1",
+      pubDate: at(20000),
+      body: "The ministry report and its suppressed findings received thin coverage.",
+    },
+  ];
 
   test("groups social posts alongside news covering the same event", () => {
     const clusters = clusterAcrossModes(NEWS, ORGANIC);
@@ -813,7 +890,9 @@ describe("Jetstream instance failover", () => {
     onmessage: ((e: any) => void) | null = null;
     closed = false;
     constructor(readonly url: string) {}
-    close() { this.closed = true; }
+    close() {
+      this.closed = true;
+    }
   }
 
   test("rotates to a different instance after a failed connection", () => {

@@ -34,7 +34,7 @@ function TimelinePage() {
         t: `Investigation ${c.id} initialized: ${c.title}`,
         // Tone was driven by an invented per-case risk score. A case opening
         // is a neutral fact about the workspace, not a threat level.
-        tone: "neutral"
+        tone: "neutral",
       });
 
       // Add pinned evidence events
@@ -78,8 +78,8 @@ function TimelinePage() {
               <p className="mt-3 text-[11px] text-[#94A3B8]">No case activity yet.</p>
               <p className="mx-auto mt-1 max-w-md text-[10px] leading-relaxed text-[#64748B]">
                 This timeline is built from your own cases and the evidence pinned to them. It
-                previously merged in five seeded events describing analysis that never ran.
-                Create a case on{" "}
+                previously merged in five seeded events describing analysis that never ran. Create a
+                case on{" "}
                 <a href="/investigations" className="text-[#3B82F6] hover:underline">
                   Investigations
                 </a>{" "}
@@ -87,22 +87,25 @@ function TimelinePage() {
               </p>
             </div>
           ) : (
-          <div className="relative pl-6">
-            <span className="absolute left-2.5 top-2 bottom-2 w-px bg-[#22332B]" />
-            {timelineEvents.map((e, i) => (
-              <div key={i} className="relative pb-5 last:pb-0">
-                <span className="absolute -left-[18.5px] top-1 grid size-3 place-items-center rounded-full bg-[#0D0E12] border border-[#10B981] ring-2 ring-[#10B981]/20" />
-                <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                  <span className="font-mono text-white font-bold">{e.d}</span>
-                  <Badge variant="secondary" className="h-4 px-1.5 text-[8px] border-[#22332B] bg-[#0B1220] rounded-none uppercase">
-                    {e.k}
-                  </Badge>
-                  <Tone tone={e.tone} />
+            <div className="relative pl-6">
+              <span className="absolute left-2.5 top-2 bottom-2 w-px bg-[#22332B]" />
+              {timelineEvents.map((e, i) => (
+                <div key={i} className="relative pb-5 last:pb-0">
+                  <span className="absolute -left-[18.5px] top-1 grid size-3 place-items-center rounded-full bg-[#0D0E12] border border-[#10B981] ring-2 ring-[#10B981]/20" />
+                  <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                    <span className="font-mono text-white font-bold">{e.d}</span>
+                    <Badge
+                      variant="secondary"
+                      className="h-4 px-1.5 text-[8px] border-[#22332B] bg-[#0B1220] rounded-none uppercase"
+                    >
+                      {e.k}
+                    </Badge>
+                    <Tone tone={e.tone} />
+                  </div>
+                  <p className="mt-1 text-white text-[11px] leading-relaxed">"{e.t}"</p>
                 </div>
-                <p className="mt-1 text-white text-[11px] leading-relaxed">"{e.t}"</p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
