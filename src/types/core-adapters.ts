@@ -205,3 +205,29 @@ export function toGeoPoint(lat: unknown, lon: unknown, precision: GeoPrecision):
   if (!isRealCoordinate(lat, lon)) return null;
   return { lat: lat as number, lon: lon as number, precision };
 }
+
+// ─── OSINT Findings Adapters ─────────────────────────────────────────────
+
+export interface GpsJamFindingInput {
+  h3: string;
+  lat: number;
+  lon: number;
+  level: "medium" | "high";
+  pct: number;
+  affectedAircraft: number;
+  totalAircraft: number;
+}
+
+export function toGpsJamFinding(input: GpsJamFindingInput) {
+  const geo = toGeoPoint(input.lat, input.lon, "city");
+  return {
+    id: `gpsjam-${input.h3}`,
+    title: `GPS Interference (${input.level.toUpperCase()}) — ${input.pct.toFixed(1)}% aircraft affected`,
+    category: "infrastructure" as const,
+    severity: input.level === "high" ? ("high" as const) : ("medium" as const),
+    lat: geo?.lat ?? null,
+    lon: geo?.lon ?? null,
+    details: `${input.affectedAircraft}/${input.totalAircraft} aircraft reported GPS jamming in hex ${input.h3}`,
+  };
+}
+

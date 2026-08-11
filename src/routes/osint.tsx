@@ -559,6 +559,8 @@ function Page() {
     errors: Record<string, string[]>;
   } | null>(null);
   const [osintProfile, setOsintProfile] = useState<any>(null);
+  const [gpsJamData, setGpsJamData] = useState<any | null>(null);
+  const [radiationData, setRadiationData] = useState<any | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -568,12 +570,17 @@ function Page() {
     const loadAllOsintData = async () => {
       setIsLoading(true);
       try {
-        const [profRes, cyberRes, tgRes, geoRes, rssRes] = await Promise.all([
+        const { fetchGpsInterference } = await import("@/utils/gps-interference");
+        const { fetchRadiationFeed } = await import("@/utils/radiation");
+
+        const [profRes, cyberRes, tgRes, geoRes, rssRes, gpsRes, radRes] = await Promise.all([
           fetchOSINT({ data: { query: searchQuery } }).catch(() => null),
           fetchCyberThreats({ data: { query: searchQuery } }).catch(() => []),
           fetchTelegramOSINT({ data: { query: searchQuery } }).catch(() => []),
           fetchGeopoliticalSecurity({ data: { query: searchQuery } }).catch(() => null),
           fetchRSSAggregator({ data: { query: searchQuery } }).catch(() => null),
+          fetchGpsInterference().catch(() => null),
+          fetchRadiationFeed().catch(() => null),
         ]);
 
         if (isMounted) {
@@ -582,6 +589,8 @@ function Page() {
           if (tgRes) setTelegramPosts(tgRes);
           if (geoRes) setGeopoliticalData(geoRes);
           if (rssRes) setRssFeeds(rssRes);
+          if (gpsRes) setGpsJamData(gpsRes);
+          if (radRes) setRadiationData(radRes);
         }
       } catch (err) {
         console.error("OSINT loadAllData failed:", err);
@@ -700,6 +709,18 @@ function Page() {
             className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
           >
             News RSS Aggregator
+          </TabsTrigger>
+          <TabsTrigger
+            value="gpsjam"
+            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+          >
+            GPS Interference
+          </TabsTrigger>
+          <TabsTrigger
+            value="radiation"
+            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+          >
+            Radiation Sensors
           </TabsTrigger>
         </TabsList>
 
@@ -1492,6 +1513,84 @@ function Page() {
                     </CardContent>
                   </Card>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab content 6: GPS Interference */}
+        <TabsContent value="gpsjam" className="space-y-4">
+          <Card className="bg-[#111827] border-[#263548] p-4 text-xs font-mono text-[#F3F4F6]">
+            <CardHeader className="p-0 pb-3 border-b border-[#263548] mb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-bold text-[#F3F4F6] flex items-center gap-2">
+                  <Radio className="size-4 text-[#06B6D4]" /> GPS Interference & ADS-B Jamming Feed
+                </CardTitle>
+                <CardDescription className="text-[10px] text-[#94A3B8]">
+                  Real-time hex map statistics from ADS-B Exchange reporting aircraft navigation disruption.
+                </CardDescription>
+              </div>
+              {gpsJamData && (
+                <Badge className="bg-[#06B6D4]/10 text-[#06B6D4] border-[#06B6D4]/30 text-[9px] uppercase">
+                  {gpsJamData.stats.totalHexes} Hexes Measured
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="p-0 space-y-4">
+              {gpsJamData ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
+                    <span className="text-[#94A3B8] text-[10px] block">High Severity Hexes</span>
+                    <span className="text-lg font-bold text-[#EF4444]">{gpsJamData.stats.highCount}</span>
+                  </div>
+                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
+                    <span className="text-[#94A3B8] text-[10px] block">Medium Severity Hexes</span>
+                    <span className="text-lg font-bold text-[#F59E0B]">{gpsJamData.stats.mediumCount}</span>
+                  </div>
+                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
+                    <span className="text-[#94A3B8] text-[10px] block">Primary Source</span>
+                    <span className="text-xs font-semibold text-[#F3F4F6] truncate block">{gpsJamData.source}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-[#94A3B8]">Loading GPSJam telemetry...</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab content 7: Radiation Sensors */}
+        <TabsContent value="radiation" className="space-y-4">
+          <Card className="bg-[#111827] border-[#263548] p-4 text-xs font-mono text-[#F3F4F6]">
+            <CardHeader className="p-0 pb-3 border-b border-[#263548] mb-3 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-bold text-[#F3F4F6] flex items-center gap-2">
+                  <Activity className="size-4 text-[#10B981]" /> Environmental Radiation Sensor Network
+                </CardTitle>
+                <CardDescription className="text-[10px] text-[#94A3B8]">
+                  Open radiation sensor measurements (Safecast/EURDEP) in microSieverts per hour (µSv/h).
+                </CardDescription>
+              </div>
+              {radiationData && (
+                <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px] uppercase">
+                  {radiationData.totalStations} Active Stations
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="p-0 space-y-4">
+              {radiationData ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
+                    <span className="text-[#94A3B8] text-[10px] block">Elevated / High Stations</span>
+                    <span className="text-lg font-bold text-[#F59E0B]">{radiationData.elevatedCount}</span>
+                  </div>
+                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
+                    <span className="text-[#94A3B8] text-[10px] block">Normal Baseline Range</span>
+                    <span className="text-xs font-semibold text-[#10B981] block">0.05 – 0.20 µSv/h</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-[#94A3B8]">Loading radiation sensor network data...</div>
               )}
             </CardContent>
           </Card>

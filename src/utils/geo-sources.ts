@@ -165,6 +165,74 @@ export async function collectNewsGeo(query: string): Promise<LayerResult> {
   }
 }
 
+export async function collectGpsJamming(): Promise<LayerResult> {
+  try {
+    const { fetchGpsInterference } = await import("./gps-interference");
+    const data = await fetchGpsInterference();
+    if (!data || !data.hexes.length) {
+      return { layer: "infrastructure", records: [], unplaceable: 0, error: null };
+    }
+    const records: GeoRecord[] = data.hexes.slice(0, 100).map((h) => ({
+      id: `gpsjam-${h.h3}`,
+      title: `GPS Interference (${h.level.toUpperCase()}) — ${h.pct.toFixed(1)}% aircraft affected`,
+      locates: "H3 Hex Aircraft Navigation Interference Area",
+      layer: "infrastructure",
+      source: "GPSJam ADS-B Exchange",
+      url: "https://gpsjam.org",
+      lat: h.lat,
+      lon: h.lon,
+      precision: "city",
+      timestamp: data.fetchedAt,
+      magnitude: h.pct,
+      magnitudeLabel: `${h.pct.toFixed(1)}% affected`,
+      detail: { hex: h.h3, affected: h.affectedAircraft, total: h.totalAircraft },
+      credibility: h.level === "high" ? 0.9 : 0.6,
+    }));
+    return { layer: "infrastructure", records, unplaceable: 0, error: null };
+  } catch (err: any) {
+    return {
+      layer: "infrastructure",
+      records: [],
+      unplaceable: 0,
+      error: `GPSJam feed unavailable: ${err?.message ?? String(err)}`,
+    };
+  }
+}
+
+export async function collectRadiation(): Promise<LayerResult> {
+  try {
+    const { fetchRadiationFeed } = await import("./radiation");
+    const data = await fetchRadiationFeed();
+    if (!data || !data.stations.length) {
+      return { layer: "infrastructure", records: [], unplaceable: 0, error: null };
+    }
+    const records: GeoRecord[] = data.stations.map((s) => ({
+      id: s.id,
+      title: `Radiation Level (${s.status.toUpperCase()}): ${s.usvPerHour} µSv/h`,
+      locates: `Environmental Radiation Sensor: ${s.name}`,
+      layer: "infrastructure",
+      source: s.source,
+      url: "https://safecast.org",
+      lat: s.lat,
+      lon: s.lon,
+      precision: "exact",
+      timestamp: s.measuredAt,
+      magnitude: s.usvPerHour,
+      magnitudeLabel: `${s.usvPerHour} µSv/h`,
+      detail: { station: s.name, status: s.status },
+      credibility: s.status === "high" ? 1.0 : s.status === "elevated" ? 0.7 : 0.4,
+    }));
+    return { layer: "infrastructure", records, unplaceable: 0, error: null };
+  } catch (err: any) {
+    return {
+      layer: "infrastructure",
+      records: [],
+      unplaceable: 0,
+      error: `Radiation feed unavailable: ${err?.message ?? String(err)}`,
+    };
+  }
+}
+
 export interface GeoCollection {
   layers: LayerResult[];
   collectedAt: string;
@@ -175,13 +243,15 @@ export interface GeoCollection {
  * Module 4 corpus, which lives in the analyst's browser and never reaches us.
  */
 export async function collectGeoLayers(query: string): Promise<GeoCollection> {
-  const [seismic, conflict, news] = await Promise.all([
+  const [seismic, conflict, news, gpsjam, radiation] = await Promise.all([
     collectSeismic(),
     collectConflict(),
     collectNewsGeo(query),
+    collectGpsJamming(),
+    collectRadiation(),
   ]);
   return {
-    layers: [conflict, seismic, news],
+    layers: [conflict, seismic, news, gpsjam, radiation],
     collectedAt: new Date().toISOString(),
   };
 }
@@ -189,3 +259,4 @@ export async function collectGeoLayers(query: string): Promise<GeoCollection> {
 export const fetchGeoLayers = createServerFn({ method: "GET" })
   .validator((d: { query?: string } | undefined) => d)
   .handler(async ({ data }) => collectGeoLayers(data?.query ?? ""));
+

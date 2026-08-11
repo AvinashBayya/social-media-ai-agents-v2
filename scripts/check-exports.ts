@@ -20,6 +20,7 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "fromSocialPost",
     "toGeoPoint",
     "PostDegradation",
+    "toGpsJamFinding",
   ],
   "src/utils/llm.ts": [
     "chat",
@@ -92,7 +93,19 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "collectConflict",
     "collectNewsGeo",
     "collectGeoLayers",
+    "collectGpsJamming",
+    "collectRadiation",
   ],
+  "src/utils/gps-interference.ts": [
+    "fetchGpsInterference",
+    "classifyGpsRegion",
+    "groupGpsHexesByRegion",
+  ],
+  "src/utils/radiation.ts": ["fetchRadiationFeed", "classifyRadiationLevel"],
+  "src/utils/cyber-intel.ts": ["fetchCyberIntel"],
+  "src/utils/social-velocity.ts": ["calculateSocialVelocity"],
+  "src/utils/threat-classifier.ts": ["classifyThreatText"],
+  "src/utils/focal-point.ts": ["detectFocalPoints"],
 };
 
 let missingCount = 0;

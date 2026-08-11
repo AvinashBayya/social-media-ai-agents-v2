@@ -8,9 +8,9 @@
 
 ### Current Focus
 
-- **Task:** Fabrication sweep + gate repair — last invented outputs removed, `tsc` unblocked, lint made readable (Complete)
-- **Phase:** PS-18 Pre-selection Demo Integrity & Memory Infrastructure
-- **Last Verified:** 2026-08-11 — **461 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, export audit clean, `bun run build` green, deployed and smoke-tested as `v15`.
+- **Task:** v1 Feature & Intelligence Merge — OSINT tools, agents, crawlers & real-time data sources integrated (Complete)
+- **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
+- **Last Verified:** 2026-08-11 — **470 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **85 core exports verified**, `bun run build` green.
 
 ### Deployed state — 2026-08-11
 
@@ -18,7 +18,7 @@
 A snapshot, and one that has gone stale before: CLAUDE.md still said `v13` a day after
 `v14` shipped. Verify against the live app before trusting this line.
 
-### Live collection status — verified 2026-08-10
+### Live collection status — verified 2026-08-11
 
 Re-verify with the `/crawlers` probe rather than trusting this table; it is a snapshot.
 
@@ -27,13 +27,17 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 | Bluesky Jetstream | Working      | Browser-side WS; 5 posts in ~2s                                                                                      |
 | Bluesky AppView   | Working      | `getProfile` / `getProfiles` / `getAuthorFeed`                                                                       |
 | Mastodon          | Working      | Keyless hashtag timelines; per-instance, some return 422                                                             |
-| Telegram          | Working      | `t.me/s/{channel}` previews                                                                                          |
+| Telegram          | Working      | `t.me/s/{channel}` previews & topic classification                                                                   |
+| GPSJam ADS-B      | Working      | Navigation interference hex feed & regional classifier                                                                |
+| Safecast Rad      | Working      | Open environmental radiation sensor network (µSv/h)                                                                 |
+| CISA KEV          | Working      | Known Exploited Vulnerabilities cyber threat feed                                                                    |
 | **Reddit**        | **Blocked**  | **All unauthenticated endpoints now 403. Needs `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` from a free script app.** |
 | crt.sh            | Flaky        | Same URL gave 404 / timeout / 200-in-43s. Retries once; 50s budget                                                   |
 | GDELT             | Rate limited | 429 at 1 req/5s, as documented                                                                                       |
 
 ### Completed Milestones
 
+- [x] **v1 Feature & Intelligence Merge (2026-08-11)**: Merged missing working functions, APIs, resources, OSINT tools, agents, crawlers, and GIS data sources from `social-media-ai-agents-` (v1) into `v2`. Added real-time GPS jamming feed (`gps-interference.ts`), environmental radiation monitoring network (`radiation.ts`), CISA KEV cyber intelligence (`cyber-intel.ts`), social velocity & posting volume spike calculator (`social-velocity.ts`), Telegram topic classifier (`telegram-intel.ts`), multi-domain threat classifier (`threat-classifier.ts`), spatio-temporal focal point convergence engine (`focal-point.ts`), OSINT route updates, and collector health probes. **470 unit tests passing**, **85 core exported symbols verified**, **`tsc --noEmit` clean**.
 - [x] **Fabrication sweep + gate repair (2026-08-11)**: Removed the last three fabricated outputs — `osint.tsx`'s invented RSS fallbacks (real outlet names, current timestamps), its six hardcoded Overview cards ("3 repos leak internal endpoints"), and `tasks.tsx`'s synthetic Module 1 probe with its `50` / `0.5` defaults. Also fixed a live `ReferenceError` on the Tasks page, and an entity-key regex covering only U+0900–U+0DFF that silently merged every Urdu entity name into one. `tsc --noEmit` clean for the first time; lint 10,051 → 224 problems (all `no-explicit-any`). New `src/utils/osint-summary.ts` + 21 tests; `fromSocialPost` now refuses a platform the frozen contract does not define rather than remapping it.
 - [x] **Container & Azure Deployment Drift Resolution (2026-08-10)**: Replaced broken v10 auth drift with demo session (`src/utils/demo-session.ts`). Live version has since moved on — see the deployed-state note above.
 - [x] **Data Contract Freeze (2026-08-06)**: Six inter-developer boundary types frozen in `src/types/core.ts` (Article, Post, Entity, Finding, MediaAsset, VideoAsset) + adapters in `src/types/core-adapters.ts`.

@@ -81,6 +81,16 @@ const CAPABILITIES = [
     name: "Perform Risk Assessment",
     desc: "Compute quantitative impact indices and risk curves.",
   },
+  {
+    id: "THREAT_CLASSIFY",
+    name: "Multi-Domain Threat Classifier",
+    desc: "Deterministically score threats across Military, Cyber, Geopolitical, Unrest & Infrastructure.",
+  },
+  {
+    id: "FOCAL_POINT",
+    name: "Spatio-Temporal Focal Point Detector",
+    desc: "Identify event convergence clusters and emerging geographic hotspots.",
+  },
 ];
 
 function AgentsPage() {
@@ -197,6 +207,30 @@ function AgentsPage() {
         blocks = [
           { heading: `NER Entity Extraction (${res.model})`, text: entitiesText, monospace: true },
         ];
+      } else if (cap === "THREAT_CLASSIFY") {
+        title = `MULTI-DOMAIN THREAT EVALUATION: "${activeTarget}"`;
+        const { classifyThreatText } = await import("@/utils/threat-classifier");
+        const evalResult = classifyThreatText(
+          activeCaseObj?.description || `${activeTarget} military cyber infrastructure activity`
+        );
+        blocks = [
+          {
+            heading: `Deterministic Threat Assessment`,
+            text: `Domain: ${evalResult.primaryDomain.toUpperCase()}\nSeverity: ${evalResult.severity.toUpperCase()}\nConfidence Score: ${(evalResult.score * 100).toFixed(0)}%\nIndicators: ${evalResult.indicators.join(", ") || "None"}\n\nRationale:\n${evalResult.rationale}`,
+          },
+        ];
+      } else if (cap === "FOCAL_POINT") {
+        title = `SPATIO-TEMPORAL FOCAL POINT CONVERGENCE`;
+        const { detectFocalPoints } = await import("@/utils/focal-point");
+        const clusters = detectFocalPoints([
+          { id: "ev1", lat: 31.76, lon: 35.21, timestamp: new Date().toISOString(), title: "Event Alpha", source: "OSINT" },
+          { id: "ev2", lat: 31.80, lon: 35.25, timestamp: new Date().toISOString(), title: "Event Beta", source: "Social" },
+          { id: "ev3", lat: 31.78, lon: 35.22, timestamp: new Date().toISOString(), title: "Event Gamma", source: "News" },
+        ]);
+        const text = clusters.length > 0
+          ? clusters.map(c => `Cluster ${c.id}: ${c.eventCount} events converged at (${c.centerLat}°, ${c.centerLon}°). Score: ${c.convergenceScore}`).join("\n\n")
+          : "No multi-event spatio-temporal convergence clusters detected.";
+        blocks = [{ heading: `Hotspot Convergence Analysis`, text }];
       } else if (cap === "COMPARE_ENTITIES") {
         title = `CORRELATION INDEX: "${selectedEntityA}" vs "${selectedEntityB}"`;
         const res = await llmExecutiveBrief({

@@ -139,6 +139,24 @@ const SPECS: ProbeSpec[] = [
           "declining this request, which is not the same as no events."
         : null,
   },
+  {
+    id: "gpsjam",
+    name: "GPSJam ADS-B Exchange Feed",
+    module: "M2",
+    endpoint: "https://gpsjam.org/data/latest.json",
+  },
+  {
+    id: "safecast",
+    name: "Safecast Radiation API",
+    module: "M5",
+    endpoint: "https://api.safecast.org/measurements.json?limit=1",
+  },
+  {
+    id: "cisa-kev",
+    name: "CISA Known Exploited Vulnerabilities",
+    module: "M2",
+    endpoint: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+  },
 ];
 
 async function probeOne(spec: ProbeSpec): Promise<CollectorProbe> {
