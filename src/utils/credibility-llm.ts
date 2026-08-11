@@ -27,6 +27,13 @@
 import { assessLanguageOf, LlmUnavailableError, type LanguageAssessment } from "./llm";
 import type { Article } from "./analysis";
 
+/**
+ * Re-exported because this is the module consumers assess through — sources.tsx
+ * already imported the type from here, which type-checked as an error nobody
+ * saw. Type-only, so it adds no runtime edge from a route to llm.ts.
+ */
+export type { LanguageAssessment };
+
 /** Text given to the assessor. Title plus body — the tone of a headline counts. */
 function assessableText(article: Article): string {
   return `${article.title}\n\n${article.body ?? ""}`.trim();

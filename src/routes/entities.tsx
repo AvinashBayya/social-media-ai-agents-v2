@@ -6,15 +6,20 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Search, Loader2, AlertTriangle, Tags, Info, ExternalLink, ChevronDown, ChevronRight,
+  Search,
+  Loader2,
+  AlertTriangle,
+  Tags,
+  Info,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchNews } from "./news";
 import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
 import { clusterStories, type Article } from "@/utils/analysis";
-import {
-  bandFor, defaultFactors, scoreCorpus, type CredibilityScore,
-} from "@/utils/credibility";
+import { bandFor, defaultFactors, scoreCorpus, type CredibilityScore } from "@/utils/credibility";
 
 /**
  * Entity Explorer — Module 2, entity extraction over the live corpus.
@@ -80,7 +85,17 @@ interface AggregatedEntity {
 
 /** Case- and punctuation-insensitive key, so "IAF" and "I.A.F." merge. */
 function entityKey(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9ऀ-෿]/g, "");
+  // Unicode property escapes rather than a hand-rolled range. The previous class
+  // was `[^a-z0-9<U+0900>-<U+0DFF>]`, which had two problems: it opened on a
+  // combining mark that renders as an invisible or dotted-circle glyph in source
+  // and so could not be verified by eye, and the range covers Devanagari through
+  // Sinhala only. Urdu is written in Arabic script (U+0600-U+06FF) and is one of
+  // this application's 15 supported languages, so every Urdu entity name was
+  // stripped to an empty key and silently merged with every other one.
+  //
+  // \p{L}\p{N} keeps letters and digits in ANY script and drops punctuation,
+  // which is exactly what "case- and punctuation-insensitive" was meant to say.
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 function Page() {
@@ -138,7 +153,9 @@ function Page() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   // Module 1 scores, shared clustering, default factor weights. The analyst can
@@ -251,7 +268,11 @@ function Page() {
               placeholder="Search target subject or entity..."
               className="h-11 pl-9 pr-24 text-base"
             />
-            <Button size="sm" onClick={handleSearch} className="absolute right-1.5 top-1/2 -translate-y-1/2">
+            <Button
+              size="sm"
+              onClick={handleSearch}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2"
+            >
               Search
             </Button>
           </div>
@@ -263,8 +284,8 @@ function Page() {
           <CardContent className="flex items-start gap-2 p-3">
             <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
             <div className="font-mono text-[11px] text-[#EF4444]">
-              <span className="font-bold">Collection failed.</span> No corpus was retrieved for
-              this subject.
+              <span className="font-bold">Collection failed.</span> No corpus was retrieved for this
+              subject.
               <div className="pt-0.5 opacity-80">{loadError}</div>
             </div>
           </CardContent>
@@ -282,7 +303,9 @@ function Page() {
                   Entities across {analysed} analysed article{analysed === 1 ? "" : "s"}
                 </h3>
                 {model && (
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">{model}</span>
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                    {model}
+                  </span>
                 )}
               </div>
 
@@ -314,7 +337,7 @@ function Page() {
               {visible.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
                   {analysed === 0
-                    ? "No article has been analysed yet. Use \"Extract\" on an article to the right — extraction is a model call, so it runs only when you ask for it."
+                    ? 'No article has been analysed yet. Use "Extract" on an article to the right — extraction is a model call, so it runs only when you ask for it.'
                     : "The model found no named entities in the analysed articles."}
                 </p>
               ) : (
@@ -322,7 +345,8 @@ function Page() {
                   {visible.map((a) => {
                     const key = `${a.entity}::${a.type}`;
                     const open = openEntity === key;
-                    const band = a.bestCredibility === null ? "unknown" : bandFor(a.bestCredibility).tone;
+                    const band =
+                      a.bestCredibility === null ? "unknown" : bandFor(a.bestCredibility).tone;
                     return (
                       <div key={key} className="py-2">
                         <button
@@ -334,7 +358,9 @@ function Page() {
                           ) : (
                             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                           )}
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{a.entity}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {a.entity}
+                          </span>
                           <Badge
                             className={`shrink-0 text-[10px] font-normal ${TYPE_COLOURS[a.type] ?? TYPE_COLOURS.OTHER}`}
                           >
@@ -354,7 +380,9 @@ function Page() {
                                 : "Highest Module 1 credibility among the articles naming this entity, using default factor weights."
                             }
                           >
-                            {a.bestCredibility === null ? "cred —" : `cred ${a.bestCredibility.toFixed(2)}`}
+                            {a.bestCredibility === null
+                              ? "cred —"
+                              : `cred ${a.bestCredibility.toFixed(2)}`}
                           </span>
                         </button>
 
@@ -363,18 +391,24 @@ function Page() {
                             {a.occurrences.map((o, i) => (
                               <div key={i} className="rounded border bg-muted/30 p-2 text-[11px]">
                                 <div className="flex items-center gap-2">
-                                  <span className="font-mono text-[10px] text-foreground">{o.source}</span>
+                                  <span className="font-mono text-[10px] text-foreground">
+                                    {o.source}
+                                  </span>
                                   <span className="text-muted-foreground">
                                     model confidence {o.confidence.toFixed(2)}
                                   </span>
                                   {o.credibility !== null && (
-                                    <span className={`ml-auto ${BAND_COLOURS[bandFor(o.credibility).tone]}`}>
+                                    <span
+                                      className={`ml-auto ${BAND_COLOURS[bandFor(o.credibility).tone]}`}
+                                    >
                                       article cred {o.credibility.toFixed(2)}
                                     </span>
                                   )}
                                 </div>
                                 {o.mention && (
-                                  <p className="mt-0.5 italic text-muted-foreground">"{o.mention}"</p>
+                                  <p className="mt-0.5 italic text-muted-foreground">
+                                    "{o.mention}"
+                                  </p>
                                 )}
                                 {o.url && (
                                   <a
@@ -402,11 +436,11 @@ function Page() {
             <CardContent className="flex items-start gap-2 p-3">
               <Info className="size-3.5 shrink-0 text-muted-foreground" />
               <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Confidence values are reported by the model per extraction and are shown
-                unmodified — the aggregate row shows the highest observed value rather than a
-                mean, because averaging two model-reported confidences produces a number no
-                model asserted. Credibility is Module 1's score for the article, computed with
-                default factor weights; retune them on the Source Credibility page.
+                Confidence values are reported by the model per extraction and are shown unmodified
+                — the aggregate row shows the highest observed value rather than a mean, because
+                averaging two model-reported confidences produces a number no model asserted.
+                Credibility is Module 1's score for the article, computed with default factor
+                weights; retune them on the Source Credibility page.
               </p>
             </CardContent>
           </Card>

@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { createServerFn } from "@tanstack/react-start";
 import {
-  Search, Filter, Languages, Bookmark, Expand, MapPin, ExternalLink, RefreshCw
+  Search,
+  Filter,
+  Languages,
+  Bookmark,
+  Expand,
+  MapPin,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 
 export const fetchLiveMonitoring = createServerFn({ method: "GET" })
@@ -25,8 +32,8 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
         const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=6&prop=pageimages&piprop=thumbnail&pithumbsize=400&format=json&origin=*`;
         const res = await fetch(wikiUrl, {
           headers: {
-            "User-Agent": "SentinelAI/1.0.0 (contact: admin@sentinelai.io)"
-          }
+            "User-Agent": "SentinelAI/1.0.0 (contact: admin@sentinelai.io)",
+          },
         });
         if (res.ok) {
           const json = await res.json();
@@ -65,13 +72,38 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
           handle = "@" + source.toLowerCase().replace(/[^a-z0-9]/g, "") + "_feed";
         } else if (idx % 3 === 2) {
           platform = "Telegram";
-          handle = "channel_" + (1000 + (idx * 23) % 9000);
+          handle = "channel_" + (1000 + ((idx * 23) % 9000));
         }
 
         let sentiment: "positive" | "negative" | "neutral" = "neutral";
-        const posWords = ["success", "achieve", "land", "keynote", "progress", "growth", "approved", "positive", "launch", "space", "orbit"];
-        const negWords = ["fail", "crash", "lost", "delay", "breach", "leak", "unverified", "investigate", "alert", "crashed", "dispute", "restrict"];
-        
+        const posWords = [
+          "success",
+          "achieve",
+          "land",
+          "keynote",
+          "progress",
+          "growth",
+          "approved",
+          "positive",
+          "launch",
+          "space",
+          "orbit",
+        ];
+        const negWords = [
+          "fail",
+          "crash",
+          "lost",
+          "delay",
+          "breach",
+          "leak",
+          "unverified",
+          "investigate",
+          "alert",
+          "crashed",
+          "dispute",
+          "restrict",
+        ];
+
         let posCount = 0;
         let negCount = 0;
         for (const w of posWords) {
@@ -84,11 +116,25 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
         else if (negCount > posCount) sentiment = "negative";
 
         let threat: "low" | "medium" | "high" | "critical" = "low";
-        if (textLower.includes("crash") || textLower.includes("breach") || textLower.includes("critical") || textLower.includes("catastrophe")) {
+        if (
+          textLower.includes("crash") ||
+          textLower.includes("breach") ||
+          textLower.includes("critical") ||
+          textLower.includes("catastrophe")
+        ) {
           threat = "critical";
-        } else if (textLower.includes("leak") || textLower.includes("unverified") || textLower.includes("investigate") || textLower.includes("alert")) {
+        } else if (
+          textLower.includes("leak") ||
+          textLower.includes("unverified") ||
+          textLower.includes("investigate") ||
+          textLower.includes("alert")
+        ) {
           threat = "high";
-        } else if (textLower.includes("delay") || textLower.includes("dispute") || textLower.includes("restrict")) {
+        } else if (
+          textLower.includes("delay") ||
+          textLower.includes("dispute") ||
+          textLower.includes("restrict")
+        ) {
           threat = "medium";
         }
 
@@ -97,22 +143,32 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
           credibility = idx % 2 === 0 ? "medium" : "unverified";
         }
 
-        const locations = ["New Delhi, IN", "Damascus, SY", "London, UK", "Cupertino, US", "Washington, US", "Bengaluru, IN", "Houston, US", "Moscow, RU", "Tokyo, JP"];
+        const locations = [
+          "New Delhi, IN",
+          "Damascus, SY",
+          "London, UK",
+          "Cupertino, US",
+          "Washington, US",
+          "Bengaluru, IN",
+          "Houston, US",
+          "Moscow, RU",
+          "Tokyo, JP",
+        ];
         const loc = locations[idx % locations.length];
 
         const tags = [
           "#" + q.replace(/[^a-zA-Z0-9]/g, ""),
           platform === "Telegram" ? "OSINT" : "intel",
-          sentiment === "positive" ? "growth" : "alert"
+          sentiment === "positive" ? "growth" : "alert",
         ];
 
         // Only assign images if we actually resolved some real Wikipedia thumbnails
-        const hasImage = wikiImages.length > 0 && (idx % 3 === 0) && (idx / 3 < wikiImages.length);
+        const hasImage = wikiImages.length > 0 && idx % 3 === 0 && idx / 3 < wikiImages.length;
         const imageUrl = hasImage ? wikiImages[Math.floor(idx / 3)] : undefined;
 
         let language = "EN";
         let displayTxt = title + ". " + (item.contentSnippet || "");
-        
+
         // Simulating different languages based on index
         if (idx % 4 === 1) {
           language = "ES";
@@ -130,7 +186,14 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
           handle,
           platform,
           pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
-          loc: language === "ES" ? "Madrid, ES" : language === "FR" ? "Paris, FR" : language === "HI" ? "New Delhi, IN" : loc,
+          loc:
+            language === "ES"
+              ? "Madrid, ES"
+              : language === "FR"
+                ? "Paris, FR"
+                : language === "HI"
+                  ? "New Delhi, IN"
+                  : loc,
           text: displayTxt,
           tags,
           sentiment,
@@ -139,7 +202,7 @@ export const fetchLiveMonitoring = createServerFn({ method: "GET" })
           url: item.link,
           hasImage,
           imageUrl,
-          language
+          language,
         };
       });
 
@@ -155,7 +218,15 @@ export const Route = createFileRoute("/live")({
   component: Page,
 });
 
-const examples = ["Tesla", "OpenAI", "India Election", "ISRO", "Narendra Modi", "OPEC", "Vector-17"];
+const examples = [
+  "Tesla",
+  "OpenAI",
+  "India Election",
+  "ISRO",
+  "Narendra Modi",
+  "OPEC",
+  "Vector-17",
+];
 const quickFilters = ["Social", "News", "Images", "Videos", "OSINT", "Forums", "Documents"];
 
 function formatRelativeTime(dateStr: string): string {
@@ -223,7 +294,11 @@ function Page() {
     try {
       const saved = localStorage.getItem("sentinel_bookmarks");
       if (saved) setBookmarks(JSON.parse(saved));
-    } catch {}
+    } catch {
+      // Unreadable or malformed bookmark store: start empty rather than
+      // resurrecting a partial list, matching how parseDemoSession treats a
+      // half-readable record.
+    }
   }, []);
 
   const toggleBookmark = (url: string) => {
@@ -240,8 +315,8 @@ function Page() {
   };
 
   const toggleTranslate = (url: string) => {
-    setTranslatedUrls((prev) => 
-      prev.includes(url) ? prev.filter((x) => x !== url) : [...prev, url]
+    setTranslatedUrls((prev) =>
+      prev.includes(url) ? prev.filter((x) => x !== url) : [...prev, url],
     );
   };
 
@@ -294,7 +369,7 @@ function Page() {
           setBuffer((prevBuffer) => {
             const existingUrls = new Set(prevBuffer.map((x) => x.url));
             const newItems = fetched.filter((x) => !existingUrls.has(x.url));
-            
+
             if (newItems.length > 0) {
               return [...newItems, ...prevBuffer];
             }
@@ -316,7 +391,7 @@ function Page() {
       setVisibleStreams((prev) => {
         const nextItem = buffer[bufferIndex];
         setBufferIndex((prevIdx) => prevIdx + 1);
-        
+
         // Prepend and cap at 8
         const updated = [nextItem, ...prev];
         return updated.slice(0, 8);
@@ -347,16 +422,32 @@ function Page() {
           if (!item.hasImage) return false;
           break;
         case "Videos":
-          if (!item.text.toLowerCase().includes("video") && !item.text.toLowerCase().includes("footage") && !item.text.toLowerCase().includes("clip")) return false;
+          if (
+            !item.text.toLowerCase().includes("video") &&
+            !item.text.toLowerCase().includes("footage") &&
+            !item.text.toLowerCase().includes("clip")
+          )
+            return false;
           break;
         case "OSINT":
           if (!item.tags.includes("OSINT") && item.platform !== "Telegram") return false;
           break;
         case "Forums":
-          if (item.platform !== "Telegram" && !item.handle.includes("group") && !item.handle.includes("channel")) return false;
+          if (
+            item.platform !== "Telegram" &&
+            !item.handle.includes("group") &&
+            !item.handle.includes("channel")
+          )
+            return false;
           break;
         case "Documents":
-          if (!item.text.toLowerCase().includes("report") && !item.text.toLowerCase().includes("pdf") && !item.text.toLowerCase().includes("document") && !item.text.toLowerCase().includes("brief")) return false;
+          if (
+            !item.text.toLowerCase().includes("report") &&
+            !item.text.toLowerCase().includes("pdf") &&
+            !item.text.toLowerCase().includes("document") &&
+            !item.text.toLowerCase().includes("brief")
+          )
+            return false;
           break;
       }
     }
@@ -369,7 +460,8 @@ function Page() {
       if (selectedCountry === "US" && !item.loc.includes("US")) return false;
       if (selectedCountry === "IN" && !item.loc.includes("IN")) return false;
       if (selectedCountry === "UK" && !item.loc.includes("UK")) return false;
-      if (selectedCountry === "ES" && !item.loc.includes("ES") && !item.loc.includes("SY")) return false;
+      if (selectedCountry === "ES" && !item.loc.includes("ES") && !item.loc.includes("SY"))
+        return false;
       if (selectedCountry === "FR" && !item.loc.includes("FR")) return false;
     }
 
@@ -398,7 +490,12 @@ function Page() {
       <PageHeader
         title="Live Monitoring"
         description="Global, real-time intelligence stream — filter by platform, language, geography, or credibility."
-        badge={<Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary"><StatusDot />Streaming</Badge>}
+        badge={
+          <Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary">
+            <StatusDot />
+            Streaming
+          </Badge>
+        }
       />
 
       <Card className="mb-4">
@@ -450,7 +547,7 @@ function Page() {
               <span className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1">
                 <Filter className="size-3" /> Advanced:
               </span>
-              
+
               <div className="flex items-center gap-1 text-[11px]">
                 <span className="text-muted-foreground">Lang:</span>
                 <select
@@ -547,7 +644,10 @@ function Page() {
             const isBookmarked = bookmarks.includes(r.url);
             const isTranslated = translatedUrls.includes(r.url);
             return (
-              <Card key={`${r.author}-${i}`} className="overflow-hidden bg-card/75 border border-primary/10 hover:border-primary/25 transition-all">
+              <Card
+                key={`${r.author}-${i}`}
+                className="overflow-hidden bg-card/75 border border-primary/10 hover:border-primary/25 transition-all"
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
@@ -559,8 +659,11 @@ function Page() {
                         <span className="truncate text-xs text-muted-foreground">{r.handle}</span>
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-medium">{r.platform}</Badge>
-                        <MapPin className="size-3" />{r.loc}
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-medium">
+                          {r.platform}
+                        </Badge>
+                        <MapPin className="size-3" />
+                        {r.loc}
                         <span>·</span>
                         <span>{timeAgo} ago</span>
                       </div>
@@ -572,12 +675,14 @@ function Page() {
                     </div>
                   </div>
 
-                  <p className="mt-3 text-sm text-foreground/95 leading-relaxed">{getPostText(r)}</p>
+                  <p className="mt-3 text-sm text-foreground/95 leading-relaxed">
+                    {getPostText(r)}
+                  </p>
 
                   {r.hasImage && r.imageUrl && (
                     <div className="mt-3 h-48 rounded-md border overflow-hidden bg-muted relative group">
-                      <img 
-                        src={r.imageUrl} 
+                      <img
+                        src={r.imageUrl}
                         alt="Visual Signal"
                         className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
                         referrerPolicy="no-referrer"
@@ -587,7 +692,12 @@ function Page() {
 
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {r.tags.map((t: string) => (
-                      <span key={t} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{t}</span>
+                      <span
+                        key={t}
+                        className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                      >
+                        {t}
+                      </span>
                     ))}
                   </div>
 
@@ -604,9 +714,9 @@ function Page() {
 
                   <div className="mt-3 flex items-center gap-1">
                     {r.language === "EN" ? (
-                      <Button 
-                        size="sm" 
-                        variant="ghost" 
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         className="h-8 gap-1.5 text-xs text-muted-foreground/50 cursor-default"
                         disabled
                       >
@@ -614,34 +724,40 @@ function Page() {
                         English (Original)
                       </Button>
                     ) : (
-                      <Button 
-                        size="sm" 
-                        variant="ghost" 
-                        className={`h-8 gap-1.5 text-xs ${isTranslated ? 'text-primary bg-primary/10' : ''}`}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className={`h-8 gap-1.5 text-xs ${isTranslated ? "text-primary bg-primary/10" : ""}`}
                         onClick={() => toggleTranslate(r.url)}
                       >
                         <Languages className="size-3.5" />
                         {isTranslated ? "Show Original" : "Translate to EN"}
                       </Button>
                     )}
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       className="h-8 gap-1.5 text-xs"
                       onClick={() => setExpandedPost(r)}
                     >
-                      <Expand className="size-3.5" />Expand
+                      <Expand className="size-3.5" />
+                      Expand
                     </Button>
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      className={`h-8 gap-1.5 text-xs ${isBookmarked ? 'text-amber-500 bg-amber-500/10' : ''}`}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={`h-8 gap-1.5 text-xs ${isBookmarked ? "text-amber-500 bg-amber-500/10" : ""}`}
                       onClick={() => toggleBookmark(r.url)}
                     >
-                      <Bookmark className={`size-3.5 ${isBookmarked ? 'fill-amber-500' : ''}`} />
+                      <Bookmark className={`size-3.5 ${isBookmarked ? "fill-amber-500" : ""}`} />
                       {isBookmarked ? "Bookmarked" : "Bookmark"}
                     </Button>
-                    <Button asChild size="sm" variant="ghost" className="ml-auto h-8 gap-1.5 text-xs">
+                    <Button
+                      asChild
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto h-8 gap-1.5 text-xs"
+                    >
                       <a href={r.url} target="_blank" rel="noopener noreferrer">
                         Open <ExternalLink className="size-3.5" />
                       </a>
@@ -656,8 +772,14 @@ function Page() {
 
       {/* Expanded Signal Details Modal */}
       {expandedPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setExpandedPost(null)}>
-          <Card className="w-full max-w-2xl bg-card border border-primary/20 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setExpandedPost(null)}
+        >
+          <Card
+            className="w-full max-w-2xl bg-card border border-primary/20 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <CardContent className="p-6 space-y-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
@@ -665,7 +787,9 @@ function Page() {
                     {expandedPost.author.slice(0, 2).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-foreground">{expandedPost.author}</h3>
+                    <h3 className="text-base font-semibold text-foreground">
+                      {expandedPost.author}
+                    </h3>
                     <div className="text-xs text-muted-foreground">{expandedPost.handle}</div>
                   </div>
                 </div>
@@ -678,18 +802,23 @@ function Page() {
 
               <div className="flex gap-2 text-xs text-muted-foreground border-b pb-3">
                 <Badge variant="secondary">{expandedPost.platform}</Badge>
-                <span className="flex items-center gap-1"><MapPin className="size-3" />{expandedPost.loc}</span>
+                <span className="flex items-center gap-1">
+                  <MapPin className="size-3" />
+                  {expandedPost.loc}
+                </span>
                 <span>·</span>
                 <span>{new Date(expandedPost.pubDate).toLocaleString()}</span>
               </div>
 
-              <p className="text-base text-foreground/90 leading-relaxed whitespace-pre-wrap">{getPostText(expandedPost)}</p>
+              <p className="text-base text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                {getPostText(expandedPost)}
+              </p>
 
               {expandedPost.hasImage && expandedPost.imageUrl && (
                 <div className="rounded-lg overflow-hidden border border-primary/10 bg-muted">
-                  <img 
-                    src={expandedPost.imageUrl} 
-                    alt={expandedPost.author} 
+                  <img
+                    src={expandedPost.imageUrl}
+                    alt={expandedPost.author}
                     className="w-full h-auto object-cover max-h-[350px]"
                     referrerPolicy="no-referrer"
                   />
@@ -698,19 +827,26 @@ function Page() {
 
               <div className="flex flex-wrap gap-1.5 pt-2">
                 {expandedPost.tags.map((t: string) => (
-                  <Badge key={t} variant="outline" className="text-xs">{t}</Badge>
+                  <Badge key={t} variant="outline" className="text-xs">
+                    {t}
+                  </Badge>
                 ))}
               </div>
 
               <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs space-y-1">
                 <span className="font-semibold text-primary">AI Signal Analysis Report</span>
                 <p className="text-foreground/80">
-                  This intelligence signal has been captured in the real-time stream. Sentiment analysis is classified as {expandedPost.sentiment}. Public threat assessment indicates a {expandedPost.threat} threat level. Target account source credibility is labeled {expandedPost.credibility}.
+                  This intelligence signal has been captured in the real-time stream. Sentiment
+                  analysis is classified as {expandedPost.sentiment}. Public threat assessment
+                  indicates a {expandedPost.threat} threat level. Target account source credibility
+                  is labeled {expandedPost.credibility}.
                 </p>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t">
-                <Button size="sm" variant="outline" onClick={() => setExpandedPost(null)}>Close</Button>
+                <Button size="sm" variant="outline" onClick={() => setExpandedPost(null)}>
+                  Close
+                </Button>
                 <Button asChild size="sm" className="gap-1.5">
                   <a href={expandedPost.url} target="_blank" rel="noopener noreferrer">
                     Open Original <ExternalLink className="size-3.5" />

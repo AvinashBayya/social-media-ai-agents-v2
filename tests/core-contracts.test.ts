@@ -244,6 +244,30 @@ describe("Post adapters", () => {
     const { post } = toSocialPost(POST_FIXTURE_MINIMAL);
     expect(fromSocialPost(post, null).accountAgeDays).toBeNull();
   });
+
+  /**
+   * social.ts gained "mastodon" after the 2026-08-06 freeze, so the internal
+   * platform union is now wider than the contract's. The adapter must refuse
+   * rather than reconcile: mapping a Mastodon post onto "bluesky" would put a
+   * platform on a record that did not come from it, and that record feeds
+   * credibility scoring.
+   */
+  test("a platform the frozen contract does not define is refused, not remapped", () => {
+    const { post } = toSocialPost(POST_FIXTURE);
+    const mastodon = { ...post, platform: "mastodon" as const };
+
+    expect(() => fromSocialPost(mastodon, 42)).toThrow(/mastodon/i);
+    expect(() => fromSocialPost(mastodon, 42)).toThrow(/re-freeze/i);
+  });
+
+  test("the three frozen platforms still convert", () => {
+    const { post } = toSocialPost(POST_FIXTURE);
+    for (const platform of ["bluesky", "reddit", "telegram"] as const) {
+      const out = fromSocialPost({ ...post, platform }, 1);
+      expect(out.platform).toBe(platform);
+      expect(() => parsePost(out)).not.toThrow();
+    }
+  });
 });
 
 // ─── Coordinate honesty at the boundary ────────────────────────────────────

@@ -38,15 +38,51 @@ import { LlmQuotaCard } from "@/components/llm-quota";
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   cyber: ["cyber", "hack", "hacked", "hacking", "breach", "malware", "ransomware", "phishing"],
   conflict: [
-    "war", "military", "weapon", "weapons", "conflict", "strike", "strikes",
-    "troops", "combat", "defense", "defence", "offensive", "airstrike",
+    "war",
+    "military",
+    "weapon",
+    "weapons",
+    "conflict",
+    "strike",
+    "strikes",
+    "troops",
+    "combat",
+    "defense",
+    "defence",
+    "offensive",
+    "airstrike",
   ],
   economy: [
-    "rate", "rates", "market", "markets", "stock", "stocks", "inflation",
-    "economy", "economic", "bank", "banks", "trade", "tariff",
-    "price", "prices", "gdp", "recession",
+    "rate",
+    "rates",
+    "market",
+    "markets",
+    "stock",
+    "stocks",
+    "inflation",
+    "economy",
+    "economic",
+    "bank",
+    "banks",
+    "trade",
+    "tariff",
+    "price",
+    "prices",
+    "gdp",
+    "recession",
   ],
-  maritime: ["sea", "ship", "ships", "vessel", "vessels", "maritime", "port", "ports", "cargo", "naval"],
+  maritime: [
+    "sea",
+    "ship",
+    "ships",
+    "vessel",
+    "vessels",
+    "maritime",
+    "port",
+    "ports",
+    "cargo",
+    "naval",
+  ],
   intelligence: ["intel", "intelligence", "spy", "spies", "espionage", "cia", "surveillance"],
   nuclear: ["nuclear", "nuke", "atomic", "radiation", "enrichment"],
 };
@@ -59,41 +95,96 @@ const THREAT_KEYWORDS: Record<string, string[]> = {
 };
 
 const SOURCE_TYPES: Record<string, string> = {
-  'Reuters': 'wire', 'Reuters World': 'wire', 'Reuters Business': 'wire',
-  'AP News': 'wire', 'AFP': 'wire', 'Bloomberg': 'wire',
-  'White House': 'gov', 'State Dept': 'gov', 'Pentagon': 'gov',
-  'Treasury': 'gov', 'DOJ': 'gov', 'DHS': 'gov', 'CDC': 'gov',
-  'FEMA': 'gov', 'Federal Reserve': 'gov', 'SEC': 'gov',
-  'UN News': 'gov', 'CISA': 'gov',
-  'Defense One': 'intel', 'Breaking Defense': 'intel', 'The War Zone': 'intel',
-  'Defense News': 'intel', 'Janes': 'intel', 'Military Times': 'intel', 'Task & Purpose': 'intel',
-  'USNI News': 'intel', 'gCaptain': 'intel', 'Oryx OSINT': 'intel', 'UK MOD': 'gov',
-  'Bellingcat': 'intel', 'Krebs Security': 'intel', 'Foreign Policy': 'intel', 'The Diplomat': 'intel',
-  'Atlantic Council': 'intel', 'Foreign Affairs': 'intel', 'CrisisWatch': 'intel',
-  'CSIS': 'intel', 'RAND': 'intel', 'Brookings': 'intel', 'Carnegie': 'intel',
-  'BBC World': 'mainstream', 'BBC News': 'mainstream', 'NYT News': 'mainstream', 'Guardian World': 'mainstream',
-  'NPR News': 'mainstream', 'Al Jazeera': 'mainstream', 'CNN World': 'mainstream',
-  'Politico': 'mainstream', 'Axios': 'mainstream', 'EuroNews': 'mainstream',
-  'France 24': 'mainstream', 'Le Monde': 'mainstream', 'Fox News': 'mainstream',
-  'NBC News': 'mainstream', 'CBS News': 'mainstream', 'ABC News': 'mainstream',
-  'PBS NewsHour': 'mainstream', 'Yahoo Finance': 'market', 'Financial Times': 'market',
-  'Hacker News': 'tech', 'Ars Technica': 'tech', 'The Verge': 'tech',
-  'The Verge AI': 'tech', 'MIT Tech Review': 'tech', 'War on the Rocks': 'intel'
+  Reuters: "wire",
+  "Reuters World": "wire",
+  "Reuters Business": "wire",
+  "AP News": "wire",
+  AFP: "wire",
+  Bloomberg: "wire",
+  "White House": "gov",
+  "State Dept": "gov",
+  Pentagon: "gov",
+  Treasury: "gov",
+  DOJ: "gov",
+  DHS: "gov",
+  CDC: "gov",
+  FEMA: "gov",
+  "Federal Reserve": "gov",
+  SEC: "gov",
+  "UN News": "gov",
+  CISA: "gov",
+  "Defense One": "intel",
+  "Breaking Defense": "intel",
+  "The War Zone": "intel",
+  "Defense News": "intel",
+  Janes: "intel",
+  "Military Times": "intel",
+  "Task & Purpose": "intel",
+  "USNI News": "intel",
+  gCaptain: "intel",
+  "Oryx OSINT": "intel",
+  "UK MOD": "gov",
+  Bellingcat: "intel",
+  "Krebs Security": "intel",
+  "Foreign Policy": "intel",
+  "The Diplomat": "intel",
+  "Atlantic Council": "intel",
+  "Foreign Affairs": "intel",
+  CrisisWatch: "intel",
+  CSIS: "intel",
+  RAND: "intel",
+  Brookings: "intel",
+  Carnegie: "intel",
+  "BBC World": "mainstream",
+  "BBC News": "mainstream",
+  "NYT News": "mainstream",
+  "Guardian World": "mainstream",
+  "NPR News": "mainstream",
+  "Al Jazeera": "mainstream",
+  "CNN World": "mainstream",
+  Politico: "mainstream",
+  Axios: "mainstream",
+  EuroNews: "mainstream",
+  "France 24": "mainstream",
+  "Le Monde": "mainstream",
+  "Fox News": "mainstream",
+  "NBC News": "mainstream",
+  "CBS News": "mainstream",
+  "ABC News": "mainstream",
+  "PBS NewsHour": "mainstream",
+  "Yahoo Finance": "market",
+  "Financial Times": "market",
+  "Hacker News": "tech",
+  "Ars Technica": "tech",
+  "The Verge": "tech",
+  "The Verge AI": "tech",
+  "MIT Tech Review": "tech",
+  "War on the Rocks": "intel",
 };
 
 function getSourceType(source: string): string {
-  return SOURCE_TYPES[source] || 'other';
+  return SOURCE_TYPES[source] || "other";
 }
 
 const SOURCE_PROPAGANDA_RISK: Record<string, string> = {
-  'Xinhua': 'high', 'TASS': 'high', 'RT': 'high', 'RT Russia': 'high',
-  'Sputnik': 'high', 'CGTN': 'high', 'Press TV': 'high', 'IRNA': 'high',
-  'Mehr News': 'high', 'KCNA': 'high', 'Al Jazeera': 'medium',
-  'Al Arabiya': 'medium', 'TRT World': 'medium', 'Voice of America': 'medium'
+  Xinhua: "high",
+  TASS: "high",
+  RT: "high",
+  "RT Russia": "high",
+  Sputnik: "high",
+  CGTN: "high",
+  "Press TV": "high",
+  IRNA: "high",
+  "Mehr News": "high",
+  KCNA: "high",
+  "Al Jazeera": "medium",
+  "Al Arabiya": "medium",
+  "TRT World": "medium",
+  "Voice of America": "medium",
 };
 
 function getSourcePropagandaRisk(source: string): { risk: string } {
-  return { risk: SOURCE_PROPAGANDA_RISK[source] || 'low' };
+  return { risk: SOURCE_PROPAGANDA_RISK[source] || "low" };
 }
 
 interface APIStory {
@@ -181,29 +272,69 @@ export const fetchNews = createServerFn({ method: "GET" })
           {
             source: "Google News",
             url: `https://news.google.com/rss/search?q=${encodeURIComponent(upstreamQuery)}&hl=en-US&gl=US&ceid=US:en`,
-            region: "Global"
-          }
+            region: "Global",
+          },
         ];
       } else {
         feedsToFetch = [
-          { source: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml", region: "Global" },
-          { source: "Guardian World", url: "https://www.theguardian.com/world/rss", region: "Global" },
-          { source: "AP News", url: "https://news.google.com/rss/search?q=site:apnews.com&hl=en-US&gl=US&ceid=US:en", region: "Global" },
-          { source: "Reuters World", url: "https://news.google.com/rss/search?q=site:reuters.com+world&hl=en-US&gl=US&ceid=US:en", region: "Global" },
+          {
+            source: "BBC World",
+            url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+            region: "Global",
+          },
+          {
+            source: "Guardian World",
+            url: "https://www.theguardian.com/world/rss",
+            region: "Global",
+          },
+          {
+            source: "AP News",
+            url: "https://news.google.com/rss/search?q=site:apnews.com&hl=en-US&gl=US&ceid=US:en",
+            region: "Global",
+          },
+          {
+            source: "Reuters World",
+            url: "https://news.google.com/rss/search?q=site:reuters.com+world&hl=en-US&gl=US&ceid=US:en",
+            region: "Global",
+          },
           { source: "NPR News", url: "https://feeds.npr.org/1001/rss.xml", region: "US" },
-          { source: "PBS NewsHour", url: "https://www.pbs.org/newshour/feeds/rss/headlines", region: "US" },
+          {
+            source: "PBS NewsHour",
+            url: "https://www.pbs.org/newshour/feeds/rss/headlines",
+            region: "US",
+          },
           { source: "Hacker News", url: "https://hnrss.org/frontpage", region: "Global" },
-          { source: "Ars Technica", url: "https://feeds.arstechnica.com/arstechnica/technology-lab", region: "Global" },
+          {
+            source: "Ars Technica",
+            url: "https://feeds.arstechnica.com/arstechnica/technology-lab",
+            region: "Global",
+          },
           { source: "The Verge", url: "https://www.theverge.com/rss/index.xml", region: "Global" },
-          { source: "MIT Tech Review", url: "https://www.technologyreview.com/feed/", region: "Global" },
-          { source: "CNBC", url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", region: "Global" },
+          {
+            source: "MIT Tech Review",
+            url: "https://www.technologyreview.com/feed/",
+            region: "Global",
+          },
+          {
+            source: "CNBC",
+            url: "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+            region: "Global",
+          },
           { source: "Financial Times", url: "https://www.ft.com/rss/home", region: "Global" },
-          { source: "Federal Reserve", url: "https://www.federalreserve.gov/feeds/press_all.xml", region: "US" },
-          { source: "CISA", url: "https://www.cisa.gov/cybersecurity-advisories/all.xml", region: "US" },
+          {
+            source: "Federal Reserve",
+            url: "https://www.federalreserve.gov/feeds/press_all.xml",
+            region: "US",
+          },
+          {
+            source: "CISA",
+            url: "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+            region: "US",
+          },
           { source: "War on the Rocks", url: "https://warontherocks.com/feed", region: "Global" },
           { source: "Foreign Policy", url: "https://foreignpolicy.com/feed/", region: "Global" },
           { source: "CrisisWatch", url: "https://www.crisisgroup.org/rss", region: "Global" },
-          { source: "Krebs Security", url: "https://krebsonsecurity.com/feed/", region: "Global" }
+          { source: "Krebs Security", url: "https://krebsonsecurity.com/feed/", region: "Global" },
         ];
       }
 
@@ -211,7 +342,7 @@ export const fetchNews = createServerFn({ method: "GET" })
         feedsToFetch.map(async (feedInfo) => {
           const feed = await parser.parseURL(feedInfo.url);
           return { feed, feedInfo };
-        })
+        }),
       );
 
       const stories: APIStory[] = [];
@@ -244,7 +375,7 @@ export const fetchNews = createServerFn({ method: "GET" })
             const relevance = scoreMatch({ title, body }, parsedQuery);
 
             const text = (title + " " + body).toLowerCase();
-            
+
             // Matched on word boundaries: plain `includes` classified "increase"
             // as maritime (via "sea"), "corporate" as economy (via "rate") and
             // "warehouse" as conflict (via "war").
@@ -307,7 +438,7 @@ export const fetchNews = createServerFn({ method: "GET" })
               isAlert: threatLevel === "critical" || threatLevel === "high",
               sourceType,
               propagandaRisk,
-              relevance
+              relevance,
             });
           }
         }
@@ -393,8 +524,14 @@ export const fetchReviews = createServerFn({ method: "GET" })
           title = title.substring(0, dashIndex).trim();
         }
 
-        const text = (title + " " + (item.contentSnippet || "") + " " + (item.content || "")).toLowerCase();
-        
+        const text = (
+          title +
+          " " +
+          (item.contentSnippet || "") +
+          " " +
+          (item.content || "")
+        ).toLowerCase();
+
         let platformIcon = "Globe2";
         let sourceName = source;
         if (text.includes("glassdoor") || source.toLowerCase().includes("glassdoor")) {
@@ -403,7 +540,13 @@ export const fetchReviews = createServerFn({ method: "GET" })
         } else if (text.includes("trustpilot") || source.toLowerCase().includes("trustpilot")) {
           sourceName = `Trustpilot (${source})`;
           platformIcon = "Globe2";
-        } else if (text.includes("complaint") || text.includes("illegal") || text.includes("dispute") || text.includes("scam") || text.includes("court")) {
+        } else if (
+          text.includes("complaint") ||
+          text.includes("illegal") ||
+          text.includes("dispute") ||
+          text.includes("scam") ||
+          text.includes("court")
+        ) {
           sourceName = `Consumer Complaints (${source})`;
           platformIcon = "ShieldAlert";
         } else if (text.includes("google") || source.toLowerCase().includes("google")) {
@@ -412,20 +555,103 @@ export const fetchReviews = createServerFn({ method: "GET" })
         }
 
         const POSITIVE_LEXICON = [
-          "invest", "invests", "investment", "luxury", "build", "excellent", "great", "growth", "profit",
-          "expand", "expands", "success", "donate", "donates", "partnership", "new", "rise", "increase",
-          "gain", "high", "top", "benefit", "good", "deliver", "foray", "forays", "premium", "launch",
-          "launches", "trust", "happy", "satisfy", "pleased", "green", "smart", "award", "won", "leading",
-          "pioneering", "efficient", "quality", "clean", "safe", "secure", "modern"
+          "invest",
+          "invests",
+          "investment",
+          "luxury",
+          "build",
+          "excellent",
+          "great",
+          "growth",
+          "profit",
+          "expand",
+          "expands",
+          "success",
+          "donate",
+          "donates",
+          "partnership",
+          "new",
+          "rise",
+          "increase",
+          "gain",
+          "high",
+          "top",
+          "benefit",
+          "good",
+          "deliver",
+          "foray",
+          "forays",
+          "premium",
+          "launch",
+          "launches",
+          "trust",
+          "happy",
+          "satisfy",
+          "pleased",
+          "green",
+          "smart",
+          "award",
+          "won",
+          "leading",
+          "pioneering",
+          "efficient",
+          "quality",
+          "clean",
+          "safe",
+          "secure",
+          "modern",
         ];
 
         const NEGATIVE_LEXICON = [
-          "illegal", "complaint", "scam", "bad", "issue", "issues", "dispute", "disputes", "warning",
-          "sacks", "strike", "court", "arrest", "fire", "delay", "delays", "fail", "failed", "failure",
-          "fall", "loss", "losses", "decreased", "poor", "low", "critical", "threat", "fine", "penalty",
-          "protest", "protests", "prohibited", "violation", "violations", "leak", "leaks", "encroach",
-          "encroachment", "demolish", "demolition", "notice", "notices", "seize", "seized", "investigate",
-          "investigation", "fraud", "scandal", "warns"
+          "illegal",
+          "complaint",
+          "scam",
+          "bad",
+          "issue",
+          "issues",
+          "dispute",
+          "disputes",
+          "warning",
+          "sacks",
+          "strike",
+          "court",
+          "arrest",
+          "fire",
+          "delay",
+          "delays",
+          "fail",
+          "failed",
+          "failure",
+          "fall",
+          "loss",
+          "losses",
+          "decreased",
+          "poor",
+          "low",
+          "critical",
+          "threat",
+          "fine",
+          "penalty",
+          "protest",
+          "protests",
+          "prohibited",
+          "violation",
+          "violations",
+          "leak",
+          "leaks",
+          "encroach",
+          "encroachment",
+          "demolish",
+          "demolition",
+          "notice",
+          "notices",
+          "seize",
+          "seized",
+          "investigate",
+          "investigation",
+          "fraud",
+          "scandal",
+          "warns",
         ];
 
         const words = text.split(/[^a-zA-Z]/);
@@ -466,13 +692,13 @@ export const fetchReviews = createServerFn({ method: "GET" })
           maxRating: 5,
           content: title,
           url: item.link,
-          tone
+          tone,
         });
       }
 
       const activeReviews = reviewsList.slice(0, 10);
       const totalCount = activeReviews.length;
-      
+
       let overallRating = 0;
       let posPct = 0;
       let neuPct = 0;
@@ -485,36 +711,68 @@ export const fetchReviews = createServerFn({ method: "GET" })
         neuPct = 100 - posPct - negPct;
       }
 
-      const positiveTitles = reviewsList.filter(r => r.tone === "positive").map(r => r.content);
-      const negativeTitles = reviewsList.filter(r => r.tone === "critical").map(r => r.content);
+      const positiveTitles = reviewsList.filter((r) => r.tone === "positive").map((r) => r.content);
+      const negativeTitles = reviewsList.filter((r) => r.tone === "critical").map((r) => r.content);
       const takeaways: string[] = [];
       const capQuery = q.charAt(0).toUpperCase() + q.slice(1);
 
       if (positiveTitles.length > 0) {
-        const keywords = ["invest", "luxury", "launch", "mall", "township", "crore", "build", "expansion"];
-        const found = keywords.filter(kw => positiveTitles.some(t => t.toLowerCase().includes(kw)));
+        const keywords = [
+          "invest",
+          "luxury",
+          "launch",
+          "mall",
+          "township",
+          "crore",
+          "build",
+          "expansion",
+        ];
+        const found = keywords.filter((kw) =>
+          positiveTitles.some((t) => t.toLowerCase().includes(kw)),
+        );
         if (found.length > 0) {
-          takeaways.push(`Key positives: Expansion and growth markers identified around [${found.join(", ")}].`);
+          takeaways.push(
+            `Key positives: Expansion and growth markers identified around [${found.join(", ")}].`,
+          );
         } else {
-          takeaways.push(`General positive milestones and customer feedback recorded for ${capQuery}.`);
+          takeaways.push(
+            `General positive milestones and customer feedback recorded for ${capQuery}.`,
+          );
         }
       } else {
         takeaways.push(`No significant positive indicators detected in indexed records.`);
       }
 
       if (negativeTitles.length > 0) {
-        const keywords = ["illegal", "wall", "notice", "court", "complaint", "demolition", "protest", "delay"];
-        const found = keywords.filter(kw => negativeTitles.some(t => t.toLowerCase().includes(kw)));
+        const keywords = [
+          "illegal",
+          "wall",
+          "notice",
+          "court",
+          "complaint",
+          "demolition",
+          "protest",
+          "delay",
+        ];
+        const found = keywords.filter((kw) =>
+          negativeTitles.some((t) => t.toLowerCase().includes(kw)),
+        );
         if (found.length > 0) {
-          takeaways.push(`Risk Alert: Mentions of potential [${found.join(", ")}] issues noted in public documents.`);
+          takeaways.push(
+            `Risk Alert: Mentions of potential [${found.join(", ")}] issues noted in public documents.`,
+          );
         } else {
           takeaways.push(`Risk Alert: Active public complaints or compliance checks spotted.`);
         }
       } else {
-        takeaways.push(`No major risk alerts, disputes, or compliance notices detected for ${capQuery}.`);
+        takeaways.push(
+          `No major risk alerts, disputes, or compliance notices detected for ${capQuery}.`,
+        );
       }
 
-      takeaways.push(`Overall index score is ${overallRating}/5 based on ${reviewsList.length} verified news & media sources.`);
+      takeaways.push(
+        `Overall index score is ${overallRating}/5 based on ${reviewsList.length} verified news & media sources.`,
+      );
 
       return {
         rating: overallRating || 4.0,
@@ -523,11 +781,19 @@ export const fetchReviews = createServerFn({ method: "GET" })
         neutral: neuPct || 20,
         negative: negPct || 10,
         takeaways,
-        reviews: activeReviews
+        reviews: activeReviews,
       };
     } catch (error) {
       console.error("Failed to parse reviews RSS:", error);
-      return { rating: 0, maxRating: 5, positive: 0, neutral: 0, negative: 0, takeaways: [], reviews: [] };
+      return {
+        rating: 0,
+        maxRating: 5,
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        takeaways: [],
+        reviews: [],
+      };
     }
   });
 
@@ -542,7 +808,7 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         github: [],
         corporate: { status: "Inactive", jurisdiction: "N/A", fileNo: "N/A", hq: "N/A" },
         certificates: [],
-        certificatesError: null
+        certificatesError: null,
       };
     }
 
@@ -576,7 +842,7 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       Registrar: "N/A (Not a domain target)",
       Created: "N/A",
       Expires: "N/A",
-      NS: "N/A"
+      NS: "N/A",
     };
 
     let certLogs: SubdomainFinding[] = [];
@@ -593,13 +859,16 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         Registrar: "Querying registry...",
         Created: "Unknown",
         Expires: "Unknown",
-        NS: "None"
+        NS: "None",
       };
 
       // 1. DNS Resolution (Server-Side using DoH to bypass port 53 blocks)
       try {
         const aUrl = `https://cloudflare-dns.com/dns-query?name=${domainCandidate}&type=A`;
-        const aRes = await fetch(aUrl, { headers: { "accept": "application/dns-json" }, signal: AbortSignal.timeout(8000) });
+        const aRes = await fetch(aUrl, {
+          headers: { accept: "application/dns-json" },
+          signal: AbortSignal.timeout(8000),
+        });
         if (aRes.ok) {
           const aJson = await aRes.json();
           if (aJson.Status === 0 && aJson.Answer && aJson.Answer.length > 0) {
@@ -616,7 +885,10 @@ export const fetchOSINT = createServerFn({ method: "GET" })
 
       try {
         const mxUrl = `https://cloudflare-dns.com/dns-query?name=${domainCandidate}&type=MX`;
-        const mxRes = await fetch(mxUrl, { headers: { "accept": "application/dns-json" }, signal: AbortSignal.timeout(8000) });
+        const mxRes = await fetch(mxUrl, {
+          headers: { accept: "application/dns-json" },
+          signal: AbortSignal.timeout(8000),
+        });
         if (mxRes.ok) {
           const mxJson = await mxRes.json();
           if (mxJson.Status === 0 && mxJson.Answer && mxJson.Answer.length > 0) {
@@ -631,20 +903,37 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       // 4. RDAP WHOIS Domain Details (Only if DNS didn't strictly say NXDOMAIN)
       if (whoisData.Registrar !== "Domain not registered (NXDOMAIN)") {
         try {
-          const rdapResponse = await fetch(`https://rdap.org/domain/${domainCandidate}`, { signal: AbortSignal.timeout(8000) });
+          const rdapResponse = await fetch(`https://rdap.org/domain/${domainCandidate}`, {
+            signal: AbortSignal.timeout(8000),
+          });
           if (rdapResponse.ok) {
             const rdapJson = await rdapResponse.json();
-            const registrarEntity = rdapJson.entities?.find((e: any) => e.roles?.includes("registrar"));
-            const createdEvent = rdapJson.events?.find((e: any) => e.eventAction === "registration");
-            const expirationEvent = rdapJson.events?.find((e: any) => e.eventAction === "expiration");
-            const nameservers = rdapJson.nameservers?.map((ns: any) => ns.ldhName.toLowerCase()).join(", ");
-            
+            const registrarEntity = rdapJson.entities?.find((e: any) =>
+              e.roles?.includes("registrar"),
+            );
+            const createdEvent = rdapJson.events?.find(
+              (e: any) => e.eventAction === "registration",
+            );
+            const expirationEvent = rdapJson.events?.find(
+              (e: any) => e.eventAction === "expiration",
+            );
+            const nameservers = rdapJson.nameservers
+              ?.map((ns: any) => ns.ldhName.toLowerCase())
+              .join(", ");
+
             whoisData = {
               Domain: domainCandidate,
-              Registrar: registrarEntity?.vcardArray?.[1]?.find((arr: any) => arr[0] === "fn")?.[3] || registrarEntity?.handle || "Registered",
-              Created: createdEvent ? new Date(createdEvent.eventDate).toISOString().substring(0, 10) : "N/A",
-              Expires: expirationEvent ? new Date(expirationEvent.eventDate).toISOString().substring(0, 10) : "N/A",
-              NS: nameservers || "None listed"
+              Registrar:
+                registrarEntity?.vcardArray?.[1]?.find((arr: any) => arr[0] === "fn")?.[3] ||
+                registrarEntity?.handle ||
+                "Registered",
+              Created: createdEvent
+                ? new Date(createdEvent.eventDate).toISOString().substring(0, 10)
+                : "N/A",
+              Expires: expirationEvent
+                ? new Date(expirationEvent.eventDate).toISOString().substring(0, 10)
+                : "N/A",
+              NS: nameservers || "None listed",
             };
             isRegistered = true;
           } else if (rdapResponse.status === 404) {
@@ -654,7 +943,9 @@ export const fetchOSINT = createServerFn({ method: "GET" })
           }
         } catch (err) {
           console.error("RDAP WHOIS failed:", err);
-          whoisData.Registrar = isRegistered ? "Private registration / WHOIS hidden" : "Domain not found / Inactive";
+          whoisData.Registrar = isRegistered
+            ? "Private registration / WHOIS hidden"
+            : "Domain not found / Inactive";
         }
       }
 
@@ -676,7 +967,7 @@ export const fetchOSINT = createServerFn({ method: "GET" })
           uniqueRepoUrls.add(item.html_url);
           repos.push({
             name: item.full_name || item.name,
-            url: item.html_url
+            url: item.html_url,
           });
         }
       }
@@ -688,10 +979,11 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc`,
         {
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
           },
-          signal: AbortSignal.timeout(8000)
-        }
+          signal: AbortSignal.timeout(8000),
+        },
       );
       if (gitResponse.ok) {
         const gitData = await gitResponse.json();
@@ -703,20 +995,18 @@ export const fetchOSINT = createServerFn({ method: "GET" })
 
     // Step B: Search GitHub users to find profiles matching the name
     try {
-      const userVariations = [
-        q,
-        q.replace(/\s+/g, ""),
-        q.split(/\s+/).reverse().join("")
-      ].filter(v => v && v.length > 2);
+      const userVariations = [q, q.replace(/\s+/g, ""), q.split(/\s+/).reverse().join("")].filter(
+        (v) => v && v.length > 2,
+      );
 
-      let foundUserLogins: string[] = [];
+      const foundUserLogins: string[] = [];
       for (const variant of userVariations.slice(0, 2)) {
         const userResponse = await fetch(
           `https://api.github.com/search/users?q=${encodeURIComponent(variant)}`,
           {
             headers: { "User-Agent": "Mozilla/5.0" },
-            signal: AbortSignal.timeout(8000)
-          }
+            signal: AbortSignal.timeout(8000),
+          },
         );
         if (userResponse.ok) {
           const userData = await userResponse.json();
@@ -735,8 +1025,8 @@ export const fetchOSINT = createServerFn({ method: "GET" })
           `https://api.github.com/users/${username}/repos?sort=updated&per_page=5`,
           {
             headers: { "User-Agent": "Mozilla/5.0" },
-            signal: AbortSignal.timeout(8000)
-          }
+            signal: AbortSignal.timeout(8000),
+          },
         );
         if (userReposResponse.ok) {
           const userReposData = await userReposResponse.json();
@@ -752,7 +1042,12 @@ export const fetchOSINT = createServerFn({ method: "GET" })
     repos = repos.slice(0, 6);
 
     // 3. Corporate Registry Search via Wikidata (Keyless and Open)
-    let corporateData = { status: "Not found", jurisdiction: "Not found", fileNo: "Not found", hq: "Not found" };
+    let corporateData = {
+      status: "Not found",
+      jurisdiction: "Not found",
+      fileNo: "Not found",
+      hq: "Not found",
+    };
     try {
       const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(q)}&language=en&format=json`;
       const res = await fetch(url);
@@ -765,15 +1060,30 @@ export const fetchOSINT = createServerFn({ method: "GET" })
           if (detailsRes.ok) {
             const detailsData = await detailsRes.json();
             const entity = detailsData.entities[entityId];
-            
+
             // Map Wikidata country codes to names
             const countryId = entity.claims?.P17?.[0]?.mainsnak?.datavalue?.value?.id;
             const countryMap: Record<string, string> = {
-              Q30: "United States", Q17: "Japan", Q20: "Norway", Q29: "Spain", Q40: "Austria",
-              Q55: "Netherlands", Q96: "Mexico", Q142: "France", Q145: "United Kingdom",
-              Q159: "Russia", Q166: "Germany", Q183: "Germany", Q258: "South Africa",
-              Q298: "Chile", Q408: "Australia", Q414: "Argentina", Q668: "India",
-              Q794: "Iran", Q884: "South Korea", Q1009: "Cameroon"
+              Q30: "United States",
+              Q17: "Japan",
+              Q20: "Norway",
+              Q29: "Spain",
+              Q40: "Austria",
+              Q55: "Netherlands",
+              Q96: "Mexico",
+              Q142: "France",
+              Q145: "United Kingdom",
+              Q159: "Russia",
+              Q166: "Germany",
+              Q183: "Germany",
+              Q258: "South Africa",
+              Q298: "Chile",
+              Q408: "Australia",
+              Q414: "Argentina",
+              Q668: "India",
+              Q794: "Iran",
+              Q884: "South Korea",
+              Q1009: "Cameroon",
             };
             const jurisdiction = countryMap[countryId] || countryId || "Global";
 
@@ -784,18 +1094,27 @@ export const fetchOSINT = createServerFn({ method: "GET" })
             // Map Headquarters city codes to labels
             const hqId = entity.claims?.P159?.[0]?.mainsnak?.datavalue?.value?.id;
             const cityMap: Record<string, string> = {
-              Q1439: "Austin, Texas", Q62: "San Francisco, California", Q64: "Berlin, Germany",
-              Q84: "London, United Kingdom", Q1355: "Bengaluru, India", Q1156: "Mumbai, India",
-              Q90: "Paris, France", Q268: "Palo Alto, California", Q47265: "Palo Alto, California",
-              Q1361: "Hyderabad, India", Q1297: "Chicago, Illinois", Q61: "Washington, D.C."
+              Q1439: "Austin, Texas",
+              Q62: "San Francisco, California",
+              Q64: "Berlin, Germany",
+              Q84: "London, United Kingdom",
+              Q1355: "Bengaluru, India",
+              Q1156: "Mumbai, India",
+              Q90: "Paris, France",
+              Q268: "Palo Alto, California",
+              Q47265: "Palo Alto, California",
+              Q1361: "Hyderabad, India",
+              Q1297: "Chicago, Illinois",
+              Q61: "Washington, D.C.",
             };
-            const hq = cityMap[hqId] || entity.descriptions?.en?.value || "Registered Address Undisclosed";
+            const hq =
+              cityMap[hqId] || entity.descriptions?.en?.value || "Registered Address Undisclosed";
 
             corporateData = {
               status: "Active",
               jurisdiction,
               fileNo,
-              hq
+              hq,
             };
           }
         }
@@ -808,12 +1127,12 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       whois: whoisData,
       dns: {
         a: ipAddress,
-        mx: mxRecord
+        mx: mxRecord,
       },
       github: repos,
       corporate: corporateData,
       certificates: certLogs,
-      certificatesError
+      certificatesError,
     };
   });
 
@@ -822,19 +1141,19 @@ export const fetchSearchIntelligence = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const q = data?.query || data?.q || "";
     if (!q.trim()) return { results: [] };
-    
+
     try {
       const Parser = (await import("rss-parser")).default;
       const parser = new Parser();
-      
+
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
       const feed = await parser.parseURL(url);
-      
+
       const results: any[] = [];
       const items = feed.items || [];
       for (const item of items) {
         if (!item.title) continue;
-        
+
         let title = item.title;
         let displayUrl = "google.com";
         const dashIndex = title.lastIndexOf(" - ");
@@ -842,16 +1161,19 @@ export const fetchSearchIntelligence = createServerFn({ method: "GET" })
           displayUrl = title.substring(dashIndex + 3).trim();
           title = title.substring(0, dashIndex).trim();
         }
-        
+
         results.push({
           title,
           url: item.link,
           displayUrl,
-          snippet: item.contentSnippet || item.content || `Search index entry for ${q} published on ${displayUrl}.`,
-          pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
+          snippet:
+            item.contentSnippet ||
+            item.content ||
+            `Search index entry for ${q} published on ${displayUrl}.`,
+          pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
         });
       }
-      
+
       return { results: results.slice(0, 15) };
     } catch (err) {
       console.error("Google News search failed:", err);
@@ -875,7 +1197,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
       let xHandle = "No public profile found";
       let xFollowers = "N/A";
       let xStatus = "Inactive";
-      
+
       let liHandle = "No public profile found";
       let liFollowers = "N/A";
       let liStatus = "Inactive";
@@ -884,7 +1206,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
       let subRedditStatus = "Inactive";
 
       const isEmail = q.includes("@");
-      
+
       if (!isEmail) {
         // Expand search terms for abbreviations/acronyms to handle Junior, Group, etc.
         const searchTerms = [q];
@@ -907,23 +1229,25 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                 // Loop through top 5 results to find one with active social claims
                 for (const item of searchData.search.slice(0, 5)) {
                   const detailsUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${item.id}&languages=en&format=json`;
-                  const detailsRes = await fetch(detailsUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+                  const detailsRes = await fetch(detailsUrl, {
+                    headers: { "User-Agent": "Mozilla/5.0" },
+                  });
                   if (detailsRes.ok) {
                     const detailsData = await detailsRes.json();
                     const entity = detailsData.entities[item.id];
-                    
+
                     const p2002 = entity.claims?.P2002?.[0]?.mainsnak?.datavalue?.value;
                     const p4264 = entity.claims?.P4264?.[0]?.mainsnak?.datavalue?.value;
                     const p3984 = entity.claims?.P3984?.[0]?.mainsnak?.datavalue?.value;
 
                     // Avoid false positive subreddits like Netorare for NTR search
                     const isFalseSubreddit = q.toLowerCase() === "ntr" && p3984 === "netorare";
-                    
+
                     if (p2002 || p4264 || (p3984 && !isFalseSubreddit)) {
                       if (p2002) {
                         xHandle = "@" + p2002;
                         xStatus = "Monitored · Active Ingestion";
-                        
+
                         // Followers count P8687
                         const p8687Claims = entity.claims?.P8687 || [];
                         let maxFollowers = 0;
@@ -936,7 +1260,8 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                         }
                         if (maxFollowers > 0) {
                           if (maxFollowers >= 1000000) {
-                            xFollowers = (maxFollowers / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+                            xFollowers =
+                              (maxFollowers / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
                           } else if (maxFollowers >= 1000) {
                             xFollowers = (maxFollowers / 1000).toFixed(1).replace(/\.0$/, "") + "K";
                           } else {
@@ -948,7 +1273,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                       if (p4264) {
                         liHandle = p4264;
                         liStatus = "Monitored · Active Ingestion";
-                        
+
                         // Estimate LinkedIn followers
                         let empCount = 0;
                         const p1128Claims = entity.claims?.P1128 || [];
@@ -971,7 +1296,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                         subReddit = p3984;
                         subRedditStatus = "Monitored · Active Ingestion";
                       }
-                      
+
                       matchFound = true;
                       break;
                     }
@@ -986,17 +1311,25 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
       }
 
       // 2. Google Search profiles resolver fallback
-      if (xHandle === "No public profile found" && liHandle === "No public profile found" && !isEmail) {
+      if (
+        xHandle === "No public profile found" &&
+        liHandle === "No public profile found" &&
+        !isEmail
+      ) {
         try {
           const searchQuery = `${q} (site:twitter.com OR site:linkedin.com OR site:instagram.com)`;
           const url = `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`;
           const feed = await parser.parseURL(url);
           const items = feed.items || [];
-          
+
           for (const item of items) {
             const link = item.link || "";
             const xMatch = link.match(/(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]{1,15})(?:\/|$)/);
-            if (xMatch && xMatch[1] && !["search", "home", "intent", "share", "i"].includes(xMatch[1].toLowerCase())) {
+            if (
+              xMatch &&
+              xMatch[1] &&
+              !["search", "home", "intent", "share", "i"].includes(xMatch[1].toLowerCase())
+            ) {
               if (xHandle === "No public profile found") {
                 xHandle = "@" + xMatch[1];
                 xStatus = "Monitored · Active Ingestion";
@@ -1004,8 +1337,8 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
                 xFollowers = "N/A";
               }
             }
-            
-            const liMatch = link.match(/linkedin\.com\/(?:company|in)\/([a-zA-Z0-9_\-]+)/);
+
+            const liMatch = link.match(/linkedin\.com\/(?:company|in)\/([a-zA-Z0-9_-]+)/);
             if (liMatch && liMatch[1]) {
               if (liHandle === "No public profile found") {
                 liHandle = liMatch[1];
@@ -1027,7 +1360,10 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
         xFollowers = "N/A";
       }
       if (liHandle === "No public profile found") {
-        const hyphen = q.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
+        const hyphen = q
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-]/g, "");
         liHandle = hyphen || "target";
         liStatus = "Monitored · Active Ingestion";
         liFollowers = "N/A";
@@ -1043,20 +1379,21 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
           platform: "X / Twitter",
           handle: xHandle,
           followers: xFollowers,
-          status: xStatus
+          status: xStatus,
         },
         {
           platform: "LinkedIn",
           handle: liHandle,
           followers: liFollowers,
-          status: liStatus
+          status: liStatus,
         },
         {
           platform: "Reddit",
-          handle: subReddit !== "No public profile found" ? `/r/${subReddit}` : "No public profile found",
+          handle:
+            subReddit !== "No public profile found" ? `/r/${subReddit}` : "No public profile found",
           followers: subReddit !== "No public profile found" ? "Active Subreddit" : "N/A",
-          status: subRedditStatus
-        }
+          status: subRedditStatus,
+        },
       ];
 
       const mentions: any[] = [];
@@ -1070,12 +1407,37 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
           const hits = data.hits || [];
           for (const h of hits) {
             if (!h.title) continue;
-            
+
             const textLower = h.title.toLowerCase();
             let tone: "positive" | "negative" | "neutral" = "neutral";
-            const posWords = ["success", "achieve", "land", "keynote", "progress", "growth", "approved", "positive", "launch", "space", "orbit"];
-            const negWords = ["fail", "crash", "lost", "delay", "breach", "leak", "unverified", "investigate", "alert", "crashed", "dispute", "restrict"];
-            
+            const posWords = [
+              "success",
+              "achieve",
+              "land",
+              "keynote",
+              "progress",
+              "growth",
+              "approved",
+              "positive",
+              "launch",
+              "space",
+              "orbit",
+            ];
+            const negWords = [
+              "fail",
+              "crash",
+              "lost",
+              "delay",
+              "breach",
+              "leak",
+              "unverified",
+              "investigate",
+              "alert",
+              "crashed",
+              "dispute",
+              "restrict",
+            ];
+
             let posCount = 0;
             let negCount = 0;
             for (const w of posWords) {
@@ -1095,7 +1457,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
               likes: h.points || 0,
               shares: h.num_comments || 0,
               tone,
-              url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`
+              url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
             });
           }
         }
@@ -1121,11 +1483,36 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
 
           const isReddit = source.toLowerCase().includes("reddit");
           const textLower = title.toLowerCase();
-          
+
           let tone: "positive" | "negative" | "neutral" = "neutral";
-          const posWords = ["success", "achieve", "land", "keynote", "progress", "growth", "approved", "positive", "launch", "space", "orbit"];
-          const negWords = ["fail", "crash", "lost", "delay", "breach", "leak", "unverified", "investigate", "alert", "crashed", "dispute", "restrict"];
-          
+          const posWords = [
+            "success",
+            "achieve",
+            "land",
+            "keynote",
+            "progress",
+            "growth",
+            "approved",
+            "positive",
+            "launch",
+            "space",
+            "orbit",
+          ];
+          const negWords = [
+            "fail",
+            "crash",
+            "lost",
+            "delay",
+            "breach",
+            "leak",
+            "unverified",
+            "investigate",
+            "alert",
+            "crashed",
+            "dispute",
+            "restrict",
+          ];
+
           let posCount = 0;
           let negCount = 0;
           for (const w of posWords) {
@@ -1149,7 +1536,7 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
             likes: null,
             shares: null,
             tone,
-            url: item.link
+            url: item.link,
           });
         }
       } catch (rssErr) {
@@ -1205,8 +1592,8 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
       const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=8&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*`;
       const res = await fetch(wikiUrl, {
         headers: {
-          "User-Agent": "SentinelAI/1.0.0 (contact: admin@sentinelai.io)"
-        }
+          "User-Agent": "SentinelAI/1.0.0 (contact: admin@sentinelai.io)",
+        },
       });
       if (res.ok) {
         const json = await res.json();
@@ -1220,7 +1607,7 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
               // The API does not report a byte size for thumbnails, and the
               // previous value was Math.random(). Report nothing instead.
               size: null,
-              type: "Image"
+              type: "Image",
             });
           }
         }
@@ -1248,7 +1635,7 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
           url: item.link,
           pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
           size: "1.2 MB",
-          type: "Video"
+          type: "Video",
         });
       }
     } catch (err) {
@@ -1269,14 +1656,15 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
         if (dashIndex !== -1) {
           title = title.substring(0, dashIndex).trim();
         }
-        const isPdf = title.toLowerCase().includes("pdf") || (item.link || "").toLowerCase().includes(".pdf");
+        const isPdf =
+          title.toLowerCase().includes("pdf") || (item.link || "").toLowerCase().includes(".pdf");
         documents.push({
           title,
           url: item.link,
           pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
           // Fixed sizes invented per file type; nothing measured them.
           size: null,
-          type: isPdf ? "PDF" : "Document"
+          type: isPdf ? "PDF" : "Document",
         });
       }
     } catch (err) {
@@ -1394,7 +1782,17 @@ function groupByCluster(stories: APIStory[], clusters: StoryCluster[]): FeedGrou
   return groups;
 }
 
-const validTones = new Set(["positive", "negative", "neutral", "critical", "high", "medium", "low", "verified", "unverified"]);
+const validTones = new Set([
+  "positive",
+  "negative",
+  "neutral",
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "verified",
+  "unverified",
+]);
 
 function Page() {
   const loaded = Route.useLoaderData();
@@ -1414,16 +1812,21 @@ function Page() {
       <PageHeader
         title="News Intelligence"
         description="Global news coverage with outlet credibility, cross-language coverage, and narrative tracking."
-        badge={<Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary"><Newspaper className="size-3.5" />Live wires</Badge>}
+        badge={
+          <Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary">
+            <Newspaper className="size-3.5" />
+            Live wires
+          </Badge>
+        }
       />
 
       {stories.length > 0 && (
         <p className="mb-3 text-xs text-muted-foreground">
-          {stories.length} article{stories.length === 1 ? "" : "s"} collected ·{" "}
-          {groups.length} distinct stor{groups.length === 1 ? "y" : "ies"} after clustering ·{" "}
-          {corroborated} corroborated by more than one independent source. Clustering is
-          deterministic (Jaccard title similarity ≥ {SAME_STORY_THRESHOLD}); no model is
-          involved and the same grouping drives Module 1's corroboration score.
+          {stories.length} article{stories.length === 1 ? "" : "s"} collected · {groups.length}{" "}
+          distinct stor{groups.length === 1 ? "y" : "ies"} after clustering · {corroborated}{" "}
+          corroborated by more than one independent source. Clustering is deterministic (Jaccard
+          title similarity ≥ {SAME_STORY_THRESHOLD}); no model is involved and the same grouping
+          drives Module 1's corroboration score.
         </p>
       )}
 
@@ -1460,7 +1863,11 @@ function Page() {
                         </Badge>
                       )}
                       <div className="ml-auto flex gap-1.5">
-                        <Tone tone={validTones.has(lead.threatLevel) ? (lead.threatLevel as any) : "neutral"} />
+                        <Tone
+                          tone={
+                            validTones.has(lead.threatLevel) ? (lead.threatLevel as any) : "neutral"
+                          }
+                        />
                         <Tone tone={lead.isAlert ? "unverified" : "verified"} />
                       </div>
                     </div>
@@ -1474,7 +1881,12 @@ function Page() {
                     <div className="mt-2 flex items-center gap-1.5">
                       {lead.url && (
                         <Button asChild size="sm" variant="ghost" className="h-7 gap-1 text-xs">
-                          <a href={lead.url} target="_blank" rel="noopener noreferrer" className="open-link">
+                          <a
+                            href={lead.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="open-link"
+                          >
                             Open <ExternalLink className="size-3" />
                           </a>
                         </Button>
@@ -1567,7 +1979,10 @@ function Page() {
               </h3>
               <div className="mt-3 space-y-2">
                 {outlets.slice(0, 8).map((o) => (
-                  <div key={o.name} className="flex items-center justify-between gap-2 rounded-md border bg-card p-2">
+                  <div
+                    key={o.name}
+                    className="flex items-center justify-between gap-2 rounded-md border bg-card p-2"
+                  >
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{o.name}</div>
                       <div className="text-[11px] text-muted-foreground">
@@ -1584,9 +1999,9 @@ function Page() {
                 ))}
               </div>
               <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                Counts are articles collected in this run, not totals. Tier is Module 1's
-                documented reputation rating; outlets absent from the table show "unrated"
-                rather than an invented score.
+                Counts are articles collected in this run, not totals. Tier is Module 1's documented
+                reputation rating; outlets absent from the table show "unrated" rather than an
+                invented score.
               </p>
             </CardContent>
           </Card>
@@ -1613,8 +2028,8 @@ function Page() {
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    TF-IDF over this collection. No rise/fall percentage is shown — that
-                    would need a previous collection to compare against, and none is stored.
+                    TF-IDF over this collection. No rise/fall percentage is shown — that would need
+                    a previous collection to compare against, and none is stored.
                   </p>
                 </>
               ) : (

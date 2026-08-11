@@ -131,14 +131,52 @@ export function toSocialPost(post: Post): {
 }
 
 /**
+ * Platforms the FROZEN contract can represent.
+ *
+ * `PlatformSchema` in core.ts is `["bluesky", "reddit", "telegram"]`, frozen
+ * 2026-08-06. The internal `Platform` union in social.ts has since gained
+ * "mastodon", so the two are no longer the same set and this adapter is where
+ * that shows up.
+ *
+ * Widening a frozen enum is NOT the additive change the freeze permits. New
+ * optional fields are safe because a consumer that ignores them still behaves
+ * correctly; a new enum member is different — every consumer switching on
+ * `platform` (Dev 1's and Dev 2's code, which this repo does not contain) would
+ * silently fall through its default branch on a value it has never seen. That
+ * needs the joint re-freeze CLAUDE.md describes, not a one-line edit here.
+ */
+const CONTRACT_PLATFORMS = new Set<Post["platform"]>(["bluesky", "reddit", "telegram"]);
+
+function isContractPlatform(platform: SocialPost["platform"]): platform is Post["platform"] {
+  return CONTRACT_PLATFORMS.has(platform as Post["platform"]);
+}
+
+/**
  * Internal → contract. Lossless: the extension fields exist precisely so a post
  * this system collected itself survives the round trip intact.
  *
  * `accountAgeDays` is not derivable from a post alone — it needs a profile
  * fetch — so it is a required argument. Passing null is correct when no profile
  * was retrieved; it must never be defaulted to a number.
+ *
+ * THROWS for a platform the contract does not define. The alternatives were both
+ * worse: casting would emit a Post whose `platform` fails `parsePost` downstream
+ * with a far less useful message, and mapping Mastodon onto one of the three
+ * existing values would attribute a post to a platform it did not come from —
+ * fabricated provenance on a record that feeds credibility scoring.
  */
 export function fromSocialPost(post: SocialPost, accountAgeDays: number | null): Post {
+  if (!isContractPlatform(post.platform)) {
+    throw new Error(
+      `Post ${post.id} is from "${post.platform}", which the frozen Post contract does not ` +
+        `define (it allows ${[...CONTRACT_PLATFORMS].join(", ")}). The shape was frozen ` +
+        `2026-08-06 and adding a platform is a joint re-freeze with Dev 1 and Dev 2, not a ` +
+        `local change — every consumer switching on platform would fall through on the new ` +
+        `value. Until then, ${post.platform} posts are usable inside this system but must not ` +
+        `cross the developer boundary.`,
+    );
+  }
+
   return {
     id: post.id,
     platform: post.platform,
