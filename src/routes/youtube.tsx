@@ -26,9 +26,9 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import {
-  fetchYoutubeMetadata,
-  fetchYoutubeSubtitles,
-  downloadYoutubeVideo,
+  serverFetchYoutubeMetadata,
+  serverFetchYoutubeSubtitles,
+  serverDownloadYoutubeVideo,
   extractYoutubeId,
   isYoutubeUrl,
   type YoutubeMetadata,
@@ -97,7 +97,7 @@ function YoutubePage() {
     setActiveUrl(targetUrl);
 
     try {
-      const data = await fetchYoutubeMetadata(targetUrl);
+      const data = await serverFetchYoutubeMetadata({ data: { url: targetUrl } });
       setMetadata(data);
       // Default to first available subtitle language if 'en' is missing
       if (data.available_subtitles.length > 0) {
@@ -121,7 +121,7 @@ function YoutubePage() {
     setSubsError(null);
 
     try {
-      const data = await fetchYoutubeSubtitles(activeUrl, lang);
+      const data = await serverFetchYoutubeSubtitles({ data: { url: activeUrl, lang } });
       setSubtitles(data);
     } catch (err: any) {
       setSubsError(err as YoutubeError);
@@ -138,7 +138,7 @@ function YoutubePage() {
     setDownloadError(null);
 
     try {
-      const data = await downloadYoutubeVideo(activeUrl, "720p");
+      const data = await serverDownloadYoutubeVideo({ data: { url: activeUrl, quality: "720p" } });
       setDownloadResult(data);
     } catch (err: any) {
       setDownloadError(err as YoutubeError);

@@ -186,46 +186,62 @@ export async function fetchYoutubeSubtitles(
   url: string,
   lang = "en"
 ): Promise<YoutubeSubtitlesResponse> {
-  const res = await fetch(`${BACKEND_URL}/osint/youtube/subtitles`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: url.trim(), lang }),
-  });
+  try {
+    const res = await fetch(`${BACKEND_URL}/osint/youtube/subtitles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.trim(), lang }),
+    });
 
-  const json = await res.json().catch(() => null);
+    const json = await res.json().catch(() => null);
 
-  if (!res.ok) {
+    if (res.ok && json) {
+      return json as YoutubeSubtitlesResponse;
+    }
+
     const errDetail = json?.detail || json || {};
     throw {
       error: errDetail.error || "SubsUnavailable",
       cause: errDetail.cause || `No subtitles available for language '${lang}'.`,
     } as YoutubeError;
+  } catch (err: any) {
+    if (err && err.error) throw err;
+    throw {
+      error: "SubsUnavailable",
+      cause: `Subtitles extraction service is currently offline. Start the FastAPI backend ('uvicorn app.main:app --port 8000') to enable subtitle transcript parsing.`,
+    } as YoutubeError;
   }
-
-  return json as YoutubeSubtitlesResponse;
 }
 
 export async function downloadYoutubeVideo(
   url: string,
   quality = "720p"
 ): Promise<YoutubeDownloadResponse> {
-  const res = await fetch(`${BACKEND_URL}/osint/youtube/download`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: url.trim(), quality }),
-  });
+  try {
+    const res = await fetch(`${BACKEND_URL}/osint/youtube/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.trim(), quality }),
+    });
 
-  const json = await res.json().catch(() => null);
+    const json = await res.json().catch(() => null);
 
-  if (!res.ok) {
+    if (res.ok && json) {
+      return json as YoutubeDownloadResponse;
+    }
+
     const errDetail = json?.detail || json || {};
     throw {
       error: errDetail.error || "DownloadFailed",
       cause: errDetail.cause || `Video artifact download failed.`,
     } as YoutubeError;
+  } catch (err: any) {
+    if (err && err.error) throw err;
+    throw {
+      error: "DownloadFailed",
+      cause: `FastAPI download collector service is currently offline. Start the backend service ('uvicorn app.main:app --port 8000') to enable local MP4 video artifact downloads.`,
+    } as YoutubeError;
   }
-
-  return json as YoutubeDownloadResponse;
 }
 
 // Server functions for TanStack Start routing integration
