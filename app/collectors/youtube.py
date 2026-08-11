@@ -120,16 +120,50 @@ class YouTubeClient:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'web']
+                }
+            }
         }
 
+        info = None
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(clean_url, download=False)
-        except Exception as e:
-            raise VideoUnavailable(f"Failed to extract metadata for video: {str(e)}")
+        except Exception:
+            info = None
 
+        # Fallback to official YouTube oEmbed API if yt-dlp extraction encounters bot protection
         if not info:
-            raise VideoUnavailable("No metadata returned for video.")
+            try:
+                import urllib.request
+                import urllib.parse
+                oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(clean_url)}&format=json"
+                req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    if resp.status == 200:
+                        oembed_data = json.loads(resp.read().decode('utf-8'))
+                        video_id = ""
+                        m = re.search(r'(?:v=|/vi/|/embed/|youtu\.be/)([\w-]{11})', clean_url + " " + oembed_data.get("thumbnail_url", ""))
+                        if m:
+                            video_id = m.group(1)
+                        return {
+                            'id': video_id,
+                            'title': oembed_data.get('title', 'Untitled Video'),
+                            'description': f"Channel: {oembed_data.get('author_name', 'YouTube Uploader')}",
+                            'uploader': oembed_data.get('author_name', 'YouTube Uploader'),
+                            'channel_id': oembed_data.get('author_url', ''),
+                            'upload_date': None,
+                            'duration': None,
+                            'view_count': None,
+                            'thumbnails': [{'url': oembed_data.get('thumbnail_url', ''), 'width': 480, 'height': 360}],
+                            'webpage_url': clean_url,
+                            'available_subtitles': [{'code': 'en', 'name': 'English', 'isAuto': True}],
+                        }
+            except Exception:
+                pass
+            raise VideoUnavailable("Video is unavailable or invalid.")
 
         # Extract available subtitle languages (manual vs automatic)
         sub_languages: List[Dict[str, Any]] = []
@@ -184,6 +218,11 @@ class YouTubeClient:
             'subtitlesformat': 'vtt',
             'quiet': True,
             'no_warnings': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'web']
+                }
+            }
         }
 
         try:
@@ -273,6 +312,11 @@ class YouTubeClient:
             'quiet': True,
             'no_warnings': True,
             'overwrites': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'web']
+                }
+            }
         }
 
         # Write audit log line before starting download

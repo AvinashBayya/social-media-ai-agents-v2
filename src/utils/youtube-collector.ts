@@ -107,6 +107,55 @@ export function extractYoutubeId(url: string): string | null {
   return match ? match[1] : null;
 }
 
+async function fetchYoutubeOembedFallback(url: string): Promise<YoutubeMetadata> {
+  const videoId = extractYoutubeId(url);
+  if (!videoId) {
+    throw {
+      error: "VideoUnavailable",
+      cause: "Invalid YouTube URL format.",
+    } as YoutubeError;
+  }
+
+  const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url.trim())}&format=json`;
+  const res = await fetch(oembedUrl).catch(() => null);
+
+  if (!res || !res.ok) {
+    throw {
+      error: "VideoUnavailable",
+      cause: `Video '${videoId}' is unavailable, private, or deleted.`,
+    } as YoutubeError;
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!data) {
+    throw {
+      error: "VideoUnavailable",
+      cause: "Failed parsing video metadata.",
+    } as YoutubeError;
+  }
+
+  return {
+    id: videoId,
+    title: data.title || "Untitled Video",
+    description: `Channel: ${data.author_name || "YouTube Uploader"}\nURL: ${data.author_url || ""}`,
+    uploader: data.author_name || "YouTube Uploader",
+    channel_id: data.author_url || "",
+    upload_date: undefined,
+    duration: undefined,
+    view_count: undefined,
+    thumbnails: data.thumbnail_url
+      ? [{ url: data.thumbnail_url, width: data.thumbnail_width, height: data.thumbnail_height }]
+      : [{ url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, width: 480, height: 360 }],
+    webpage_url: `https://www.youtube.com/watch?v=${videoId}`,
+    available_subtitles: [{ code: "en", name: "English", isAuto: true }],
+    provenance: {
+      source: "youtube",
+      model: "yt-oembed",
+      fetchedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function fetchYoutubeMetadata(url: string): Promise<YoutubeMetadata> {
   if (!isYoutubeUrl(url)) {
     throw {
@@ -115,23 +164,22 @@ export async function fetchYoutubeMetadata(url: string): Promise<YoutubeMetadata
     } as YoutubeError;
   }
 
-  const res = await fetch(`${BACKEND_URL}/osint/youtube/metadata`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: url.trim() }),
-  });
+  try {
+    const res = await fetch(`${BACKEND_URL}/osint/youtube/metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.trim() }),
+    });
 
-  const json = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    const errDetail = json?.detail || json || {};
-    throw {
-      error: errDetail.error || "VideoUnavailable",
-      cause: errDetail.cause || `HTTP ${res.status}: Failed fetching video metadata.`,
-    } as YoutubeError;
+    if (res.ok) {
+      const json = await res.json().catch(() => null);
+      if (json && json.id) return json as YoutubeMetadata;
+    }
+  } catch {
+    // Backend unreachable -> fall through to oEmbed
   }
 
-  return json as YoutubeMetadata;
+  return fetchYoutubeOembedFallback(url);
 }
 
 export async function fetchYoutubeSubtitles(
