@@ -79,6 +79,8 @@ function YoutubePage() {
 
   // UI toggle states
   const [showFullDescription, setShowFullDescription] = useState(false);
+  // Click-to-load iframe — prevents browser Tracking Prevention noise on page load
+  const [iframeActivated, setIframeActivated] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -95,6 +97,7 @@ function YoutubePage() {
 
     const targetUrl = urlInput.trim();
     setActiveUrl(targetUrl);
+    setIframeActivated(false); // reset poster on new video
 
     try {
       const data = await serverFetchYoutubeMetadata({ data: { url: targetUrl } });
@@ -215,17 +218,41 @@ function YoutubePage() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             {/* Left Column: Embed Player & Metadata (7 cols) */}
             <div className="space-y-6 lg:col-span-7">
-              {/* Embed Player */}
+              {/* Embed Player — click-to-load to avoid Edge Tracking Prevention noise */}
               <Card className={`${CARD} overflow-hidden p-0`}>
-                <div className="aspect-video w-full bg-black">
-                  <iframe
-                    ref={iframeRef}
-                    title={metadata.title}
-                    src={`https://www.youtube-nocookie.com/embed/${metadata.id}`}
-                    className="size-full border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+                <div className="relative aspect-video w-full bg-black">
+                  {iframeActivated ? (
+                    <iframe
+                      ref={iframeRef}
+                      title={metadata.title}
+                      src={`https://www.youtube-nocookie.com/embed/${metadata.id}?autoplay=1&rel=0`}
+                      className="size-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                    />
+                  ) : (
+                    /* Poster — click activates the iframe, no cross-origin storage touched until user opts in */
+                    <button
+                      type="button"
+                      aria-label="Play video"
+                      onClick={() => setIframeActivated(true)}
+                      className="group relative size-full flex items-center justify-center bg-black cursor-pointer"
+                    >
+                      <img
+                        src={`https://i.ytimg.com/vi/${metadata.id}/maxresdefault.jpg`}
+                        onError={(e) => { (e.target as HTMLImageElement).src = `https://i.ytimg.com/vi/${metadata.id}/hqdefault.jpg`; }}
+                        alt={metadata.title}
+                        className="size-full object-cover opacity-80 group-hover:opacity-60 transition-opacity duration-200"
+                      />
+                      <span className="absolute flex size-16 items-center justify-center rounded-full bg-[#EF4444]/90 shadow-lg ring-2 ring-white/20 transition-transform duration-200 group-hover:scale-110">
+                        <Play className="ml-1 size-7 text-white fill-white" />
+                      </span>
+                      <span className="absolute bottom-3 left-3 rounded bg-black/70 px-2 py-0.5 text-[10px] font-mono text-[#06B6D4] backdrop-blur-sm">
+                        Click to load player
+                      </span>
+                    </button>
+                  )}
                 </div>
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -333,12 +360,25 @@ function YoutubePage() {
                   Download original MP4 artifact (720p) into local storage for keyframe extraction, OCR, and Whisper audio analysis. Each download is audit logged.
                 </p>
 
-                {downloadError && (
-                  <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/10 p-3 text-[#EF4444]">
-                    <span className="font-bold">Download Failed: </span>
-                    {downloadError.cause}
-                  </div>
-                )}
+                {downloadError && (() => {
+                  const isOffline = downloadError.cause?.includes("currently offline");
+                  return isOffline ? (
+                    <div className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-3 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30 text-[9px] uppercase">Backend Offline</Badge>
+                        <span className="text-[10px] text-[#94A3B8]">FastAPI collector not reachable</span>
+                      </div>
+                      <p className="text-[10px] text-[#64748B] font-mono">
+                        Run <span className="text-[#06B6D4]">uvicorn app.main:app --port 8000</span> locally to enable MP4 artifact downloads.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/10 p-3 text-[#EF4444] text-xs">
+                      <span className="font-bold">Download Failed: </span>
+                      {downloadError.cause}
+                    </div>
+                  );
+                })()}
 
                 {downloadResult ? (
                   <div className="space-y-3 rounded border border-[#10B981]/30 bg-[#10B981]/10 p-3">
@@ -360,8 +400,9 @@ function YoutubePage() {
                 ) : (
                   <Button
                     onClick={handleDownload}
-                    disabled={downloading}
-                    className="h-9 w-full rounded bg-[#F59E0B] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#F59E0B]/90"
+                    disabled={downloading || (downloadError?.cause?.includes("currently offline") ?? false)}
+                    title={downloadError?.cause?.includes("currently offline") ? "Start the FastAPI backend to enable downloads" : undefined}
+                    className="h-9 w-full rounded bg-[#F59E0B] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#F59E0B]/90 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {downloading ? (
                       <Loader2 className="mr-2 size-4 animate-spin" />
