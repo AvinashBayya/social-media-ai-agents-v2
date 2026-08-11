@@ -4,3 +4,12 @@ node_modules
 dist
 *.log
 .env*
+
+# Runtime state, never build input. `COPY . .` in the build stage was uploading
+# data/credentials.json — an operator credential store held in cleartext — into
+# the ACR build service on every deploy. The runtime stage copies only .output,
+# so it never reached the published image, but there is no reason to send it.
+# data/social_cache.json* is fabricated records mentioning real individuals and
+# is barred from leaving this machine (DPDP Act 2023) for the same reason
+# .gitignore blocks it.
+data/
