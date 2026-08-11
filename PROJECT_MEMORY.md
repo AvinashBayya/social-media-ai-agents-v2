@@ -8,9 +8,15 @@
 
 ### Current Focus
 
-- **Task:** Module 3 collection integrity — Reddit OAuth migration, Mastodon added, fabricated Meta feed removed (Complete)
+- **Task:** Fabrication sweep + gate repair — last invented outputs removed, `tsc` unblocked, lint made readable (Complete)
 - **Phase:** PS-18 Pre-selection Demo Integrity & Memory Infrastructure
-- **Last Verified:** 2026-08-10 — 438 unit tests passing (`bun test`), export audit clean, `bun run build` green.
+- **Last Verified:** 2026-08-11 — **461 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, export audit clean, `bun run build` green, deployed and smoke-tested as `v15`.
+
+### Deployed state — 2026-08-11
+
+`sentinel-web` runs **`v15`** / revision **`sentinel-web--0000013`** (healthy, 1 replica).
+A snapshot, and one that has gone stale before: CLAUDE.md still said `v13` a day after
+`v14` shipped. Verify against the live app before trusting this line.
 
 ### Live collection status — verified 2026-08-10
 
@@ -28,7 +34,8 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
-- [x] **Container & Azure Deployment Drift Resolution (2026-08-10)**: `sentinel-web` running `v13` from `main` (`sentinel-web--0000011`). Replaced broken v10 auth drift with demo session (`src/utils/demo-session.ts`).
+- [x] **Fabrication sweep + gate repair (2026-08-11)**: Removed the last three fabricated outputs — `osint.tsx`'s invented RSS fallbacks (real outlet names, current timestamps), its six hardcoded Overview cards ("3 repos leak internal endpoints"), and `tasks.tsx`'s synthetic Module 1 probe with its `50` / `0.5` defaults. Also fixed a live `ReferenceError` on the Tasks page, and an entity-key regex covering only U+0900–U+0DFF that silently merged every Urdu entity name into one. `tsc --noEmit` clean for the first time; lint 10,051 → 224 problems (all `no-explicit-any`). New `src/utils/osint-summary.ts` + 21 tests; `fromSocialPost` now refuses a platform the frozen contract does not define rather than remapping it.
+- [x] **Container & Azure Deployment Drift Resolution (2026-08-10)**: Replaced broken v10 auth drift with demo session (`src/utils/demo-session.ts`). Live version has since moved on — see the deployed-state note above.
 - [x] **Data Contract Freeze (2026-08-06)**: Six inter-developer boundary types frozen in `src/types/core.ts` (Article, Post, Entity, Finding, MediaAsset, VideoAsset) + adapters in `src/types/core-adapters.ts`.
 - [x] **Module 1 (Source Credibility)**: Synchronous scoring in `credibility.ts`, 7 PS-18 factors, language marker assessment in `credibility-llm.ts`.
 - [x] **Module 2 (Open-Source Content Analysis)**: Topic clustering, stance detection, entity extraction in `analysis.ts` & `analysis-llm.ts`.
@@ -89,6 +96,8 @@ This registry lists key files and their exported symbols. When adding features, 
 
 - **[llm.ts](file:///d:/social_media_research/src/utils/llm.ts)**: Open-source LLM client speaking OpenAI format.
   - Exports: `chat`, `chatJson`, `summariseText`, `extractEntitiesFrom`, `assessLanguageOf`, `getLlmStats`, `llmStatsSnapshot`, `LlmUnavailableError`.
+- **[osint-summary.ts](file:///d:/social_media_research/src/utils/osint-summary.ts)**: OSINT Overview collection summary, pure half. Lives here rather than in `routes/osint.tsx` because a route file calls `createFileRoute` at module load and so cannot be imported by `bun test` — which is why the hardcoded cards it replaces went uncaught for so long.
+  - Exports: `buildOverviewModules`, `rssEmptyReason`, `formatFeedDate`, `OverviewModule`, `OverviewTone`, `OverviewInput`, `RssCollection`.
 - **[credibility.ts](file:///d:/social_media_research/src/utils/credibility.ts)**: Module 1 deterministic scoring.
   - Exports: `scoreArticle`, `scoreCorpus`, `defaultFactors`, `TIER_SCORES`, `DOMAIN_REPUTATION`.
 - **[credibility-llm.ts](file:///d:/social_media_research/src/utils/credibility-llm.ts)**: Module 1 linguistic factor via LLM.
