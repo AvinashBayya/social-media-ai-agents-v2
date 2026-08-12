@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional, Tuple
 
 import yt_dlp
-from app.config import YT_DOWNLOAD_DIR
+from app.config import YT_DOWNLOAD_DIR, FFMPEG_PATH
 
 # Set up logging for audit trails
 logger = logging.getLogger("osint.youtube")
@@ -312,6 +312,7 @@ class YouTubeClient:
             'quiet': True,
             'no_warnings': True,
             'overwrites': True,
+            'ffmpeg_location': FFMPEG_PATH,
             'extractor_args': {
                 'youtube': {
                     'player_client': ['android', 'ios', 'mweb', 'web']

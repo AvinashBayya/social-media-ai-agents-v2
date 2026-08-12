@@ -143,6 +143,15 @@ function YoutubePage() {
     try {
       const data = await serverDownloadYoutubeVideo({ data: { url: activeUrl, quality: "720p" } });
       setDownloadResult(data);
+      // Trigger browser download via the direct stream URL
+      const anchor = document.createElement("a");
+      anchor.href = data.directUrl;
+      anchor.download = `${data.id}_720p.mp4`;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
     } catch (err: any) {
       setDownloadError(err as YoutubeError);
     } finally {
@@ -276,7 +285,7 @@ function YoutubePage() {
                     <FileText className="size-4 text-[#06B6D4]" /> Video Metadata
                   </h3>
                   <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px]">
-                    Verified yt-dlp
+                    {metadata.provenance.model === "yt-oembed-fallback" ? "oEmbed (partial)" : "Verified ytdl-core"}
                   </Badge>
                 </div>
 
@@ -361,20 +370,14 @@ function YoutubePage() {
                 </p>
 
                 {downloadError && (() => {
-                  const isOffline = downloadError.cause?.includes("currently offline");
-                  return isOffline ? (
-                    <div className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-3 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30 text-[9px] uppercase">Backend Offline</Badge>
-                        <span className="text-[10px] text-[#94A3B8]">FastAPI collector not reachable</span>
-                      </div>
-                      <p className="text-[10px] text-[#64748B] font-mono">
-                        Run <span className="text-[#06B6D4]">uvicorn app.main:app --port 8000</span> locally to enable MP4 artifact downloads.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/10 p-3 text-[#EF4444] text-xs">
-                      <span className="font-bold">Download Failed: </span>
+                  const isBlocked = downloadError.cause?.includes("age-restricted") || downloadError.cause?.includes("region-locked");
+                  return (
+                    <div className={`rounded border p-3 text-xs space-y-1 ${
+                      isBlocked
+                        ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
+                        : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
+                    }`}>
+                      <span className="font-bold">{isBlocked ? "Download Restricted: " : "Download Failed: "}</span>
                       {downloadError.cause}
                     </div>
                   );
@@ -383,25 +386,42 @@ function YoutubePage() {
                 {downloadResult ? (
                   <div className="space-y-3 rounded border border-[#10B981]/30 bg-[#10B981]/10 p-3">
                     <div className="flex items-center gap-2 text-[#10B981] font-bold">
-                      <CheckCircle2 className="size-4" /> Artifact Downloaded Successfully
+                      <CheckCircle2 className="size-4" /> Direct Download URL Retrieved
                     </div>
                     <div className="text-[10px] text-[#94A3B8] space-y-1 font-mono break-all">
-                      <div><span className="text-[#64748B]">Path: </span>{downloadResult.path}</div>
                       <div><span className="text-[#64748B]">Format: </span>{downloadResult.format}</div>
-                      <div><span className="text-[#64748B]">Size: </span>{(downloadResult.filesize ? (downloadResult.filesize / 1024 / 1024).toFixed(2) : "?")} MB</div>
+                      {downloadResult.filesize && (
+                        <div><span className="text-[#64748B]">Size: </span>{(downloadResult.filesize / 1024 / 1024).toFixed(1)} MB</div>
+                      )}
                     </div>
-                    <Button
-                      onClick={() => navigate({ to: "/videos" })}
-                      className="h-8 rounded bg-[#10B981] px-3 text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#10B981]/90"
-                    >
-                      Run Video Analysis →
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => {
+                          const anchor = document.createElement("a");
+                          anchor.href = downloadResult.directUrl;
+                          anchor.download = `${downloadResult.id}_720p.mp4`;
+                          anchor.target = "_blank";
+                          anchor.rel = "noopener noreferrer";
+                          document.body.appendChild(anchor);
+                          anchor.click();
+                          document.body.removeChild(anchor);
+                        }}
+                        className="h-8 flex-1 rounded bg-[#10B981] px-3 text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#10B981]/90"
+                      >
+                        <Download className="mr-1 size-3" /> Save MP4 to Disk
+                      </Button>
+                      <Button
+                        onClick={() => navigate({ to: "/videos" })}
+                        className="h-8 rounded bg-[#263548] px-3 text-[10px] font-bold uppercase tracking-wider text-[#F3F4F6] hover:bg-[#263548]/90"
+                      >
+                        Run Analysis →
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <Button
                     onClick={handleDownload}
-                    disabled={downloading || (downloadError?.cause?.includes("currently offline") ?? false)}
-                    title={downloadError?.cause?.includes("currently offline") ? "Start the FastAPI backend to enable downloads" : undefined}
+                    disabled={downloading}
                     className="h-9 w-full rounded bg-[#F59E0B] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#F59E0B]/90 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {downloading ? (
