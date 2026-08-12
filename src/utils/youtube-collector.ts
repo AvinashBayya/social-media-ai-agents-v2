@@ -89,6 +89,7 @@ export function isYoutubeUrl(url: string): boolean {
       host === "www.youtube.com" ||
       host === "m.youtube.com" ||
       host === "youtu.be" ||
+      host === "shorts.youtube.com" ||
       host.endsWith(".youtube.com")
     );
   } catch {
@@ -98,8 +99,9 @@ export function isYoutubeUrl(url: string): boolean {
 
 export function extractYoutubeId(url: string): string | null {
   if (!url) return null;
+  // Handles: watch?v=ID, youtu.be/ID, /embed/ID, /v/ID, /shorts/ID
   const match = url.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/
+    /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|shorts\/|watch\?v=|watch\?.+&v=))([\w-]{11})/
   );
   return match ? match[1] : null;
 }

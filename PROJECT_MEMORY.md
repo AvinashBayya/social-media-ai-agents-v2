@@ -12,11 +12,30 @@
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
 - **Last Verified:** 2026-08-11 — **470 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **85 core exports verified**, `bun run build` green.
 
-### Deployed state — 2026-08-11
+### Deployed state — 2026-08-12 ✅ LATEST
 
-`sentinel-web` runs **`v20`** / revision **`sentinel-web--0000018`** (healthy, 1 replica).
-A snapshot, and one that has gone stale before: CLAUDE.md still said `v13` a day after
-`v14` shipped. Verify against the live app before trusting this line.
+`sentinel-web` runs **`v22`** / revision **`sentinel-web--0000020`** (healthy, 1 replica).
+**470 JS/TS unit tests passing**, **5 Python unit tests passing**, **`tsc --noEmit` clean**.
+
+#### YouTube Feature Architecture (v21+) — CRITICAL FOR AI TO KNOW
+- **Self-contained**: YouTube feature uses `@distube/ytdl-core` (npm) inside TanStack Start **server functions**.
+- **NO separate FastAPI backend required** for YouTube. The old `localhost:8000` calls are GONE.
+- **Metadata**: `ytdl.getInfo()` → full metadata (title, channel, duration, views, upload_date). Falls back to oEmbed if bot-blocked.
+- **Subtitles**: YouTube timedtext API (3 strategies: auto-caption → manual → ytdl caption tracks).
+- **Download**: `ytdl.filterFormats("videoandaudio")` → direct signed MP4 URL → browser `<a download>` trigger. Max quality = muxed (~360p) since no ffmpeg in runtime container.
+- **Supported URLs**: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `shorts.youtube.com/` — all work.
+- **Key files**: `src/utils/youtube-collector.ts` (all logic), `src/routes/youtube.tsx` (UI).
+- **Data honesty**: typed errors (`VideoUnavailable`, `SubsUnavailable`, `DownloadFailed`) — NEVER fake data.
+
+#### Deployment Commands (run from `d:\social_media_research`)
+```bash
+# Build image
+az acr build --registry sentinelacr4821 --image sentinel-web:vXX --no-logs .
+# Deploy
+az containerapp update -g rg-sentinel-demo -n sentinel-web --image sentinelacr4821.azurecr.io/sentinel-web:vXX
+# Git push
+git add -A && git commit -m "..." && git push origin main
+```
 
 ### Live collection status — verified 2026-08-11
 

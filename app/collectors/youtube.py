@@ -46,7 +46,7 @@ def validate_youtube_url(url: str) -> str:
     if ":" in domain:
         domain = domain.split(":")[0]
         
-    valid_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
+    valid_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com", "shorts.youtube.com"}
     if domain not in valid_hosts and not domain.endswith(".youtube.com"):
         raise VideoUnavailable(f"Invalid URL host '{parsed.netloc}'. Only youtube.com and youtu.be URLs are accepted.")
         
