@@ -53,6 +53,16 @@ import { LlmQuotaCard } from "@/components/llm-quota";
  * it is validated to resolve against one of them.
  */
 
+/**
+ * How many sources are pre-selected for generation.
+ *
+ * Sized against the free tier that actually serves this: Groq allows 8,000
+ * tokens per minute for openai/gpt-oss-120b, and a 45-source context measured
+ * 13,705. Twelve leaves room for the prompt, the reasoning budget these models
+ * spend before answering, and the product itself.
+ */
+export const DEFAULT_SOURCE_BUDGET = 12;
+
 export const Route = createFileRoute("/reports")({
   head: () => ({ meta: [{ title: "Report Generator — Sentinel AI" }] }),
   component: ReportsPage,
@@ -116,7 +126,10 @@ function ReportsPage() {
           id: String(s.id ?? s.primaryLink ?? i),
           title: s.primaryTitle || "",
           source: s.primarySource || "",
-          url: s.primaryLink || s.url || "",
+          // The PUBLISHER, not the aggregator redirect. Ordered the other way
+          // round, every article on a queried corpus resolved to
+          // news.google.com and Module 1 scored the aggregator 35 times.
+          url: s.url || "",
           pubDate: s.pubDate || "",
           body: s.body || "",
         }))
@@ -130,9 +143,15 @@ function ReportsPage() {
       // source into the citation list.
       const geoRecords = (geoRes?.layers ?? []).flatMap((l: any) => l.records ?? []).slice(0, 10);
 
-      setCandidates(
-        renumber([...sourcesFromArticles(corpus, scored), ...sourcesFromGeo(geoRecords)]),
-      );
+      const merged = renumber([
+        ...sourcesFromArticles(corpus, scored),
+        ...sourcesFromGeo(geoRecords),
+      ]);
+      setCandidates(merged);
+      // Pre-exclude past the budget rather than letting generation fail with a
+      // 413 the analyst has no way to act on. Sources arrive ordered by Module 1
+      // credibility, so this keeps the best-scored material and drops the tail.
+      setExcluded(new Set(merged.slice(DEFAULT_SOURCE_BUDGET).map((s) => s.n)));
     } catch (err: any) {
       setCollectError(err?.message ?? String(err));
     } finally {
@@ -144,9 +163,33 @@ function ReportsPage() {
     collect(target);
   }, [target, collect]);
 
+  /*
+   * DEFAULT SOURCE BUDGET.
+   *
+   * Collection routinely returns 45+ sources, and passing them all exceeded the
+   * free tier on every attempt:
+   *
+   *   HTTP 413: Request too large for model openai/gpt-oss-120b
+   *   tokens per minute (TPM): Limit 8000, Requested 13705
+   *
+   * The failure was surfaced honestly - "No product was produced" - but the
+   * page was unusable at its defaults, and the only route to output was for the
+   * analyst to hand-deselect about forty rows without being told why.
+   *
+   * So the first DEFAULT_SOURCE_BUDGET sources are pre-selected. They arrive
+   * ordered by Module 1 credibility, so this keeps the best-scored material and
+   * drops the tail. The analyst can re-include any row; nothing is hidden, and
+   * the count is stated on screen.
+   */
   const selected = useMemo(
     () => renumber(candidates.filter((s) => !excluded.has(s.n))),
     [candidates, excluded],
+  );
+
+  /** Sources beyond the budget that were pre-excluded, so the UI can say so. */
+  const autoTrimmed = useMemo(
+    () => Math.max(0, candidates.length - DEFAULT_SOURCE_BUDGET),
+    [candidates],
   );
 
   const meanCredibility = useMemo(() => {
@@ -292,6 +335,23 @@ function ReportsPage() {
                     ` · mean credibility ${(meanCredibility * 100).toFixed(0)}% (${bandFor(meanCredibility).label})`}
                 </span>
               </div>
+
+              {/*
+                Silent truncation reads as "everything was covered". The trim is
+                a budget decision, not a judgement about the dropped sources, so
+                it says so and points at the control that undoes it.
+              */}
+              {autoTrimmed > 0 && (
+                <p className="mb-2 rounded border border-[#F59E0B]/25 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#94A3B8]">
+                  <span className="font-bold text-[#F59E0B]">
+                    {autoTrimmed} lower-scored source{autoTrimmed === 1 ? "" : "s"} pre-excluded.
+                  </span>{" "}
+                  The configured free tier allows 8,000 tokens per minute, and a full
+                  {` ${candidates.length}`}-source context measured 13,705 — generation failed with
+                  HTTP 413 every time. The highest-credibility {DEFAULT_SOURCE_BUDGET} are selected;
+                  re-include any row below to override.
+                </p>
+              )}
 
               <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
                 <Info className="mt-px size-3 shrink-0" />

@@ -148,7 +148,21 @@ function SourcesPage() {
             id: String(s.primaryLink || s.url || i),
             title: s.primaryTitle || "",
             source: s.primarySource || "",
-            url: s.primaryLink || s.url || "",
+            /*
+             * `s.url` is the PUBLISHER's URL, not the feed link — Module 1 reads
+             * its domain from this field.
+             *
+             * The order here used to be `s.primaryLink || s.url`, and on a
+             * queried corpus every primaryLink is a news.google.com redirect, so
+             * domainOf() returned the aggregator for all 35 articles and
+             * domain_tier scored the same value every time. Securelist, Reuters
+             * and 9to5Google were all rated identically Low.
+             *
+             * An empty string when no publisher was identified: credibility.ts
+             * then skips domain_tier with a stated reason, which is the correct
+             * outcome and is what the engine is built to do.
+             */
+            url: s.url || "",
             pubDate: s.pubDate || "",
             body: s.body || "",
           }))

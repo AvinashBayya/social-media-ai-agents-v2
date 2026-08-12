@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { publisherUrlsFromRss, resolvePublisherUrl } from "@/utils/rss-source";
 import { githubHeaders } from "@/utils/credential-vault";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,7 @@ import {
   corpusTerms,
   detectLanguage,
   sourceKeyOf,
+  stripHtml,
   SAME_STORY_THRESHOLD,
   type Article,
   type StoryCluster,
@@ -195,9 +197,18 @@ interface APIStory {
   /** Snippet/content from the feed. Feeds Module 1's citation_depth factor. */
   body?: string;
   primarySource: string;
+  /** The feed's own link — a Google News redirect on search feeds. For "Open". */
   primaryLink?: string;
-  url?: string;
-  sourceUrl?: string;
+  /**
+   * The PUBLISHER's URL, which is what Module 1 reads its domain from.
+   *
+   * Null when neither the feed's `<source url>` nor the item link identifies a
+   * publisher. It must never fall back to the aggregator link: `domainOf()`
+   * would then return `news.google.com` for every article and domain_tier would
+   * rate the aggregator while reporting it as the publisher's score.
+   */
+  url?: string | null;
+  sourceUrl?: string | null;
   pubDate: string;
   sourceCount: number;
   /** Null until there is an honest basis to compute it. Rendered as "—". */
@@ -339,10 +350,30 @@ export const fetchNews = createServerFn({ method: "GET" })
         ];
       }
 
+      /*
+       * Fetch the XML ourselves and hand the SAME string to rss-parser, so the
+       * raw markup is still available afterwards.
+       *
+       * Google News RSS carries the real publisher in `<source url="...">`, and
+       * rss-parser discards that attribute — a customFields mapping yields only
+       * the element text, and overriding its xml2js options breaks feed
+       * detection outright. Without it every article's URL is a
+       * news.google.com redirect, so Module 1's domain_tier factor scored the
+       * aggregator identically for all 35 articles.
+       */
       const results = await Promise.allSettled(
         feedsToFetch.map(async (feedInfo) => {
-          const feed = await parser.parseURL(feedInfo.url);
-          return { feed, feedInfo };
+          const res = await fetch(feedInfo.url, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; SentinelAI/1.0)" },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) throw new Error(`${feedInfo.source}: HTTP ${res.status}`);
+          const xml = await res.text();
+          const feed = await parser.parseString(xml);
+          // One entry per <item>, in document order, nulls included — so these
+          // index 1:1 against feed.items and cannot shift onto the wrong story.
+          const publisherUrls = publisherUrlsFromRss(xml);
+          return { feed, feedInfo, publisherUrls };
         }),
       );
 
@@ -350,9 +381,10 @@ export const fetchNews = createServerFn({ method: "GET" })
 
       for (const res of results) {
         if (res.status === "fulfilled") {
-          const { feed, feedInfo } = res.value;
+          const { feed, feedInfo, publisherUrls } = res.value;
           const items = feed.items || [];
-          for (const item of items) {
+          for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+            const item = items[itemIndex];
             if (!item.title) continue;
 
             let title = item.title;
@@ -363,7 +395,10 @@ export const fetchNews = createServerFn({ method: "GET" })
               title = title.substring(0, dashIndex).trim();
             }
 
-            const body = `${item.contentSnippet || ""} ${item.content || ""}`;
+            // Markup out at the point of collection too, not only at
+            // tokenisation: `body` is also what Module 1's citation_depth factor
+            // scans for outbound links, and what the LLM summariser is handed.
+            const body = stripHtml(`${item.contentSnippet || ""} ${item.content || ""}`);
 
             // Google already ranked these for the query. Re-check only that the
             // terms are present somewhere (in any order) rather than demanding
@@ -413,6 +448,7 @@ export const fetchNews = createServerFn({ method: "GET" })
             // same story (see the corroboration pass below).
             const sourceType = getSourceType(source);
             const propagandaRisk = getSourcePropagandaRisk(source).risk;
+            const publisherUrl = resolvePublisherUrl(publisherUrls[itemIndex], item.link);
 
             stories.push({
               // Unique within this response. Clustering needs a stable handle on
@@ -423,9 +459,20 @@ export const fetchNews = createServerFn({ method: "GET" })
               // to scan. Without it that factor is permanently skipped.
               body: body.trim(),
               primarySource: source,
+              /*
+               * `primaryLink` stays the feed's own link so "Open" still reaches
+               * the article through Google's redirect.
+               *
+               * `url` is what Module 1 reads its domain from, so it must be the
+               * PUBLISHER — Reuters, Securelist — and never the aggregator.
+               * When neither the feed nor the link identifies a publisher this
+               * is null, and Module 1 skips domain_tier with a stated reason
+               * rather than scoring news.google.com and reporting it as the
+               * publisher's rating.
+               */
               primaryLink: item.link,
-              url: item.link,
-              sourceUrl: item.link,
+              url: publisherUrl,
+              sourceUrl: publisherUrl,
               pubDate: safeIsoDate(item.pubDate),
               // Filled in by the corroboration pass once every story is collected.
               sourceCount: 1,

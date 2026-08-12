@@ -4,6 +4,7 @@ import {
   clusterFor,
   clusterStories,
   corpusTerms,
+  stripHtml,
   detectLanguage,
   domainOf,
   extractKeywords,
@@ -437,5 +438,57 @@ describe("timeline", () => {
     expect(t.brokenBy).toBeNull();
     expect(t.spanMinutes).toBeNull();
     expect(t.summary).toContain("No member");
+  });
+});
+
+describe("stripHtml — markup never becomes a finding", () => {
+  /*
+   * /trends reported these as the corpus's "Dominant terms":
+   *
+   *   google · font · nbsp · 9to5google · com · 6f6f6f · href · blank · color
+   *
+   * Six of the top twenty were HTML artefacts and one was a hex colour, because
+   * the tokeniser stripped punctuation but not tags. The same corpus feeds the
+   * /news term list and Module 1's citation-depth link scan, so one gap degraded
+   * three separate outputs.
+   */
+  test("drops tags, attribute names and attribute values", () => {
+    const out = stripHtml(
+      '<p style="color:#6f6f6f"><a href="https://x.test" target="_blank">Real prose</a></p>',
+    );
+    expect(out).toBe("Real prose");
+    for (const artefact of ["color", "6f6f6f", "href", "blank", "target", "style"]) {
+      expect(out.toLowerCase()).not.toContain(artefact);
+    }
+  });
+
+  test("entities decode to a space, so words do not fuse and 'nbsp' is never a token", () => {
+    expect(stripHtml("Word&nbsp;joined")).toBe("Word joined");
+    expect(stripHtml("a&amp;b")).toBe("a b");
+  });
+
+  test("script and style bodies are removed entirely", () => {
+    expect(stripHtml("<script>var x = 1;</script>Body")).toBe("Body");
+    expect(stripHtml("<style>.a{color:red}</style>Body")).toBe("Body");
+  });
+
+  test("plain prose survives, apart from whitespace collapsing", () => {
+    expect(stripHtml("  Two   spaces  ")).toBe("Two spaces");
+    expect(stripHtml("")).toBe("");
+  });
+
+  test("corpusTerms no longer ranks HTML artefacts", () => {
+    const corpus = Array.from({ length: 4 }, (_, i) => ({
+      id: String(i),
+      title: `Satellite launch report ${i}`,
+      source: `Outlet ${i}`,
+      url: `https://outlet${i}.test/a`,
+      pubDate: "2026-08-01T00:00:00Z",
+      body: '<div style="color:#6f6f6f"><a href="https://x.test" target="_blank">The satellite reached orbit.</a>&nbsp;</div>',
+    }));
+    const terms = corpusTerms(corpus, 20).map((t) => t.term);
+    for (const artefact of ["color", "href", "blank", "nbsp", "div", "6f6f6f"]) {
+      expect(terms).not.toContain(artefact);
+    }
   });
 });

@@ -18,6 +18,40 @@ function NotReported({ what = "not reported" }: { what?: string }) {
   return <span className="italic text-[#64748B]">{what}</span>;
 }
 
+/**
+ * Why a collector panel is showing nothing.
+ *
+ * Three states, never collapsed into one: still running, failed with a cause,
+ * or answered with nothing. The GPS and radiation panels previously rendered a
+ * hardcoded "Loading..." string in ALL THREE cases, so a request that had
+ * already failed with a CORS error looked like one still in flight — forever.
+ */
+function CollectorAbsence({
+  error,
+  loading,
+  emptyLabel,
+}: {
+  error: string | null;
+  loading: boolean;
+  emptyLabel: string;
+}) {
+  if (loading) {
+    return <div className="py-8 text-center text-[#94A3B8]">Collecting…</div>;
+  }
+  if (error) {
+    return (
+      <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-4 text-[10px]">
+        <div className="font-bold uppercase text-[#EF4444]">Collection failed</div>
+        <p className="mt-1 text-[#94A3B8]">
+          This is a collection fault, not a finding that nothing is happening.
+        </p>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[#64748B]">{error}</pre>
+      </div>
+    );
+  }
+  return <div className="py-8 text-center text-[#94A3B8]">{emptyLabel}</div>;
+}
+
 import { createServerFn } from "@tanstack/react-start";
 import { fetchOSINT } from "./news";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
@@ -321,6 +355,41 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     return allPosts;
   });
 
+/**
+ * GPS interference and radiation, as SERVER functions.
+ *
+ * Both collectors used to be imported directly into the browser, unlike every
+ * other collector on this page. The requests were therefore blocked by CORS —
+ * gpsjam.org sends no Access-Control-Allow-Origin at all, and api.safecast.org
+ * sends an invalid one — and both helpers swallowed the failure and returned a
+ * null cache, so the two tabs showed "Loading..." forever with no error and no
+ * end.
+ *
+ * `collector-health.ts` had already been probing both hosts server-side, where
+ * they answer, which is what showed the problem was placement rather than
+ * availability.
+ *
+ * These return a discriminated result rather than throwing across the RPC
+ * boundary, so the UI can render the real upstream cause.
+ */
+export const fetchGpsJamLayer = createServerFn({ method: "GET" }).handler(async () => {
+  try {
+    const { fetchGpsInterference } = await import("@/utils/gps-interference");
+    return { data: await fetchGpsInterference(), error: null as string | null };
+  } catch (err: any) {
+    return { data: null, error: err?.message ?? String(err) };
+  }
+});
+
+export const fetchRadiationLayer = createServerFn({ method: "GET" }).handler(async () => {
+  try {
+    const { fetchRadiationFeed } = await import("@/utils/radiation");
+    return { data: await fetchRadiationFeed(), error: null as string | null };
+  } catch (err: any) {
+    return { data: null, error: err?.message ?? String(err) };
+  }
+});
+
 export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
   .validator((data: { q?: string; query?: string } | undefined) => data)
   .handler(async ({ data }) => {
@@ -357,6 +426,11 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
         }
       } catch (err) {
         console.error("UCDP fetch failed:", err);
+        // Rethrow so the caller can name the cause. Returning [] here rendered
+        // "No conflict events found." for what is usually a 401 - UCDP GED
+        // requires an access token, and a missing credential was being shown to
+        // the analyst as an absence of armed conflict.
+        throw err;
       }
       return [];
     };
@@ -431,15 +505,34 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
       return null;
     };
 
-    const [ucdpEventsList, gdeltStoriesList, openSkyFlightCount] = await Promise.all([
+    // allSettled, not all: each source reports its own outcome. UCDP failing
+    // must not take GDELT down with it, and a UCDP 401 must reach the UI as a
+    // missing credential rather than as an empty conflict picture.
+    const [ucdpSettled, gdeltSettled, openSkySettled] = await Promise.allSettled([
       fetchUcdp(),
       fetchGdelt(),
       fetchOpenSky(),
     ]);
+    const ucdpEventsList = ucdpSettled.status === "fulfilled" ? ucdpSettled.value : [];
+    const ucdpError =
+      ucdpSettled.status === "rejected"
+        ? String(ucdpSettled.reason?.message ?? ucdpSettled.reason)
+        : null;
+    const gdeltStoriesList = gdeltSettled.status === "fulfilled" ? gdeltSettled.value : [];
+    const gdeltError =
+      gdeltSettled.status === "rejected"
+        ? String(gdeltSettled.reason?.message ?? gdeltSettled.reason)
+        : null;
+    const openSkyFlightCount = openSkySettled.status === "fulfilled" ? openSkySettled.value : null;
 
     return {
       ucdpEvents: ucdpEventsList,
+      // Carried so the panel can say WHY it is empty. UCDP GED returns 401
+      // without an access token, and that was rendering as "No conflict events
+      // found." - a missing credential shown to the analyst as a peaceful world.
+      ucdpError,
       gdeltStories: gdeltStoriesList,
+      gdeltError,
       flightCount: openSkyFlightCount,
       // gpsStatus was the fixed string "GPS Jamming High: 14 hotzones active in
       // Baltic / Eastern Europe" and orefAlerts was two hardcoded rocket alerts
@@ -604,6 +697,14 @@ function Page() {
   const [osintProfile, setOsintProfile] = useState<any>(null);
   const [gpsJamData, setGpsJamData] = useState<any | null>(null);
   const [radiationData, setRadiationData] = useState<any | null>(null);
+  // A collector that FAILED and a collector that returned nothing are different
+  // findings. Without these the two panels rendered a permanent "Loading..."
+  // string for a request that had already failed.
+  const [gpsJamError, setGpsJamError] = useState<string | null>(null);
+  const [radiationError, setRadiationError] = useState<string | null>(null);
+  const [cyberError, setCyberError] = useState<string | null>(null);
+  // null = not collected yet; [] = collected and genuinely empty.
+  const [telegramLoadFailed, setTelegramLoadFailed] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -613,27 +714,30 @@ function Page() {
     const loadAllOsintData = async () => {
       setIsLoading(true);
       try {
-        const { fetchGpsInterference } = await import("@/utils/gps-interference");
-        const { fetchRadiationFeed } = await import("@/utils/radiation");
-
         const [profRes, cyberRes, tgRes, geoRes, rssRes, gpsRes, radRes] = await Promise.all([
           fetchOSINT({ data: { query: searchQuery } }).catch(() => null),
-          fetchCyberThreats({ data: { query: searchQuery } }).catch(() => []),
-          fetchTelegramOSINT({ data: { query: searchQuery } }).catch(() => []),
+          fetchCyberThreats({ data: { query: searchQuery } }).catch((e: any) => {
+            setCyberError(e?.message ?? String(e));
+            return [];
+          }),
+          fetchTelegramOSINT({ data: { query: searchQuery } }).catch(() => null),
           fetchGeopoliticalSecurity({ data: { query: searchQuery } }).catch(() => null),
           fetchRSSAggregator({ data: { query: searchQuery } }).catch(() => null),
-          fetchGpsInterference().catch(() => null),
-          fetchRadiationFeed().catch(() => null),
+          fetchGpsJamLayer().catch((e: any) => ({ data: null, error: e?.message ?? String(e) })),
+          fetchRadiationLayer().catch((e: any) => ({ data: null, error: e?.message ?? String(e) })),
         ]);
 
         if (isMounted) {
           if (profRes) setOsintProfile(profRes);
           if (cyberRes) setCyberThreats(cyberRes);
-          if (tgRes) setTelegramPosts(tgRes);
+          setTelegramPosts(tgRes ?? []);
+          setTelegramLoadFailed(tgRes === null);
           if (geoRes) setGeopoliticalData(geoRes);
           if (rssRes) setRssFeeds(rssRes);
-          if (gpsRes) setGpsJamData(gpsRes);
-          if (radRes) setRadiationData(radRes);
+          setGpsJamData(gpsRes?.data ?? null);
+          setGpsJamError(gpsRes?.error ?? null);
+          setRadiationData(radRes?.data ?? null);
+          setRadiationError(radRes?.error ?? null);
         }
       } catch (err) {
         console.error("OSINT loadAllData failed:", err);
@@ -1197,9 +1301,15 @@ function Page() {
                   <RefreshCw className="size-8 animate-spin text-primary" />
                 </div>
               ) : filteredTelegram.length === 0 ? (
-                <div className="text-center py-20 text-xs text-muted-foreground">
-                  No recent Telegram OSINT alerts found.
-                </div>
+                <CollectorAbsence
+                  error={
+                    telegramLoadFailed
+                      ? "The Telegram collector did not return. Channel previews are scraped from t.me and can fail per channel; a failure here is not a finding that the channels were quiet."
+                      : null
+                  }
+                  loading={isLoading}
+                  emptyLabel="Channel previews returned no posts."
+                />
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
                   {filteredTelegram.map((post) => (
@@ -1304,9 +1414,11 @@ function Page() {
                     <RefreshCw className="size-6 animate-spin text-primary" />
                   </div>
                 ) : filteredUcdp.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-muted-foreground">
-                    No conflict events found.
-                  </div>
+                  <CollectorAbsence
+                    error={geopoliticalData?.ucdpError ?? null}
+                    loading={isLoading}
+                    emptyLabel="UCDP answered; no conflict events matched."
+                  />
                 ) : (
                   filteredUcdp.map((event: any, idx: number) => (
                     <div
@@ -1355,9 +1467,11 @@ function Page() {
                     <RefreshCw className="size-6 animate-spin text-primary" />
                   </div>
                 ) : filteredGdelt.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-muted-foreground">
-                    No news reports found.
-                  </div>
+                  <CollectorAbsence
+                    error={geopoliticalData?.gdeltError ?? null}
+                    loading={isLoading}
+                    emptyLabel="GDELT answered; no reports matched."
+                  />
                 ) : (
                   filteredGdelt.map((story: any) => (
                     <div key={story.id} className="border-b pb-2 text-xs space-y-1">
@@ -1596,7 +1710,11 @@ function Page() {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-8 text-[#94A3B8]">Loading GPSJam telemetry...</div>
+                <CollectorAbsence
+                  error={gpsJamError}
+                  loading={isLoading}
+                  emptyLabel="GPSJam answered, but reported no cells with observed interference."
+                />
               )}
             </CardContent>
           </Card>
@@ -1641,9 +1759,11 @@ function Page() {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-8 text-[#94A3B8]">
-                  Loading radiation sensor network data...
-                </div>
+                <CollectorAbsence
+                  error={radiationError}
+                  loading={isLoading}
+                  emptyLabel="Safecast answered, but returned no usable station readings."
+                />
               )}
             </CardContent>
           </Card>

@@ -156,8 +156,15 @@ export interface GeoRecord {
   title: string;
   source: string;
   url: string;
-  /** ISO 8601. Drives the time slider. */
-  timestamp: string;
+  /**
+   * ISO 8601, as the upstream reported it. Drives the time slider.
+   *
+   * Null when the source carried no time. Safecast readings and some feed items
+   * genuinely arrive undated, and the collectors were stamping those with the
+   * moment of collection — which then rendered as "Reported:" and set the
+   * slider's extent from a measurement that never happened.
+   */
+  timestamp: string | null;
   /** Magnitude for marker sizing, or null when nothing measures one. */
   magnitude: number | null;
   magnitudeLabel: string;
@@ -487,19 +494,39 @@ export interface TimeExtent {
   toMs: number;
 }
 
+/**
+ * Milliseconds for a record, or null when it carries no usable time.
+ *
+ * The explicit null check matters: `new Date(null).getTime()` is 0, which is
+ * finite, so an undated record would otherwise be silently dated to 1 Jan 1970
+ * and drag the slider's extent back fifty-six years.
+ */
+function recordTimeMs(record: GeoRecord): number | null {
+  if (!record.timestamp) return null;
+  const t = new Date(record.timestamp).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 /** Earliest and latest timestamps present, or null when nothing is dated. */
 export function timeExtent(records: GeoRecord[]): TimeExtent | null {
-  const times = records
-    .map((r) => new Date(r.timestamp).getTime())
-    .filter((t) => Number.isFinite(t));
+  const times = records.map(recordTimeMs).filter((t): t is number => t !== null);
   if (times.length === 0) return null;
   return { fromMs: Math.min(...times), toMs: Math.max(...times) };
 }
 
+/**
+ * Records inside the window.
+ *
+ * Undated records are KEPT. Excluding them would hide real observations on the
+ * strength of a field the source never supplied, which is the same mistake as
+ * inventing the field — it just fails quiet instead of loud. The record's own
+ * card states that it carries no date.
+ */
 export function filterByTime(records: GeoRecord[], fromMs: number, toMs: number): GeoRecord[] {
   return records.filter((r) => {
-    const t = new Date(r.timestamp).getTime();
-    return Number.isFinite(t) && t >= fromMs && t <= toMs;
+    const t = recordTimeMs(r);
+    if (t === null) return true;
+    return t >= fromMs && t <= toMs;
   });
 }
 

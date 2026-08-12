@@ -71,6 +71,20 @@ export interface SocialPost {
    * detection needs the identity of the thing being amplified.
    */
   links: string[];
+  /**
+   * When THIS system received the post, in ms. Optional and additive.
+   *
+   * Rate and spike detection must count ARRIVALS, not createdAt. createdAt is
+   * author-declared - it comes from the posting client clock, and across 300
+   * sampled live posts it ran a median of 2.8 hours in the past, with 0 of 300
+   * landing within a minute of the browser clock. Bucketing on it let the UI
+   * read "Posts received 2,548" beside "Rate (last 60s) 1/min", and stopped
+   * spike detection firing on live data at all.
+   *
+   * Absent for posts collected before this field existed or pulled by backfill
+   * rather than the live socket; consumers fall back to createdAt.
+   */
+  observedAt?: number;
 }
 
 // ─── 1. Jetstream consumer (browser) ───────────────────────────────────────
@@ -161,7 +175,7 @@ function linksFrom(record: NonNullable<NonNullable<JetstreamEvent["commit"]>["re
   return Array.from(out);
 }
 
-export function eventToPost(evt: JetstreamEvent): SocialPost | null {
+export function eventToPost(evt: JetstreamEvent, now: number = Date.now()): SocialPost | null {
   if (evt?.kind !== "commit") return null;
   const commit = evt.commit;
   if (!commit || commit.operation !== "create" || commit.collection !== POST_COLLECTION)
@@ -185,6 +199,8 @@ export function eventToPost(evt: JetstreamEvent): SocialPost | null {
     url: `https://bsky.app/profile/${did}/post/${commit.rkey}`,
     langs: Array.isArray(record.langs) ? record.langs : [],
     links: linksFrom(record),
+    // Arrival, measured here. now is injectable so this stays pure under test.
+    observedAt: now,
   };
 }
 
@@ -502,6 +518,22 @@ export function assessSpike(buckets: number[]): SpikeAssessment {
  * `now`. Gaps are zeros — a minute with no matches is a real observation of zero,
  * not missing data.
  */
+/**
+ * When we observed a post, in ms, or null when neither basis is usable.
+ *
+ * Prefers observedAt (arrival, measured by us) over createdAt (author-declared,
+ * from the posting client clock). Volume and spike detection are statements
+ * about what THIS system received in a window, so they must be computed on
+ * arrival - bucketing on createdAt scattered live posts hours into the past.
+ */
+export function observationTime(post: SocialPost): number | null {
+  if (typeof post.observedAt === "number" && Number.isFinite(post.observedAt)) {
+    return post.observedAt;
+  }
+  const t = new Date(post.createdAt).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 export function bucketise(
   posts: SocialPost[],
   now: number,
@@ -510,8 +542,8 @@ export function bucketise(
   const buckets = new Array(windowMinutes).fill(0);
   const newestBucket = Math.floor(now / BUCKET_MS);
   for (const p of posts) {
-    const t = new Date(p.createdAt).getTime();
-    if (!Number.isFinite(t)) continue;
+    const t = observationTime(p);
+    if (t === null) continue;
     const idx = windowMinutes - 1 - (newestBucket - Math.floor(t / BUCKET_MS));
     if (idx >= 0 && idx < windowMinutes) buckets[idx] += 1;
   }
@@ -1474,7 +1506,9 @@ export async function fetchMastodonSearch(
 
   // The token is only valid on the instance that issued it, so the credential's
   // own host wins over any instance the caller passed.
-  const host = normaliseHost(cred.identifier ?? "") || normaliseHost(instance ?? "") ||
+  const host =
+    normaliseHost(cred.identifier ?? "") ||
+    normaliseHost(instance ?? "") ||
     MASTODON_DEFAULT_INSTANCE;
 
   const key = `mastodon-search:${host}:${q}:${limit}`;

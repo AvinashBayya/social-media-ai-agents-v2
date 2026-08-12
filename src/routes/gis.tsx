@@ -263,7 +263,7 @@ function GISPage() {
         .on("click", () => setSelected(r))
         .bindPopup(
           `<strong>${r.title.slice(0, 120)}</strong><br/>` +
-            `${r.source} · ${new Date(r.timestamp).toISOString().slice(0, 16).replace("T", " ")}<br/>` +
+            `${r.source} · ${r.timestamp ? new Date(r.timestamp).toISOString().slice(0, 16).replace("T", " ") : "no date reported"}<br/>` +
             `<em>${PRECISION_LABEL[r.precision]} — locates ${r.locates}</em>`,
         );
     }

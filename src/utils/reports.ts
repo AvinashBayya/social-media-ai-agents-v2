@@ -122,6 +122,7 @@ export interface SourceRef {
   title: string;
   outlet: string;
   url: string;
+  /** As the source reported it. Empty string when it reported none. */
   publishedAt: string;
   module: ContributingModule;
   /** Module 1 score, 0-1, or null when the item could not be scored. */
@@ -220,7 +221,9 @@ export function sourcesFromGeo(records: GeoRecord[], startAt = 1): SourceRef[] {
     title: r.title,
     outlet: r.source,
     url: r.url,
-    publishedAt: r.timestamp,
+    // Empty rather than null: a GeoRecord can be undated, and the citation
+    // block renders an empty date as absent.
+    publishedAt: r.timestamp ?? "",
     module: "Module 5 · GIS" as const,
     credibility: r.credibility,
     credibilityRationale: `Geolocated record. Coordinate locates ${r.locates}.`,
@@ -417,6 +420,45 @@ export function validateCitations(body: ProductBody, sources: SourceRef[]): Vali
       }
     }
   };
+
+  /**
+   * A corroboration claim must be backed by DISTINCT cited sources.
+   *
+   * Citation-number validation alone was not enough. Both observed runs produced
+   * judgements like "Corroborated by two sources (both 38% credibility)
+   * reporting the same milestone" and "Multiple sources (3) reporting the same
+   * user milestone… suggesting corroboration" — while citing only [3]. The
+   * numbers were all in range, so validation passed, and the product asserted
+   * corroboration its own source list contradicted.
+   *
+   * Corroboration is the single most load-bearing claim an intelligence product
+   * makes: it is the difference between one outlet's assertion and an
+   * independently supported finding.
+   */
+  const CORROBORATION =
+    /\b(corroborat|multiple sources|several sources|two sources|three sources|both sources|independently confirm)/i;
+
+  const checkCorroboration = (rationale: string, cited: number[], where: string) => {
+    if (!CORROBORATION.test(rationale)) return;
+    const distinct = new Set(cited.filter((n) => valid.has(n)));
+    if (distinct.size >= 2) return;
+    problems.push({
+      where,
+      problem:
+        `claims corroboration ("${rationale.slice(0, 80)}…") but cites ` +
+        `${distinct.size === 0 ? "no valid source" : `only source [${[...distinct][0]}]`}. ` +
+        `A corroboration claim requires at least two distinct cited sources, or ` +
+        `must be restated as a single-source report.`,
+    });
+  };
+
+  body.keyJudgements.forEach((kj, i) =>
+    checkCorroboration(
+      kj.confidenceRationale ?? "",
+      kj.sources,
+      `Key judgement ${i + 1} ("${kj.judgement.slice(0, 60)}…") confidence basis`,
+    ),
+  );
 
   body.keyJudgements.forEach((kj, i) =>
     check(kj.sources, `Key judgement ${i + 1} ("${kj.judgement.slice(0, 60)}…")`),

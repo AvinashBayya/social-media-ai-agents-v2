@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   JetstreamClient,
+  observationTime,
   readMonitor,
   socialReddit,
   socialTelegram,
@@ -173,12 +174,20 @@ function SocialPage() {
   const active = readings.find((r) => r.monitor.id === activeMonitor) ?? null;
   const feed = (active ? active.matches : allPosts).slice(-RENDER_LIMIT).reverse();
 
-  /** Posts received in the last complete minute across the whole stream. */
+  /**
+   * Posts RECEIVED in the last 60 seconds.
+   *
+   * This filtered on `createdAt` — the author's declared time, from their
+   * posting client's clock — which measured a median of 2.8 hours in the past
+   * across 300 sampled live posts. The panel therefore read "Rate (last 60s)
+   * 1/min" while the socket was delivering thousands a minute. It now counts
+   * arrivals, which is what the label already claimed.
+   */
   const observedRate = useMemo(() => {
     const cutoff = now - 60_000;
     return posts.filter((p) => {
-      const t = new Date(p.createdAt).getTime();
-      return Number.isFinite(t) && t >= cutoff;
+      const t = observationTime(p);
+      return t !== null && t >= cutoff;
     }).length;
   }, [posts, now]);
 

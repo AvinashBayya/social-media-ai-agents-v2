@@ -62,42 +62,161 @@ export function groupGpsHexesByRegion(data: GpsJamData): Record<string, GpsJamHe
   return regions;
 }
 
-export async function fetchGpsInterference(
-  endpoint = "https://gpsjam.org/data/latest.json",
-): Promise<GpsJamData | null> {
+/** Parsed CSV row. Exported for tests; no network, no H3 dependency. */
+export interface GpsJamCsvRow {
+  hex: string;
+  good: number;
+  bad: number;
+}
+
+/**
+ * Parse GPSJam's daily CSV.
+ *
+ * Real shape, verified 2026-08-12:
+ *
+ *   hex,count_good_aircraft,count_bad_aircraft
+ *   8400113ffffffff,1,0
+ *
+ * Rows whose counts do not parse are DROPPED rather than defaulted to zero — a
+ * hex with unreadable counts is not a hex where every aircraft reported good
+ * navigation.
+ */
+export function parseGpsJamCsv(csv: string): GpsJamCsvRow[] {
+  if (!csv) return [];
+  const out: GpsJamCsvRow[] = [];
+  for (const line of csv.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.toLowerCase().startsWith("hex,")) continue;
+    const [hex, goodRaw, badRaw] = trimmed.split(",");
+    if (!hex) continue;
+    const good = Number(goodRaw);
+    const bad = Number(badRaw);
+    if (!Number.isFinite(good) || !Number.isFinite(bad)) continue;
+    out.push({ hex, good, bad });
+  }
+  return out;
+}
+
+/** Percentage of aircraft in a cell reporting degraded navigation, or null. */
+export function interferencePct(row: GpsJamCsvRow): number | null {
+  const total = row.good + row.bad;
+  // No aircraft observed means no measurement, NOT 0% interference.
+  if (total <= 0) return null;
+  return (row.bad / total) * 100;
+}
+
+/** GPSJam publishes one file per UTC day, named by date. */
+export function gpsJamUrlForDate(date: Date): string {
+  const iso = date.toISOString().slice(0, 10);
+  return `https://gpsjam.org/data/${iso}-h3_4.csv`;
+}
+
+/**
+ * Raised when the feed cannot be read. Thrown rather than swallowed, so the UI
+ * renders the cause instead of a permanent "Loading…" string.
+ */
+export class GpsJamUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GpsJamUnavailableError";
+  }
+}
+
+/**
+ * Fetch and normalise the GPSJam daily feed.
+ *
+ * THREE THINGS WERE WRONG HERE.
+ *
+ * 1. The endpoint did not exist. `https://gpsjam.org/data/latest.json` returns
+ *    404 — verified directly with curl. GPSJam publishes a CSV per UTC day at
+ *    `/data/<YYYY-MM-DD>-h3_4.csv`, and the current day's file does not appear
+ *    until the day is under way, so this tries today and falls back to
+ *    yesterday, reporting which day it actually read.
+ *
+ * 2. It ran in the BROWSER. Every other collector on /osint is a server
+ *    function; this one was imported client-side, so the request was blocked by
+ *    CORS ("No 'Access-Control-Allow-Origin' header"). It is server-side now,
+ *    where `collector-health.ts` had already proven the host reachable.
+ *
+ * 3. It SWALLOWED failures — `catch { return cachedData }` with `cachedData`
+ *    null, so the page showed "Loading GPSJam telemetry…" forever with no error
+ *    and no end. Failures now throw with the real cause.
+ *
+ * The CSV carries H3 cell indexes and no coordinates, so cells are converted to
+ * their centroid with h3-js (Apache 2.0). A cell that fails to convert is
+ * dropped, never emitted at 0,0 — which is the exact sentinel `toGeoPoint`
+ * exists to reject.
+ */
+export async function fetchGpsInterference(endpoint?: string): Promise<GpsJamData | null> {
   const now = Date.now();
   if (cachedData && now - cachedAt < CACHE_TTL) return cachedData;
 
-  try {
-    const resp = await fetch(endpoint, { signal: AbortSignal.timeout(15_000) });
-    if (!resp.ok) return cachedData;
+  const today = new Date(now);
+  const yesterday = new Date(now - 24 * 60 * 60 * 1000);
+  const candidates = endpoint ? [endpoint] : [gpsJamUrlForDate(today), gpsJamUrlForDate(yesterday)];
 
-    const raw = (await resp.json()) as any;
-    if (!raw || !Array.isArray(raw.hexes)) return cachedData;
+  const failures: string[] = [];
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "SentinelAI/1.0 (+OSINT demonstrator)" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!resp.ok) {
+        failures.push(`${url} -> HTTP ${resp.status}`);
+        continue;
+      }
+      const csv = await resp.text();
+      const rows = parseGpsJamCsv(csv);
+      if (rows.length === 0) {
+        failures.push(`${url} -> parsed 0 rows`);
+        continue;
+      }
 
-    const hexes: GpsJamHex[] = raw.hexes.map((h: any) => ({
-      h3: String(h.h3 ?? h.id ?? ""),
-      lat: Number(h.lat ?? 0),
-      lon: Number(h.lon ?? 0),
-      level: h.level === "high" ? "high" : "medium",
-      pct: Number.isFinite(h.pct) ? Number(h.pct) : 0,
-      affectedAircraft: Number.isFinite(h.affectedAircraft) ? Number(h.affectedAircraft) : 0,
-      totalAircraft: Number.isFinite(h.totalAircraft) ? Number(h.totalAircraft) : 0,
-    }));
+      const { cellToLatLng } = await import("h3-js");
+      const hexes: GpsJamHex[] = [];
+      for (const row of rows) {
+        const pct = interferencePct(row);
+        // Only cells with observed interference are worth plotting, and a cell
+        // with no aircraft observed carries no measurement at all.
+        if (pct === null || row.bad === 0) continue;
+        let lat: number;
+        let lon: number;
+        try {
+          [lat, lon] = cellToLatLng(row.hex);
+        } catch {
+          continue; // Unconvertible cell: dropped, never emitted at 0,0.
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        hexes.push({
+          h3: row.hex,
+          lat,
+          lon,
+          level: pct >= 25 ? "high" : "medium",
+          pct,
+          affectedAircraft: row.bad,
+          totalAircraft: row.good + row.bad,
+        });
+      }
 
-    cachedData = {
-      fetchedAt: new Date().toISOString(),
-      source: "GPSJam ADS-B Exchange Feed",
-      stats: {
-        totalHexes: hexes.length,
-        highCount: hexes.filter((h) => h.level === "high").length,
-        mediumCount: hexes.filter((h) => h.level === "medium").length,
-      },
-      hexes,
-    };
-    cachedAt = now;
-    return cachedData;
-  } catch {
-    return cachedData;
+      hexes.sort((a, b) => b.pct - a.pct);
+
+      cachedData = {
+        fetchedAt: new Date().toISOString(),
+        source: `GPSJam daily aggregate (${url.split("/").pop()})`,
+        stats: {
+          totalHexes: hexes.length,
+          highCount: hexes.filter((h) => h.level === "high").length,
+          mediumCount: hexes.filter((h) => h.level === "medium").length,
+        },
+        hexes,
+      };
+      cachedAt = now;
+      return cachedData;
+    } catch (err: any) {
+      failures.push(`${url} -> ${err?.message ?? String(err)}`);
+    }
   }
+
+  throw new GpsJamUnavailableError(`GPSJam feed could not be read. Tried: ${failures.join("; ")}`);
 }

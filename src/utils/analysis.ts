@@ -319,9 +319,39 @@ export interface Keyword {
   documentCount: number;
 }
 
+/**
+ * Strip HTML markup before any text analysis.
+ *
+ * RSS `content` fields ship markup, and the old tokeniser only removed
+ * punctuation — so tag names, attribute names and attribute VALUES survived as
+ * words. The observed "Dominant terms" on /trends were:
+ *
+ *     google · font · nbsp · 9to5google · com · 6f6f6f · href · blank · color
+ *
+ * Six of the top twenty were HTML artefacts and one was a hex colour. The same
+ * corpus feeds the /news term list and Module 1's citation-depth link scan, so
+ * this one gap degraded three separate outputs.
+ *
+ * Entities are decoded to a SPACE, not to their character: `&nbsp;` glued
+ * neighbouring words together and then tokenised as the word "nbsp".
+ */
+export function stripHtml(value: string): string {
+  if (!value) return "";
+  return (
+    value
+      // Script and style bodies are not prose at any point.
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&(?:nbsp|amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
 /** Tokens for TF-IDF: title plus body, same normalisation as titles. */
 function contentTokens(article: Article): string[] {
-  return `${article.title ?? ""} ${article.body ?? ""}`
+  return stripHtml(`${article.title ?? ""} ${article.body ?? ""}`)
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)

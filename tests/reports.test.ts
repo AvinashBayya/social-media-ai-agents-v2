@@ -177,6 +177,79 @@ describe("citation validation", () => {
     expect(validateCitations(BODY, SOURCES)).toEqual([]);
   });
 
+  /*
+   * Citation-number validation alone let a false corroboration claim through.
+   * Both observed generation runs produced a judgement whose confidence basis
+   * asserted corroboration — "Corroborated by two sources (both 38%
+   * credibility)" — while citing only [3]. Every number was in range, so the
+   * check passed, and the finished product asserted corroboration its own
+   * source list contradicted.
+   */
+  test("a corroboration claim citing one source is rejected", () => {
+    const bad: ProductBody = {
+      ...BODY,
+      keyJudgements: [
+        {
+          judgement: "The test took place.",
+          confidence: "moderate",
+          confidenceRationale: "Corroborated by two sources reporting the same milestone.",
+          sources: [1],
+        },
+      ],
+    };
+    const problems = validateCitations(bad, SOURCES);
+    expect(problems.length).toBe(1);
+    expect(problems[0].problem).toContain("claims corroboration");
+    expect(problems[0].problem).toContain("only source [1]");
+  });
+
+  test("the same claim backed by two distinct sources passes", () => {
+    const good: ProductBody = {
+      ...BODY,
+      keyJudgements: [
+        {
+          judgement: "The test took place.",
+          confidence: "moderate",
+          confidenceRationale: "Corroborated by two sources reporting the same milestone.",
+          sources: [1, 2],
+        },
+      ],
+    };
+    expect(validateCitations(good, SOURCES)).toEqual([]);
+  });
+
+  test("a single-source judgement that claims no corroboration is untouched", () => {
+    const fine: ProductBody = {
+      ...BODY,
+      keyJudgements: [
+        {
+          judgement: "The test took place.",
+          confidence: "low",
+          confidenceRationale: "A single outlet reported this and nothing else carries it.",
+          sources: [1],
+        },
+      ],
+    };
+    expect(validateCitations(fine, SOURCES)).toEqual([]);
+  });
+
+  test("repeating the same source number twice is not corroboration", () => {
+    const bad: ProductBody = {
+      ...BODY,
+      keyJudgements: [
+        {
+          judgement: "The test took place.",
+          confidence: "high",
+          confidenceRationale: "Multiple sources independently confirm the event.",
+          sources: [2, 2],
+        },
+      ],
+    };
+    const problems = validateCitations(bad, SOURCES);
+    expect(problems.length).toBe(1);
+    expect(problems[0].problem).toContain("only source [2]");
+  });
+
   test("a citation outside the supplied range is rejected", () => {
     // The failure mode the check exists for: a model citing [7] when six
     // sources were supplied is a fabricated attribution.
