@@ -50,6 +50,16 @@ interface EvidenceItem {
   /** Null for manually-entered records where no file was supplied. */
   fileSize?: string | null;
   previewUrl?: string;
+  /**
+   * True for the demonstration records seeded on first load.
+   *
+   * The SampleDataBanner labels the VIEW, not the RECORDS. Once a real upload
+   * was unshifted onto the same array, the seeded items and analyst evidence
+   * were separable only by eyeballing the id or source string - and they sit in
+   * the same localStorage key. A flag on the record itself survives into
+   * storage, into anything pinned to a case, and into an export.
+   */
+  seeded?: true;
 }
 
 const DEFAULT_EVIDENCE: EvidenceItem[] = [
@@ -59,13 +69,15 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     type: "Image",
     timestamp: "2026-07-24 09:31:02 UTC",
     source: "Telegram · channel_9821",
-    hash: "8f7c22a1b90dbf539e6a9f43003058ef51ef404e3415c9a01e3b6a95f9c46ee0",
+    // Seeded record: no file was ever hashed, so there is no digest.
+    hash: null,
     geo: "35.6892° N, 51.3890° E",
     entities: ["Vector-17", "Drone"],
     caseId: "INV-2041",
-    risk: 85,
+    risk: null,
     tags: ["surveillance", "exif", "dossier"],
     fileSize: "4.2 MB",
+    seeded: true,
   },
   {
     id: "EVID-0405",
@@ -73,13 +85,15 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     type: "PDF",
     timestamp: "2026-07-24 08:58:14 UTC",
     source: "Anonfiles leak link",
-    hash: "3c98f821d0a5e8ef492c10b7a8123ef9c4e2098d7ac210bc94e3cd9081e289df",
+    // Seeded record: no file was ever hashed, so there is no digest.
+    hash: null,
     geo: "Global / Tor Network",
     entities: ["Vector-17", "Fintech vendor"],
     caseId: "INV-2041",
-    risk: 72,
+    risk: null,
     tags: ["confidential", "memo", "leak"],
     fileSize: "1.8 MB",
+    seeded: true,
   },
   {
     id: "EVID-0391",
@@ -87,15 +101,35 @@ const DEFAULT_EVIDENCE: EvidenceItem[] = [
     type: "Social",
     timestamp: "2026-07-23 14:12:00 UTC",
     source: "Twitter feed watch",
-    hash: "f4a9b8219c0de82ff492cb10b8923ef89c4e21a7dfcc210ab94e2cd9081e289aa",
+    // Seeded record: no file was ever hashed, so there is no digest.
+    //
+    // The literal that stood here was 66 hex characters — not a SHA-256 at all,
+    // which no reader would ever have noticed. That is the argument against
+    // fabricating this field in particular: the digest is the one value this
+    // page exists to guarantee, and an invented one is unfalsifiable by eye.
+    hash: null,
     geo: "United States",
     entities: ["CIB cluster", "Election narrative"],
     caseId: "INV-2038",
-    risk: 61,
+    risk: null,
     tags: ["social", "cib", "disinfo"],
     fileSize: "245 KB",
+    seeded: true,
   },
 ];
+
+/**
+ * Human file size that does not round small files to "0.0 MB".
+ *
+ * Every file under about 50 KB displayed as "0.0 MB", which reads as an empty
+ * or failed upload.
+ */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 function VaultPage() {
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
@@ -195,7 +229,25 @@ function VaultPage() {
       return;
     }
 
-    addFileEvidence(file.name, type, `${(file.size / 1024 / 1024).toFixed(1)} MB`, hash);
+    addFileEvidence(file.name, type, formatBytes(file.size), hash);
+  };
+
+  /** Serialise one evidence record to a file the analyst can keep. */
+  const exportRecord = (item: EvidenceItem) => {
+    try {
+      const blob = new Blob([JSON.stringify(item, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${item.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${item.id}.`);
+    } catch (err: any) {
+      toast.error(`Export failed: ${err?.message ?? err}`);
+    }
   };
 
   const addFileEvidence = (
@@ -293,9 +345,9 @@ function VaultPage() {
     <AppShell>
       <PageHeader
         title="Evidence Vault"
-        description="Tamper-proof cryptographic evidence locker. Pin files, documents, and media telemetry directly to active investigations."
+        description="Files dropped here are hashed with SHA-256 in your browser and the digest is recorded. The bytes are not stored, and this is not tamper-proof storage - records live in this browser only."
       />
-      <SampleDataBanner detail="Seeded evidence records; uploaded files are hashed for real." />
+      <SampleDataBanner detail="Records badged SEEDED are demonstration entries that carry no digest - no file was ever hashed for them. Anything you drop in is hashed for real." />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-[#94A3B8]">
         {/* Main Vault Workspace */}
@@ -343,6 +395,64 @@ function VaultPage() {
               </div>
             </div>
           </div>
+
+          {/*
+            MANUAL ENTRY was unreachable dead code. handleFormSubmit had no call
+            site, a DOM query on the hydrated page found ZERO form elements in
+            main, and setUploadGeo was never called anywhere - so geo was
+            permanently "Global" on every record, and the only way to add
+            evidence at all was drag-and-drop.
+
+            It is wired now, and it states plainly that a record with no file
+            carries no digest. That distinction is the whole point of the page:
+            a hashed record attests to specific bytes, a manual note does not.
+          */}
+          <form
+            onSubmit={handleFormSubmit}
+            className="space-y-2 rounded border border-[#263548] bg-[#111827] p-3"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-white">
+                Record without a file
+              </h3>
+              <span className="text-[9px] text-[#64748B]">No file = no SHA-256</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <input
+                type="text"
+                value={uploadTitle}
+                onChange={(e) => setUploadTitle(e.target.value)}
+                placeholder="Title, e.g. Observed channel post"
+                aria-label="Evidence title"
+                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-white"
+              />
+              <select
+                value={uploadType}
+                onChange={(e) => setUploadType(e.target.value)}
+                aria-label="Evidence type"
+                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-[#06B6D4]"
+              >
+                <option value="Image">Image</option>
+                <option value="PDF">PDF</option>
+                <option value="Social">Social</option>
+                <option value="Note">Note</option>
+              </select>
+              <input
+                type="text"
+                value={uploadGeo}
+                onChange={(e) => setUploadGeo(e.target.value)}
+                placeholder="Location, if known"
+                aria-label="Location"
+                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-white"
+              />
+            </div>
+            <Button
+              type="submit"
+              className="h-6 bg-[#263548] px-3 font-mono text-[9px] uppercase tracking-wider text-white hover:bg-[#3B82F6]"
+            >
+              Add record
+            </Button>
+          </form>
 
           {/* Filtering and search console */}
           <div className="flex flex-wrap gap-2 items-center justify-between border-b border-[#263548]/40 pb-3">
@@ -410,7 +520,12 @@ function VaultPage() {
                         <span className="font-bold text-[#06B6D4] flex items-center gap-1">
                           <IconComponent className="size-3" /> {item.id}
                         </span>
-                        <span>{item.fileSize || "N/A"}</span>
+                        <span>{item.fileSize || "no file"}</span>
+                        {item.seeded && (
+                          <Badge className="ml-1 h-4 rounded-none border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[8px] text-[#F59E0B]">
+                            SEEDED
+                          </Badge>
+                        )}
                       </div>
                       <h4 className="font-semibold text-white text-[11px] line-clamp-1">
                         {item.title}
@@ -506,9 +621,27 @@ function VaultPage() {
                   </div>
 
                   <div className="pt-3 border-t border-[#263548]/30 mt-auto">
-                    <Button className="w-full h-8 bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white font-mono text-[9px] uppercase tracking-wider gap-1.5">
-                      <Download className="size-3.5" /> Download Checked Payload
+                    {/*
+                      This button had NO onClick at all - confirmed by reading
+                      the React props off the live DOM node, which returned
+                      onClick: undefined. Clicking it produced no download, no
+                      navigation and no error.
+
+                      "Download Checked Payload" also could not have worked as
+                      named: the vault stores metadata and a digest in
+                      localStorage, never the file bytes. So the honest control
+                      exports the RECORD, and says so.
+                    */}
+                    <Button
+                      onClick={() => exportRecord(selectedItem)}
+                      className="h-8 w-full gap-1.5 bg-[#3B82F6] font-mono text-[9px] uppercase tracking-wider text-white hover:bg-[#3B82F6]/90"
+                    >
+                      <Download className="size-3.5" /> Export record (JSON)
                     </Button>
+                    <p className="mt-2 text-[9px] leading-relaxed text-[#64748B]">
+                      Exports this record and its SHA-256. The original file is not held by this
+                      system, so it cannot be re-downloaded from here.
+                    </p>
                   </div>
                 </div>
               ) : (
