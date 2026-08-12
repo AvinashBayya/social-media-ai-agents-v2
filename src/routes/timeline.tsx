@@ -68,7 +68,7 @@ function TimelinePage() {
     <AppShell>
       <PageHeader
         title="Timeline Explorer"
-        description="A chronological view of alerts, dynamic evidence compilation, and case history logs."
+        description="Case openings and pinned evidence in time order, built from your own cases. No alerts appear here: nothing in this system alerts on a schedule."
       />
       <Card className="bg-[#111827] border-[#263548] rounded">
         <CardContent className="p-6 font-mono text-xs text-[#94A3B8]">

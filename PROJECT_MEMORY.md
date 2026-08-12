@@ -10,7 +10,7 @@
 
 - **Task:** Browser-audit remediation — Phases 1, 2 and 4 complete; Phase 3 asset bundling and Phase 5 repeatability outstanding
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-12 — **567 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **123 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
+- **Last Verified:** 2026-08-12 — **625 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **151 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
 
 ### Deployed state — 2026-08-12 ✅ LATEST
 
@@ -75,6 +75,7 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **Collection-policy model + media ingestion + manual capture (2026-08-12)**: Implemented the ingestion-legality matrix across Module 3. `PLATFORM_NOTES.available` was a **boolean**, rendered as a green "collected" / red "unavailable" badge, which could not express "YouTube text yes, frames no" (so YouTube had no row at all), could not express "Meta not automated but an analyst may capture", and gave a ToS prohibition and a missing free tier the same red badge. New `src/utils/collection-policy.ts` adds four modes (`automated` / `partial` / `manual-only` / `none`), five legal bases, and the ingestion route per source; `policyId` links each platform note to its row, additively — `available` is untouched because three test files assert on it. **Media ingestion closed** for Bluesky, Reddit, Telegram and Mastodon (`SocialPost.media`, five extractors), with an Analyse hand-off into Module 4 via a new validated `?url=` param on `/images`. **Manual capture path** added for Meta (`manual-evidence.ts` + `components/manual-capture-panel.tsx`), writing to the same `sentinel_evidence` store `/vault` reads. **YouTube comments** added via the official Data API v3, behind a new `youtube` vault provider with a live verification probe. **625 unit tests passing** (+58), **`tsc --noEmit` clean**, **151 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see below.
 - [x] **Browser-audit remediation, Phases 1, 2 and 4 (2026-08-12)**: Six agents drove all 31 routes in real Chrome, clicking every control on a fresh page load. The finding: the analytical core is sound and the presentation layer was not.
 
   **Phase 1 — `0ab3d44`, fabrication removal.** Verified absent from the SERVED HTML, not just the source. `/live` was discarding real article text and substituting invented Spanish, French and Hindi prose attributed to El Pais, Le Monde and Dainik Jagran — the code comment read "Simulating different languages based on index" — with platform, handle, location and credibility all manufactured from the array index, so Google News RSS rendered as X/Twitter posts while `/social` correctly declared X uncollectable. `/osint` carried five WHOIS/DNS literals ("GoDaddy", nameservers, an A record), a hardcoded "Aggregate confidence 74/100" sitting beneath six genuinely-derived counts, `status || "online"` rendering an unmeasured indicator as a live C2 beside a pulsing green dot, and `return 4290` as the unconditional OpenSky error value. `/agents` fed three hardcoded Jerusalem coordinates into the focal-point detector and printed the result as convergence analysis. `/tasks` badged all five modules "Nominal / Verified" on a compliance console, including two the same page's self-test called NOT IMPLEMENTED. **`<Toaster />` was never mounted**, so all 30 `toast.*` call sites were silent — including the vault path that rejects evidence when SubtleCrypto is unavailable, which failed invisibly.
@@ -118,6 +119,60 @@ Both were found while wiring the vault and both silently disabled a safety net.
    `_getMetadata` / `_getSubtitles` / `_getDownloadUrl`. A permanently red gate is worse
    than no gate: a real deletion would have hidden among those three. Registry corrected;
    the audit now passes at 113 symbols.
+
+### Collection policy — the ingestion-legality matrix (2026-08-12) — READ BEFORE ADDING A COLLECTOR
+
+`src/utils/collection-policy.ts` is the single source for **what may be collected, on what basis,
+and by what route**. It supplements `PLATFORM_NOTES` (which answers "does this deployment collect
+it"); the two answer different questions and both are needed.
+
+| Source | Mode | Basis | How content gets in |
+| --- | --- | --- | --- |
+| Instagram, Facebook | `manual-only` | Platform ToS + DPDP Act 2023 | Analyst captures a public post and attests to it |
+| YouTube | `partial` | Official API + ToS | API for metadata/comments/captions; **frames only via analyst-initiated download** |
+| News (RSS), GDELT, HN | `automated` | Syndication by design | Already automated |
+| Reddit, Telegram, Bluesky, Mastodon | `automated` | Official/public APIs | Text and **media URLs** |
+| X / Twitter | `none` | No free tier | Nothing automatic — a commercial limit, not a legal one |
+
+- **`allowsAutomatedCollection()` returns `false` for an unknown source.** Absence of a policy is a
+  gap to close, never a licence. Do not invert this.
+- **Media is collected as URLs, never bytes.** Re-hosting is redistribution, and under the DPDP Act
+  these are images of identifiable people. Bytes are fetched only when an analyst sends one asset to
+  Module 4.
+- **`SocialPost.media` — `undefined` means NOT COLLECTED, `[]` means collected-and-none.** Load
+  bearing. A contract-sourced post leaves it `undefined`; see `CONTRACT_MEDIA_LIMITATION` in
+  `core-adapters.ts` for why the frozen `Post` is not gaining a media field.
+- **Manual captures are `AttestedCapture`, never `SocialPost`.** Fixed marker
+  `provenance: "analyst-attested-capture"`, mandatory source URL / capturer / capture time, and they
+  must never be counted in volume, rate or coordination signals. This is the exact distinction v1's
+  `agent_scraper.py` collapsed when it wrote fabricated Instagram posts into the real collectors'
+  cache.
+
+**Payload shapes verified live 2026-08-12 — two do not match the documentation:**
+
+- **Bluesky ships `app.bsky.embed.gallery`** (up to 10 images) whose fields are `items[].thumbnail`,
+  *not* the `images[].thumb` of the older `images` embed. An extractor written from the documented
+  shape silently drops every carousel post. Also note the raw Jetstream record stores blobs as CIDs
+  (compose `cdn.bsky.app/img/feed_fullsize/plain/{did}/{cid}` — verified HTTP 200 image/webp) while
+  the AppView returns resolved URLs; both paths exist and must not be merged.
+- **A t.me page carries ~85 `background-image` declarations of which ~4 are post photos** — the rest
+  are avatars and emoji. The selectors are class-scoped to `tgme_widget_message_photo_wrap` and
+  `tgme_widget_message_video_thumb`; an unscoped regex reports a channel avatar as evidence.
+- **Reddit's shape is the one NOT verified live** (no OAuth credential in this environment). Its
+  fixture is hand-built. Confirm against a real response once a script app is registered.
+
+### Two more pre-existing defects fixed on 2026-08-12
+
+1. **Telegram posts were misattributed.** `fetchTelegramChannel` scanned the page three times into
+   parallel `ids` / `texts` / `times` arrays and zipped them by index. Any message without a text
+   block — i.e. every photo-only post — shifted all later text up one slot, so a channel posting
+   `[text A][photo][text B]` rendered post 2 carrying **text B** under the photo's id, URL and
+   timestamp. Confirmed live on `t.me/s/durov`, where `durov/522` is media-only. Replaced with
+   `splitTelegramMessages` (slices on `data-post="` boundaries) + `telegramBlockToPost`, so every
+   field of a message stays together — which is also the only way media can attach to the right post.
+2. **`/images` had no `validateSearch`.** The new Analyse hand-off would have navigated and done
+   nothing. Added, and it rejects anything that is not an absolute `http(s)` URL, so a crafted
+   `javascript:` or `data:` param cannot reach the fetch.
 
 ### Pending Backlog / Roadmap
 
@@ -173,7 +228,8 @@ This registry lists key files and their exported symbols. When adding features, 
 ### Core Types & Seams (`src/types/`)
 
 - **[core.ts](file:///d:/social_media_research/src/types/core.ts)**: Frozen boundary contracts (`ArticleSchema`, `PostSchema`, `EntitySchema`, `FindingSchema`, `MediaAssetSchema`, `VideoAssetSchema`, `ContractViolationError`, `parseMany`).
-- **[core-adapters.ts](file:///d:/social_media_research/src/types/core-adapters.ts)**: Seam adapters (`toAnalysisArticle`, `fromAnalysisArticle`, `toSocialPost`, `fromSocialPost`, `toGeoPoint`, `PostDegradation`).
+- **[core-adapters.ts](file:///d:/social_media_research/src/types/core-adapters.ts)**: Seam adapters (`toAnalysisArticle`, `fromAnalysisArticle`, `toSocialPost`, `fromSocialPost`, `toGeoPoint`, `PostDegradation`, `CONTRACT_MEDIA_LIMITATION`).
+  - `degraded[]` means "the producer could have supplied this and did not", which is why a fully populated fixture must report **zero** entries. Media is deliberately NOT in that list — the frozen `Post` has no media field, so no producer can ever supply it; flagging it per post would make the list describe the seam rather than the record. It is stated once as `CONTRACT_MEDIA_LIMITATION`.
 
 ### Intelligence & LLM Layer (`src/utils/`)
 
@@ -189,8 +245,16 @@ This registry lists key files and their exported symbols. When adding features, 
   - Exports: `CREDENTIAL_PROVIDERS`, `CredentialVaultError`, `STATUS_LABELS`, `providerById`, `normaliseStatus`, `normaliseEntry`, `normaliseVault`, `maskSecret`, `secretTail`, `redactEntry`, `redactVault`, `normaliseHost`, `readVault`, `writeVault`, `resolveCredential`, `recordCredentialUse`, `verifyProviderCredential`, `buildCapabilityMatrix`, `githubHeaders`, plus the server functions `listCredentialProviders`, `listCredentials`, `addCredential`, `deleteCredential`, `revealCredential`, `verifyCredential`, `capabilityMatrix`.
   - `writeVault` replaces the **whole** file, so a stale client (an old tab, a page loaded before another was edited) can submit a vault that drops entries it never knew about. It therefore copies the previous generation to `data/credentials.prev.json` before each overwrite — ignored by `.gitignore` and covered by `.dockerignore`'s wholesale `data/` rule. **If a credential disappears from `/settings`, look there first.**
   - **Do not re-add an Instagram or Facebook collector behind these entries.** The bottom of the file records exactly what v1's `agent_scraper.py` / `agent-scraper.js` did with these same rows — instaloader login, then a Google-News-RSS fallback relabelled as Meta posts, then hardcoded posts with 842 and 420 likes. That decision is settled.
+- **[collection-policy.ts](file:///d:/social_media_research/src/utils/collection-policy.ts)**: The ingestion-legality matrix — see the dedicated section above. Answers "may this be collected, on what basis, by what route"; `PLATFORM_NOTES` answers "does this deployment collect it". **`allowsAutomatedCollection()` returns `false` for an unknown source — absence of a policy is a gap, not a licence.**
+  - Exports: `COLLECTION_POLICIES`, `MODE_LABELS`, `BASIS_LABELS`, `BASIS_DETAIL`, `policyFor`, `policyById`, `allowsAutomatedCollection`, `policySummary`, `CollectionMode`, `LegalBasis`, `CollectionPolicy`.
+- **[manual-evidence.ts](file:///d:/social_media_research/src/utils/manual-evidence.ts)**: Analyst-attested capture — the ONLY route by which Instagram/Facebook content enters. Deliberately **not** a `SocialPost` and **not** a contract `Post`: a collected post is an observation, a screenshot is an observation of a screen whose source is the analyst. Crosses to Dev 1 as a `MediaAsset` with `source: "analyst upload — <url>"`, so `PlatformSchema` never has to widen.
+  - Exports: `AttestationError`, `CAPTURE_PLATFORM_LABELS`, `CAPTURE_CAVEATS`, `ATTRIBUTION_LIMITATION`, `isPublicPostUrl`, `buildAttestedCapture`, `attestedCaptureToMediaAsset`, `AttestedCapture`, `CapturePlatform`.
+  - `attestedCaptureToMediaAsset` **throws** when `phash` is null rather than inventing one — a synthesised perceptual hash matches nothing, which renders as "no near-duplicates found", a finding from a value never measured.
+- **[evidence.ts](file:///d:/social_media_research/src/utils/evidence.ts)**: `sha256OfFile` extracted from `routes/vault.tsx` so the vault and the capture panel hash identically. Refuses rather than falling back when SubtleCrypto is unavailable — this digest was once 64 random hex characters.
+  - Exports: `EvidenceIntegrityError`, `sha256OfFile`, `bytesToHex`, `isSha256`, `HASH_MEANING`.
 - **[social.ts](file:///d:/social_media_research/src/utils/social.ts)**: Module 3 collection & monitors.
-  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resolveRedditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchBlueskySearch`, `resetBlueskySession`, `fetchMastodonTag`, `mastodonStatusToPost`, `fetchMastodonSearch`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialBlueskySearch`, `socialMastodonSearch`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`.
+  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resolveRedditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchBlueskySearch`, `resetBlueskySession`, `fetchMastodonTag`, `mastodonStatusToPost`, `fetchMastodonSearch`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialBlueskySearch`, `socialMastodonSearch`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`, `blueskyMediaFromRecord`, `blueskyMediaFromView`, `redditMediaFrom`, `telegramMediaFrom`, `mastodonMediaFrom`, `splitTelegramMessages`, `telegramBlockToPost`, `SocialMedia`.
+  - **`SocialPost.media`: `undefined` = NOT COLLECTED, `[]` = collected and none.** Load bearing; do not collapse. Media is collected as **URLs only, never bytes** — re-hosting is redistribution and these are images of identifiable people under the DPDP Act.
   - `redditCredentials()` stays **synchronous and env-only** — call sites depend on that and its tests pin it. `resolveRedditCredentials()` is the async superset the collector uses, which also reads the vault.
   - **Removed 2026-08-10 (deliberate, not a regression):** `socialCache`. It read `data/social_cache.json`, whose only writers were `scripts/agent-scraper.js` and `scripts/agent_scraper.py` — both fabricated Instagram/Facebook posts with `Math.random()` engagement counts. All 128 records were invented. Both scripts and the reader are deleted; do not restore them (see §4 rule 2).
 - **[collector-health.ts](file:///d:/social_media_research/src/utils/collector-health.ts)**: Live reachability probe for every collector endpoint (replaces the invented `/crawlers` telemetry).

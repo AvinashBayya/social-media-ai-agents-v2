@@ -76,7 +76,7 @@ const MODULE_CARDS = [
     icon: Share2,
     color: "text-[#EC4899]",
     border: "hover:border-[#EC4899]/50",
-    desc: "Wikidata profile lookup, CIB bot scoring & narrative tracking",
+    desc: "Bluesky firehose & profiles, Mastodon, Reddit, Telegram — with CIB signals for review",
   },
   {
     title: "GIS Command Map",
@@ -116,7 +116,7 @@ const MODULE_CARDS = [
     icon: ImageIcon,
     color: "text-[#A855F7]",
     border: "hover:border-[#A855F7]/50",
-    desc: "OCR text extraction, EXIF metadata & deepfake likelihood scoring",
+    desc: "C2PA provenance, EXIF, OCR & perceptual matching — in this browser",
   },
   {
     title: "Video Intelligence",
@@ -124,7 +124,7 @@ const MODULE_CARDS = [
     icon: Video,
     color: "text-[#EF4444]",
     border: "hover:border-[#EF4444]/50",
-    desc: "Frame-by-frame object detection, face count & transcript analysis",
+    desc: "Keyframe sampling, scene-cut detection & reuse matching against hashed stills",
   },
   {
     title: "AI Investigations",

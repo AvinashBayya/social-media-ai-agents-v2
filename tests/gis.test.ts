@@ -2,14 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   cellSizeForZoom,
   clusterByGrid,
+  describeTileRequest,
   filterByTime,
   fromExifImage,
   fromGdeltArticle,
   fromUcdpEvent,
   fromUsgsFeature,
+  graticuleStepDegrees,
   isRealCoordinate,
   summarise,
   timeExtent,
+  webMercatorTile,
   COUNTRY_CENTROIDS,
   GEO_LAYERS,
   PRECISION_RADIUS_M,
@@ -294,5 +297,41 @@ describe("layer summary", () => {
     const infra = GEO_LAYERS.find((l) => l.id === "infrastructure")!;
     expect(infra.provenance).toContain("returns no geolocation");
     expect(infra.provenance).toContain("No coordinates are invented");
+  });
+});
+
+// ─── Basemap tile disclosure ───────────────────────────────────────────────
+
+describe("web-mercator tile disclosure", () => {
+  test("reproduces the tile the CARTO basemap requested for a Delhi EXIF fix", () => {
+    // The proven leak: /images centred the map at zoom 15 on the image's own
+    // GPS fix, so exactly this path was fetched from a.basemaps.cartocdn.com.
+    const d = describeTileRequest(28.613889, 77.208889, 15, "/dark_all/{z}/{x}/{y}.png");
+    expect(d.path).toBe("/dark_all/15/23411/13663.png");
+    expect(d.x).toBe(23411);
+    expect(d.y).toBe(13663);
+  });
+
+  test("states the ground square the path narrows the coordinate to", () => {
+    const d = describeTileRequest(28.613889, 77.208889, 15);
+    expect(d.widthKm).toBeGreaterThan(1.0);
+    expect(d.widthKm).toBeLessThan(1.1);
+    expect(d.footprint).toBe("1.07 km × 1.07 km");
+  });
+
+  test("sub-kilometre tiles are reported in metres, not as 0.13 km", () => {
+    expect(describeTileRequest(28.613889, 77.208889, 18).footprint).toBe("134 m × 133 m");
+  });
+
+  test("poles clamp and longitudes wrap instead of producing out-of-range tiles", () => {
+    expect(webMercatorTile(89.9, 10, 5).y).toBe(0);
+    expect(webMercatorTile(-89.9, 10, 5).y).toBe(31);
+    expect(webMercatorTile(0, 200, 4)).toEqual(webMercatorTile(0, -160, 4));
+  });
+
+  test("graticule spacing tightens with zoom so the offline map keeps a scale reference", () => {
+    expect(graticuleStepDegrees(2)).toBeGreaterThan(graticuleStepDegrees(9));
+    expect(graticuleStepDegrees(9)).toBeGreaterThan(graticuleStepDegrees(15));
+    expect(graticuleStepDegrees(15)).toBe(0.01);
   });
 });

@@ -308,8 +308,20 @@ Dependencies (all free, all in-browser WASM, no server, no GPU):
 - `exifr` (MIT) — EXIF/TIFF/XMP
 - `c2pa` (MIT, contentauth) — Content Credentials. WASM + worker emitted as **first-party
   assets** via Vite `?url`, deliberately not a CDN.
-- `tesseract.js` (Apache 2.0) — OCR incl. nine Indic scripts; traineddata fetched per
-  language on first use.
+- `tesseract.js` (Apache 2.0) — OCR incl. nine Indic scripts. Worker script and the
+  `tesseract.js-core` WASM engine are emitted as **first-party assets** via Vite `?url`,
+  exactly like c2pa. tesseract.js defaults BOTH to jsDelivr, so until 2026-08-12 pressing
+  "Run OCR" fetched and executed undisclosed third-party JavaScript on the analyst's
+  machine and OCR could not work without egress. Two traps: `corePath` must be an
+  **`-lstm` `.wasm.js`** build (the `.wasm.js` embeds the wasm as base64, so there is no
+  second request) because `createWorker(..., 1, ...)` is `OEM.LSTM_ONLY` — change one and
+  you must change the other; and pointing at a build the browser cannot compile does not
+  error, it **hangs the worker forever**, which is why the SIMD level is probed and the
+  plain build is the fallback. Traineddata is the one remaining remote fetch and is
+  disclosed in the UI: ~27.6 MB for all fourteen languages (measured 2026-08-12) against a
+  scale-to-zero image, and `langPath` is one flat directory for every language, so it is
+  all or nothing — it is none. Build with `VITE_TESSERACT_LANG_PATH` pointing at a flat
+  directory of `<lang>.traineddata.gz` to make OCR fully air-gapped.
 - pHash is hand-written DCT in `src/utils/imaging.ts` — no library.
 
 `imaging.ts` is pure/testable; `imaging-client.ts` holds everything touching DOM or WASM and

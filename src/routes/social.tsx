@@ -61,6 +61,18 @@ export const Route = createFileRoute("/social")({
   component: SocialPage,
 });
 
+/**
+ * Four states, not two. "Partial" and "manual only" are precisely the cases the
+ * old green/red boolean could not express, and they are the two an evaluator
+ * asks about.
+ */
+const MODE_STYLE: Record<CollectionMode, string> = {
+  automated: "border-[#10B981]/40 bg-[#10B981]/10 text-[#10B981]",
+  partial: "border-[#06B6D4]/40 bg-[#06B6D4]/10 text-[#06B6D4]",
+  "manual-only": "border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[#F59E0B]",
+  none: "border-[#EF4444]/40 bg-[#EF4444]/10 text-[#EF4444]",
+};
+
 const MONITOR_KEY = "sentinel_social_monitors";
 const RENDER_LIMIT = 120;
 const CIB_WINDOW = 400;
@@ -628,6 +640,11 @@ function SocialPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* The operational half of the `manual-only` policy row above. It sits
+              here, in the collection column, because that is where an analyst
+              is when they discover a source the automated pulls cannot reach. */}
+          <ManualCapturePanel />
         </div>
 
         {/* ── Live feed + CIB ──────────────────────────────────────────────── */}
@@ -712,6 +729,57 @@ function SocialPage() {
                       <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[#F3F4F6]">
                         {p.text}
                       </p>
+                      {/* Media is rendered straight from the platform's own CDN.
+                          We record URLs, never bytes: re-hosting would be
+                          redistribution, and under the DPDP Act 2023 these are
+                          images of identifiable people. Bytes are fetched only
+                          when an analyst sends one asset to Module 4. */}
+                      {p.media && p.media.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {p.media.map((m, i) => (
+                            <a
+                              key={`${p.id}-media-${i}`}
+                              href={m.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={
+                                m.altText ??
+                                `${m.type} — no alt text supplied by the uploader`
+                              }
+                              className="group relative block"
+                            >
+                              <img
+                                src={m.thumbnailUrl ?? m.url}
+                                alt={m.altText ?? ""}
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="size-14 rounded border border-[#263548] object-cover transition-colors group-hover:border-[#3B82F6]"
+                              />
+                              {m.type === "video" && (
+                                <span className="absolute bottom-0 right-0 bg-black/70 px-1 text-[7px] uppercase text-white">
+                                  video
+                                </span>
+                              )}
+                            </a>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              navigate({
+                                to: "/images",
+                                search: { url: p.media![0].url } as never,
+                              })
+                            }
+                            className="rounded border border-[#263548] px-1.5 py-1 text-[8px] uppercase text-[#94A3B8] hover:border-[#3B82F6] hover:text-white"
+                            title="Send the first asset to Module 4 for EXIF, C2PA, OCR and perceptual-hash analysis"
+                          >
+                            Analyse
+                          </button>
+                          {p.media.every((m) => !m.altText) && (
+                            <span className="text-[8px] text-[#64748B]">no alt text</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}

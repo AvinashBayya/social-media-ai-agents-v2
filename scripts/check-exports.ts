@@ -21,6 +21,7 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "toGeoPoint",
     "PostDegradation",
     "toGpsJamFinding",
+    "CONTRACT_MEDIA_LIMITATION",
   ],
   "src/utils/llm.ts": [
     "chat",
@@ -62,6 +63,42 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "resetBlueskySession",
     "mastodonStatusToPost",
     "fetchMastodonSearch",
+    // Media extraction, added 2026-08-12. Each was captured from a live
+    // response; the Bluesky pair covers the two different shapes (raw Jetstream
+    // record vs resolved AppView view) and must not be collapsed into one.
+    "blueskyMediaFromRecord",
+    "blueskyMediaFromView",
+    "redditMediaFrom",
+    "telegramMediaFrom",
+    "mastodonMediaFrom",
+    "splitTelegramMessages",
+    "telegramBlockToPost",
+  ],
+  "src/utils/collection-policy.ts": [
+    "COLLECTION_POLICIES",
+    "MODE_LABELS",
+    "BASIS_LABELS",
+    "BASIS_DETAIL",
+    "policyFor",
+    "policyById",
+    "allowsAutomatedCollection",
+    "policySummary",
+  ],
+  "src/utils/manual-evidence.ts": [
+    "AttestationError",
+    "CAPTURE_PLATFORM_LABELS",
+    "CAPTURE_CAVEATS",
+    "ATTRIBUTION_LIMITATION",
+    "isPublicPostUrl",
+    "buildAttestedCapture",
+    "attestedCaptureToMediaAsset",
+  ],
+  "src/utils/evidence.ts": [
+    "EvidenceIntegrityError",
+    "sha256OfFile",
+    "bytesToHex",
+    "isSha256",
+    "HASH_MEANING",
   ],
   "src/utils/credential-vault.ts": [
     "CREDENTIAL_PROVIDERS",

@@ -483,7 +483,9 @@ function TasksPage() {
                     <div className="flex justify-between text-[9px] text-[#94A3B8]">
                       <span>Engine confidence:</span>
                       <span className="text-white">
-                        {((mod1Result.confidence || 0) * 100).toFixed(0)}%
+                        {typeof mod1Result.confidence === "number"
+                          ? `${(mod1Result.confidence * 100).toFixed(0)}%`
+                          : "not computed"}
                       </span>
                     </div>
                     <p className="pt-1 text-[9px] leading-relaxed text-[#94A3B8]">

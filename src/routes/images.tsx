@@ -42,6 +42,7 @@ import {
   rememberImage,
   runOcr,
   MediaError,
+  OCR_ASSET_PROVENANCE,
 } from "@/utils/imaging-client";
 import { hashRgba } from "@/utils/imaging";
 import { ExifMap } from "@/components/exif-map";
@@ -65,6 +66,24 @@ import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
 
 export const Route = createFileRoute("/images")({
   head: () => ({ meta: [{ title: "Image Intelligence — Sentinel AI" }] }),
+  /**
+   * `?url=` hands one asset over from another module — the Analyse control on a
+   * social post's media is the first caller.
+   *
+   * Validated rather than trusted: only absolute http(s) URLs are accepted, so a
+   * crafted `javascript:` or `data:` search param cannot reach the fetch below.
+   * Anything else is dropped to undefined and the page opens empty.
+   */
+  validateSearch: (search: Record<string, unknown>): { url?: string } => {
+    const raw = typeof search.url === "string" ? search.url.trim() : "";
+    if (!raw) return {};
+    try {
+      const u = new URL(raw);
+      return u.protocol === "http:" || u.protocol === "https:" ? { url: raw } : {};
+    } catch {
+      return {};
+    }
+  },
   component: Page,
 });
 
@@ -137,6 +156,22 @@ function Page() {
 
   useEffect(() => setCorpus(loadImageCorpus()), []);
 
+  // Hand-off from another module via ?url=. Runs once per distinct URL so a
+  // re-render cannot re-trigger a fetch of the same remote asset. Cross-origin
+  // media will usually refuse the EXIF read — analyse() already reports that as
+  // a failed read rather than as an absence of metadata.
+  const handoffUrl = Route.useSearch().url;
+  const handledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!handoffUrl || handledRef.current === handoffUrl) return;
+    handledRef.current = handoffUrl;
+    setUrlDraft(handoffUrl);
+    void analyse(handoffUrl, handoffUrl);
+    // analyse is a stable useCallback; depending on it would re-run this on
+    // every one of its identity changes rather than on a new URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffUrl]);
+
   useEffect(() => {
     return () => {
       if (analysis?.previewUrl.startsWith("blob:")) URL.revokeObjectURL(analysis.previewUrl);
@@ -192,7 +227,19 @@ function Page() {
 
       setBusy("Matching against corpus");
       const stored = loadImageCorpus();
-      const seenAt = exif?.captureTime ?? new Date().toISOString();
+      /*
+       * When THIS analyst first saw the image, which is a real fact about our
+       * own corpus - distinct from when the camera says it was taken.
+       *
+       * This was `exif?.captureTime ?? new Date().toISOString()`, which silently
+       * substituted the analysis time for a capture time whenever EXIF carried
+       * none. EXIF absence is the NORMAL case for redistributed media (every
+       * major platform strips it), so that fallback fired constantly and made
+       * every stripped image look like it had been captured the moment it was
+       * uploaded. The two are now separate fields with separate meanings.
+       */
+      const observedAt = new Date().toISOString();
+      const seenAt = observedAt;
       const duplicates = findNearDuplicates({ hash, seenAt, id: name }, stored);
 
       const next = rememberImage({
@@ -733,6 +780,14 @@ function Page() {
                   </span>
                 )}
               </div>
+
+              {/* Exactly what pressing Run OCR touches on the network. The worker script
+                  and WASM engine used to be fetched from a CDN at this point without
+                  saying so; they are now our own assets, and whatever is still remote is
+                  named here rather than left for the analyst to discover in devtools. */}
+              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                {OCR_ASSET_PROVENANCE.disclosure}
+              </p>
 
               {ocrError && (
                 <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">

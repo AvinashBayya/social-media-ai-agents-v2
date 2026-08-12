@@ -21,6 +21,7 @@ import { fetchGeoLayers } from "@/utils/geo-sources";
 import {
   cellSizeForZoom,
   clusterByGrid,
+  describeTileRequest,
   filterByTime,
   fromExifImage,
   summarise,
@@ -33,6 +34,16 @@ import {
   type LayerResult,
 } from "@/utils/geo";
 import { loadImageCorpus } from "@/utils/imaging-client";
+import {
+  CARTO_DARK,
+  MAP_BACKGROUND,
+  OFFLINE_BASEMAP_URL,
+  addConsentedTileLayer,
+  addGraticule,
+  addOfflineBasemap,
+  addScaleBar,
+  loadLeaflet,
+} from "@/utils/leaflet-client";
 
 /**
  * GIS Command Map — Module 5 (PS-18 §6.5), deterministic half.
@@ -80,6 +91,21 @@ function GISPage() {
   const [error, setError] = useState("");
   const [zoom, setZoom] = useState(2);
   const [selected, setSelected] = useState<GeoRecord | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [basemapError, setBasemapError] = useState("");
+  const [center, setCenter] = useState<[number, number]>([20, 20]);
+
+  /*
+   * Third-party basemap tiles, OFF until an analyst turns them on.
+   *
+   * This page is NOT "public feed data only", which is the reason it does not
+   * get a more relaxed default than /images: the Imagery layer below defaults
+   * to enabled and is populated from loadImageCorpus() — EXIF GPS fixes from
+   * images analysed in this browser. Zooming to one of those pins with raster
+   * tiles on requests the tile containing that image's coordinate, which is
+   * the same disclosure /images had. Not persisted, for the same reason.
+   */
+  const [tiles, setTiles] = useState(false);
 
   const [enabled, setEnabled] = useState<Record<GeoLayerId, boolean>>({
     conflict: true,
@@ -158,44 +184,79 @@ function GISPage() {
 
   const summary = useMemo(() => summarise(allResults), [allResults]);
 
+  // What the consent control below would disclose for the view on screen.
+  const viewDisclosure = useMemo(
+    () => describeTileRequest(center[0], center[1], zoom, CARTO_DARK.pathTemplate),
+    [center, zoom],
+  );
+
   // ── Map ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return;
     let cancelled = false;
 
-    if (!document.querySelector("link[data-leaflet]")) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      link.setAttribute("data-leaflet", "true");
-      document.head.appendChild(link);
-    }
-
-    import("leaflet").then((mod) => {
+    loadLeaflet().then((L) => {
       if (cancelled || !containerRef.current || mapRef.current) return;
-      const L: any = (mod as any).default ?? mod;
       leafletRef.current = L;
 
       const map = L.map(containerRef.current, { center: [20, 20], zoom: 2, worldCopyJump: true });
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap, &copy; CARTO",
-      }).addTo(map);
+      // The basemap itself is added by the effect below, which is keyed on the
+      // consent state. Rebuilding the map on a toggle would recreate
+      // layerGroupRef and silently drop every plotted record.
+      addGraticule(L, map);
+      addScaleBar(L, map);
 
       layerGroupRef.current = L.layerGroup().addTo(map);
       map.on("zoomend", () => setZoom(map.getZoom()));
+      map.on("moveend", () => {
+        const c = map.getCenter();
+        setCenter([c.lat, c.lng]);
+      });
       mapRef.current = map;
+      setMapReady(true);
       setTimeout(() => map.invalidateSize(), 0);
     });
 
     return () => {
       cancelled = true;
+      setMapReady(false);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
+
+  // ── Basemap: first-party vectors by default, third-party tiles on consent ─
+  useEffect(() => {
+    const L = leafletRef.current;
+    const map = mapRef.current;
+    if (!mapReady || !L || !map) return;
+    let cancelled = false;
+    let layer: any = null;
+
+    setBasemapError("");
+    if (tiles) {
+      layer = addConsentedTileLayer(L, map, CARTO_DARK);
+    } else {
+      addOfflineBasemap(L, map)
+        .then((added: any) => {
+          // Consent may have been granted while the outlines were in flight.
+          if (cancelled) map.removeLayer(added);
+          else layer = added;
+        })
+        .catch((err: any) => {
+          // "The outline file did not load" and "there is no land here" are
+          // opposite claims and must not render identically.
+          if (!cancelled) setBasemapError(err?.message ?? String(err));
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+    };
+  }, [tiles, mapReady]);
 
   // ── Draw ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -267,7 +328,7 @@ function GISPage() {
             `<em>${PRECISION_LABEL[r.precision]} — locates ${r.locates}</em>`,
         );
     }
-  }, [visible, zoom]);
+  }, [visible, zoom, mapReady]);
 
   const search = () => {
     const v = draft.trim();
@@ -319,7 +380,11 @@ function GISPage() {
 
           <Card className={CARD}>
             <CardContent className="p-0">
-              <div ref={containerRef} className="h-[520px] w-full rounded-t-lg" />
+              <div
+                ref={containerRef}
+                className="h-[520px] w-full rounded-t-lg"
+                style={{ background: MAP_BACKGROUND }}
+              />
 
               {/* ── Time slider ──────────────────────────────────────────── */}
               <div className="border-t border-[#263548] p-3">
@@ -352,6 +417,50 @@ function GISPage() {
                   </p>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Basemap disclosure ─────────────────────────────────────── */}
+          <Card className={tiles ? "border-[#F59E0B]/40 bg-[#111827]" : CARD}>
+            <CardContent className="p-3">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={tiles}
+                  onChange={(e) => setTiles(e.target.checked)}
+                  className="mt-0.5 size-3 shrink-0 accent-[#F59E0B]"
+                />
+                <span className="text-[10px] leading-relaxed text-[#94A3B8]">
+                  <span className="font-semibold text-white">
+                    Request raster basemap tiles from {CARTO_DARK.host} —{" "}
+                    {tiles ? "ON, tiles are being requested" : "off"}
+                  </span>
+                  <br />
+                  <span className="text-[#64748B]">Off:</span> every pixel on this map comes from
+                  this origin — Leaflet&apos;s stylesheet and marker icons are bundled with the app
+                  and the country outlines are{" "}
+                  <span className="font-mono text-[#CBD5E1]">{OFFLINE_BASEMAP_URL}</span>. No map
+                  provider is contacted, at any zoom. The trade-off is real: coastlines and a
+                  graticule, no roads or buildings.
+                  <br />
+                  <span className="text-[#64748B]">On:</span> the browser sends one request per
+                  visible tile to <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span>{" "}
+                  ({CARTO_DARK.operator}) on every pan and zoom, and the request path IS the view:
+                  the current centre is{" "}
+                  <span className="font-mono text-[#F59E0B]">{viewDisclosure.path}</span>, a{" "}
+                  {viewDisclosure.footprint} square, recorded there with your IP address and the
+                  time. This page is not only public feed data — the Imagery layer plots EXIF GPS
+                  fixes from images analysed in this browser, so zooming to one of those pins
+                  discloses that image&apos;s location to {CARTO_DARK.operator} even though the image
+                  file itself never leaves this machine. Not stored anywhere; it resets on reload.
+                </span>
+              </label>
+              {basemapError && (
+                <p className="mt-2 font-mono text-[10px] leading-relaxed text-[#F59E0B]">
+                  Offline basemap unavailable: {basemapError}. Markers are unaffected — only the
+                  coastline backdrop is missing, and nothing was substituted for it.
+                </p>
+              )}
             </CardContent>
           </Card>
 

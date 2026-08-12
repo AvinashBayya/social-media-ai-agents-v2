@@ -208,7 +208,7 @@ function SubjectsPage() {
     <AppShell>
       <PageHeader
         title="Watchlists / Subjects"
-        description="Configure entity target filters and monitor real-time correlation matches across GDELT, social streams, and threat telemetry."
+        description="Define watchlist filters and match them against a corpus pulled once when this page loads — Google News, social mentions, Telegram channel previews and the Feodo / C2IntelFeeds blocklists. Nothing runs on a schedule; reload to re-run the match."
         actions={
           <>
             <Button

@@ -398,9 +398,11 @@ function YoutubePage() {
                       itag 18 at 360p. Higher resolutions exist only as separate
                       video and audio streams. */}
                   Download the muxed MP4 artifact (360p — the highest single-file format YouTube
-                  serves; higher resolutions are adaptive and need ffmpeg to join) into local
-                  storage for keyframe extraction, OCR, and Whisper audio analysis. Each download is
-                  audit logged.
+                  serves; higher resolutions are adaptive and need ffmpeg to join) to your own disk,
+                  then open it on the Video Analysis page for in-browser keyframe extraction,
+                  scene-cut detection and OCR. There is no audio transcription: Whisper is not
+                  deployed. No download is recorded either — nothing in this system keeps an audit
+                  trail, and the file transfers straight from YouTube to your browser.
                 </p>
 
                 {downloadError && (() => {
@@ -525,7 +527,10 @@ function YoutubePage() {
                     <span className="font-bold">Subtitles Unavailable: </span>
                     {subsError.cause}
                     <p className="mt-2 text-[10px] text-[#64748B]">
-                      You can download the video artifact above and run Whisper audio transcription on the Video Analysis page.
+                      No captions were returned, and there is no fallback: audio transcription is
+                      not implemented — Whisper needs GPU inference this system does not have. You
+                      can still download the artifact above and run keyframe extraction, scene-cut
+                      detection and OCR on the Video Analysis page.
                     </p>
                   </div>
                 )}

@@ -315,11 +315,29 @@ export function fromUcdpEvent(event: any): GeoRecord | null {
   const wherePrec = Number(event?.where_prec);
   const precision: GeoPrecision = wherePrec <= 2 ? "exact" : wherePrec === 3 ? "city" : "country";
 
-  const deaths =
-    (Number(event?.deaths_a) || 0) +
-    (Number(event?.deaths_b) || 0) +
-    (Number(event?.deaths_civilians) || 0) +
-    (Number(event?.deaths_unknown) || 0);
+  /**
+   * Casualties, or null when UCDP reported none of the four fields.
+   *
+   * This summed `Number(x) || 0` across all four, so an event with NO casualty
+   * figures at all produced 0 — and the map then rendered "0 casualties",
+   * which reads as "we know this event killed nobody" rather than "UCDP did not
+   * report this". They are opposite findings, and the same pattern was fixed in
+   * osint.tsx's UCDP handler while this copy was missed.
+   *
+   * A field that IS reported and is genuinely zero still counts as reported.
+   */
+  const deathFields = [
+    event?.deaths_a,
+    event?.deaths_b,
+    event?.deaths_civilians,
+    event?.deaths_unknown,
+  ];
+  const reportedDeaths = deathFields.filter(
+    (v) => v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v)),
+  );
+  const deaths = reportedDeaths.length
+    ? reportedDeaths.reduce((sum: number, v) => sum + Number(v), 0)
+    : null;
 
   const sides = [event?.side_a, event?.side_b].filter(Boolean).join(" vs ");
   return {
@@ -339,7 +357,10 @@ export function fromUcdpEvent(event: any): GeoRecord | null {
     url: "https://ucdp.uu.se/",
     timestamp: time,
     magnitude: deaths,
-    magnitudeLabel: `${deaths} recorded fatality/ies`,
+    // "0 recorded fatalities" and "UCDP reported no casualty figure" are
+    // different claims, and the marker is sized from this too.
+    magnitudeLabel:
+      deaths === null ? "casualties not reported by UCDP" : `${deaths} recorded fatality/ies`,
     detail: {
       country: String(event?.country ?? "unknown"),
       region: String(event?.region ?? "unknown"),
@@ -569,4 +590,110 @@ export function summarise(results: LayerResult[]): GeoSummary {
     })),
     note: parts.join(" "),
   };
+}
+
+// ─── Basemap tile disclosure ───────────────────────────────────────────────
+
+/**
+ * Web-Mercator tile arithmetic. It lives in this pure module for the same
+ * reason everything else here does: the claim it supports has to be checkable.
+ *
+ * A raster basemap tile request is not metadata ABOUT a location, it IS the
+ * location. The path carries z/x/y, and z/x/y is a bounded square on the
+ * ground. Both maps in this app used to request CARTO tiles unconditionally,
+ * so opening a geotagged photograph on /images fetched
+ * `a.basemaps.cartocdn.com/dark_all/15/23411/13663.png` for a fix at
+ * 28.613889, 77.208889 — a 1.07 km square, logged with the analyst's IP
+ * address, on a page that states the file is never uploaded.
+ *
+ * These functions exist so a consent control can print the exact path and the
+ * exact ground footprint for the coordinate in front of the analyst instead of
+ * a generic privacy sentence.
+ */
+export interface TileIndex {
+  z: number;
+  x: number;
+  y: number;
+}
+
+/** The slippy-map tile containing a coordinate (OSM/Google/CARTO scheme). */
+export function webMercatorTile(lat: number, lon: number, zoom: number): TileIndex {
+  const z = Math.max(0, Math.min(22, Math.floor(zoom)));
+  const n = 2 ** z;
+  // Web Mercator is undefined at the poles; every slippy map clamps here.
+  const clamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  const rad = (clamped * Math.PI) / 180;
+  const wrapped = (((lon + 180) % 360) + 360) % 360;
+  const x = Math.min(n - 1, Math.floor((wrapped / 360) * n));
+  const y = Math.min(
+    n - 1,
+    Math.max(0, Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n)),
+  );
+  return { z, x, y };
+}
+
+/** Ground extent of a tile — the square its path narrows a coordinate to. */
+export function tileFootprintKm(tile: TileIndex): { widthKm: number; heightKm: number } {
+  const n = 2 ** tile.z;
+  const lonWest = (tile.x / n) * 360 - 180;
+  const lonEast = ((tile.x + 1) / n) * 360 - 180;
+  const latNorth = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * tile.y) / n)));
+  const latSouth = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * (tile.y + 1)) / n)));
+  const midRad = (((latNorth + latSouth) / 2) * Math.PI) / 180;
+  return {
+    widthKm: (lonEast - lonWest) * 111.32 * Math.cos(midRad),
+    heightKm: (latNorth - latSouth) * 110.57,
+  };
+}
+
+export interface TileRequestDisclosure extends TileIndex {
+  /** Exact path the browser would request for this coordinate. */
+  path: string;
+  widthKm: number;
+  heightKm: number;
+  /** e.g. "1.07 km × 1.07 km" — what the log entry narrows the location to. */
+  footprint: string;
+}
+
+const formatKm = (v: number): string => (v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(2)} km`);
+
+/**
+ * The tile request a coordinate produces, ready to print in a consent control.
+ * `pathTemplate` is the provider's path with {z}/{x}/{y} placeholders.
+ */
+export function describeTileRequest(
+  lat: number,
+  lon: number,
+  zoom: number,
+  pathTemplate = "/{z}/{x}/{y}.png",
+): TileRequestDisclosure {
+  const tile = webMercatorTile(lat, lon, zoom);
+  const { widthKm, heightKm } = tileFootprintKm(tile);
+  return {
+    ...tile,
+    path: pathTemplate
+      .replace("{z}", String(tile.z))
+      .replace("{x}", String(tile.x))
+      .replace("{y}", String(tile.y)),
+    widthKm,
+    heightKm,
+    footprint: `${formatKm(widthKm)} × ${formatKm(heightKm)}`,
+  };
+}
+
+/**
+ * Graticule spacing in degrees for a zoom level, chosen so a viewport holds a
+ * handful of lines rather than none or thousands. With third-party tiles off
+ * the grid and the scale bar are the only scale references on the map.
+ */
+export function graticuleStepDegrees(zoom: number): number {
+  if (zoom >= 17) return 0.002;
+  if (zoom >= 15) return 0.01;
+  if (zoom >= 13) return 0.05;
+  if (zoom >= 11) return 0.1;
+  if (zoom >= 9) return 0.5;
+  if (zoom >= 7) return 1;
+  if (zoom >= 5) return 2;
+  if (zoom >= 3) return 10;
+  return 30;
 }

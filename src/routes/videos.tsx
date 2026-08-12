@@ -30,6 +30,7 @@ import {
   rememberImage,
   runOcr,
   MediaError,
+  OCR_ASSET_PROVENANCE,
   type KeyframeResult,
 } from "@/utils/imaging-client";
 import { NotImplementedPanel } from "@/components/not-implemented";
@@ -437,6 +438,11 @@ function Page() {
                       Add to corpus
                     </Button>
                   </div>
+
+                  {/* Same disclosure as the image route — one string, rendered verbatim. */}
+                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                    {OCR_ASSET_PROVENANCE.disclosure}
+                  </p>
 
                   {ocrError && (
                     <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">

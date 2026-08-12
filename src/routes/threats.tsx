@@ -17,7 +17,7 @@ function ThreatsPage() {
     <AppShell>
       <PageHeader
         title="Threat Intelligence Radar"
-        description="Correlated malicious IP blocklists, C2 networks, and actor threat indices."
+        description="Pointers to the collectors that do run. No threat index is computed for a target — nothing here correlates blocklists, DNS and infrastructure into a rating."
       />
       <div className="p-6 space-y-4 font-mono text-xs">
         <Card className="bg-[#111827] border-[#263548] p-4">

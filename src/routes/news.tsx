@@ -1510,12 +1510,16 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
             else if (negCount > posCount) tone = "negative";
 
             mentions.push({
-              author: h.author || "hn_user",
+              // null, not "hn_user" - an invented account name attached to a real
+              // Hacker News story is a fabricated attribution.
+              author: h.author || null,
               platform: "Hacker News",
               text: h.title,
               pubDate: safeIsoDate(h.created_at),
-              likes: h.points || 0,
-              shares: h.num_comments || 0,
+              // null, not 0. Algolia omits these on some records, and "no score
+              // reported" is not "this story scored zero engagement".
+              likes: typeof h.points === "number" ? h.points : null,
+              shares: typeof h.num_comments === "number" ? h.num_comments : null,
               tone,
               url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
             });
@@ -1764,7 +1768,10 @@ function formatRelativeTime(dateStr: string): string {
     const diffDays = Math.floor(diffHours / 24);
     return `${diffDays}d`;
   } catch {
-    return "1h";
+    // null, never "1h". Returning a plausible age from a PARSE FAILURE invents
+    // a publication time at the point of display - the same defect that had
+    // live.tsx returning "1m" from its catch block.
+    return null;
   }
 }
 

@@ -1199,8 +1199,9 @@ function Page() {
                 <ShieldAlert className="size-5 text-primary" /> Indicators of Compromise (IOCs)
               </CardTitle>
               <CardDescription className="text-xs">
-                Real-time threat feed mapping active command and control (C2) servers, malicious
-                payloads, and botnet IPs.
+                Feodo Tracker and C2IntelFeeds blocklists, fetched when this tab loads. Entries are
+                what those feeds published; liveness and dates are shown only where the feed
+                reported them.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
@@ -1458,7 +1459,8 @@ function Page() {
                   <Globe className="size-4 text-primary" /> GDELT Document News Stream
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Real-time geopolitical conflict news monitored globally.
+                  GDELT DOC query, run on demand for the current filter. GDELT reports the country
+                  of the publishing outlet, not the location of the event.
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-4 space-y-3">
@@ -1505,8 +1507,9 @@ function Page() {
                     <BookOpen className="size-5 text-primary" /> Categorized News & RSS Feeds
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Continuous ingestion loop covering politics, cyber threat advisories,
-                    military/defense outlets, and financial indexes.
+                    Categorised RSS pulled when this tab loads — politics, cyber threat advisories,
+                    military/defence outlets and financial indexes. One pass per load; nothing polls
+                    in the background.
                   </CardDescription>
                 </div>
                 <div className="relative w-full md:w-80 shrink-0">

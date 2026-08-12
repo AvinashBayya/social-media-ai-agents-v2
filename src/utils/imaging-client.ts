@@ -11,6 +11,13 @@
  *   - Uploaded media never leaves the browser. For a defence tool that is worth
  *     saying out loud: an analyst examining a sensitive image is not uploading
  *     it to our container, because there is nothing to upload it to.
+ *   - Nothing third-party is pulled INTO the browser either. Both c2pa and
+ *     tesseract.js default to loading their worker script and WASM engine from
+ *     a CDN at the moment the analyst presses the button; both are instead
+ *     emitted from node_modules as first-party assets (Vite `?url`) and served
+ *     from our own origin. Third-party JavaScript executing on an analyst's
+ *     machine mid-analysis is not acceptable here, and a CDN dependency would
+ *     make the tool unusable on a network without egress.
  *
  * Every import that touches WASM or a large bundle is DYNAMIC, so none of it is
  * pulled into the SSR bundle or the initial page load. The pure algorithms live
@@ -165,12 +172,167 @@ export interface OcrProgress {
   progress: number;
 }
 
+// ─── OCR engine assets: first-party, never a CDN ───────────────────────────
+
+/**
+ * WebAssembly SIMD probes, inlined.
+ *
+ * These two byte sequences are exactly the modules `wasm-feature-detect`
+ * (Apache-2.0, v1.8.0 — already installed, tesseract.js depends on it) hands to
+ * WebAssembly.validate, and they are the same two checks tesseract.js runs
+ * inside its own worker when it is left to choose a core. Inlining them keeps
+ * our choice identical to the library's while adding no dependency to
+ * package.json, which matters because the Docker build runs
+ * `bun install --frozen-lockfile`.
+ */
+const WASM_SIMD_PROBE = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15,
+  253, 98, 11,
+]);
+const WASM_RELAXED_SIMD_PROBE = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 15, 1, 13, 0, 65, 1, 253, 15,
+  65, 2, 253, 15, 253, 128, 2, 11,
+]);
+
+/**
+ * Resolve the Tesseract worker script and WASM core as FIRST-PARTY assets.
+ *
+ * Left alone, tesseract.js 7.0.0 loads BOTH from jsDelivr at the moment OCR is
+ * run — `dist/worker.min.js` and a `tesseract.js-core` build. That is
+ * third-party JavaScript executing on the analyst's machine while they examine
+ * sensitive media, undisclosed, and it makes OCR impossible without egress.
+ * Vite's `?url` emits the installed files as our own assets instead, exactly as
+ * getC2pa() above does for the C2PA toolkit.
+ *
+ * WHICH CORE. tesseract.js-core 7.0.0 ships six builds — {plain, simd,
+ * relaxedsimd} x {full, -lstm} — and each `*.wasm.js` is self-contained: the
+ * .wasm is embedded as base64, which is why no separate .wasm request is ever
+ * made and why corePath points at the .wasm.js, not the .wasm. The "-lstm"
+ * halves drop the legacy engine and are what OEM.LSTM_ONLY needs; that is the
+ * `1` passed to createWorker below, so the two must be changed together.
+ *
+ * Why probe rather than hard-code: picking a build the browser cannot compile
+ * does NOT fail loudly. worker-script/index.js calls the core factory with no
+ * .catch and only resolves on success, so a CompileError leaves the createWorker
+ * promise pending forever and the UI simply hangs. The plain build is the
+ * fallback because every WASM-capable engine can run it. Passing an explicit
+ * file also bypasses tesseract's own directory-based detection, which is
+ * unavoidable here: Vite content-hashes emitted asset names, so there is no
+ * directory of predictably-named files to hand it.
+ */
+async function resolveOcrEngine(): Promise<{
+  workerPath: string;
+  corePath: string;
+  coreBuild: string;
+}> {
+  const workerPath = (await import("tesseract.js/dist/worker.min.js?url")).default;
+
+  if (WebAssembly.validate(WASM_RELAXED_SIMD_PROBE)) {
+    return {
+      workerPath,
+      coreBuild: "relaxedsimd-lstm",
+      corePath: (await import("tesseract.js-core/tesseract-core-relaxedsimd-lstm.wasm.js?url"))
+        .default,
+    };
+  }
+  if (WebAssembly.validate(WASM_SIMD_PROBE)) {
+    return {
+      workerPath,
+      coreBuild: "simd-lstm",
+      corePath: (await import("tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url")).default,
+    };
+  }
+  return {
+    workerPath,
+    coreBuild: "lstm",
+    corePath: (await import("tesseract.js-core/tesseract-core-lstm.wasm.js?url")).default,
+  };
+}
+
+/**
+ * Language models (.traineddata) — the one thing still fetched from elsewhere.
+ *
+ * Deliberately NOT bundled. The fourteen packs in OCR_LANGUAGES total ~27.6 MB
+ * compressed (measured against the CDN on 2026-08-12: 0.98 MB for Urdu up to
+ * 5.4 MB for Sanskrit), and tesseract accepts a single FLAT directory for every
+ * language — `${langPath}/${lang}.traineddata.gz`, no per-language segment — so
+ * it is all fourteen or none. "All" means ~28 MB of model data in a
+ * scale-to-zero container image, paid as cold-start weight on every revision,
+ * to serve an analyst who typically selects one or two languages.
+ *
+ * So the default keeps tesseract.js 7.0.0's own per-language CDN layout,
+ * verified 200 on 2026-08-12:
+ *   https://cdn.jsdelivr.net/npm/@tesseract.js-data/<lang>/4.0.0_best_int/<lang>.traineddata.gz
+ * The browser then caches each pack in IndexedDB (idb-keyval). This is DATA
+ * consumed by our WASM, not third-party code executed in the analyst's browser —
+ * a materially smaller exposure than the worker and core above — but it is still
+ * a remote fetch, so the UI names it.
+ *
+ * AIR-GAPPED / no-egress deployment: serve the needed `<lang>.traineddata.gz`
+ * files from one flat directory on this origin and rebuild with
+ *   VITE_TESSERACT_LANG_PATH=/tessdata
+ * (an absolute path or a full URL). With it set, OCR contacts nothing but this
+ * origin. It is read at BUILD time — it must be present for `bun run build` /
+ * the `az acr build` arguments, NOT set as a container-app env var.
+ */
+const RAW_LANG_PATH = import.meta.env?.VITE_TESSERACT_LANG_PATH;
+const LOCAL_TRAINEDDATA_PATH: string | null =
+  typeof RAW_LANG_PATH === "string" && RAW_LANG_PATH.trim() !== ""
+    ? RAW_LANG_PATH.trim().replace(/\/+$/, "")
+    : null;
+
+export interface OcrAssetProvenance {
+  /** Worker script + WASM engine. Always served by this deployment. */
+  engine: "first-party";
+  /** Where .traineddata comes from at analysis time. */
+  trainedData: "first-party" | "jsdelivr-cdn";
+  /** The exact location an analyst can check against the network tab. */
+  trainedDataUrl: string;
+  /** Verbatim UI text. Render it as-is; do not paraphrase it in a component. */
+  disclosure: string;
+}
+
+/**
+ * What OCR touches on the network, stated exactly. Rendered next to the OCR
+ * control on both the image and video routes.
+ */
+export const OCR_ASSET_PROVENANCE: OcrAssetProvenance = LOCAL_TRAINEDDATA_PATH
+  ? {
+      engine: "first-party",
+      trainedData: "first-party",
+      trainedDataUrl: `${LOCAL_TRAINEDDATA_PATH}/<lang>.traineddata.gz`,
+      disclosure:
+        "OCR runs entirely in this browser tab and the image is never uploaded. The Tesseract " +
+        "worker script, the WebAssembly engine and the language models are all served by this " +
+        `deployment from ${LOCAL_TRAINEDDATA_PATH}/ — no third-party host is contacted at any ` +
+        "point, so OCR works with no external network access.",
+    }
+  : {
+      engine: "first-party",
+      trainedData: "jsdelivr-cdn",
+      trainedDataUrl:
+        "https://cdn.jsdelivr.net/npm/@tesseract.js-data/<lang>/4.0.0_best_int/<lang>.traineddata.gz",
+      disclosure:
+        "OCR runs entirely in this browser tab and the image is never uploaded. The Tesseract " +
+        "worker script and WebAssembly engine are served by this deployment, so no third-party " +
+        "code is fetched or executed here. Language models are not bundled: the first OCR run " +
+        "for each language downloads <lang>.traineddata.gz from the public jsDelivr CDN " +
+        "(cdn.jsdelivr.net/npm/@tesseract.js-data), roughly 1-6 MB per language, and the browser " +
+        "then caches it in IndexedDB. That request discloses this machine's IP address and the " +
+        "language codes selected — nothing else, and never the image. An air-gapped deployment " +
+        "must host those files itself and rebuild with VITE_TESSERACT_LANG_PATH set to their " +
+        "directory.",
+    };
+
 /**
  * Run Tesseract over an image.
  *
- * Traineddata is fetched on first use per language (roughly 1-15 MB each,
- * cached by the browser afterwards), so the first Indic run needs network. That
- * is surfaced through onProgress rather than appearing as a hang.
+ * The worker script and WASM engine come from this deployment (see
+ * resolveOcrEngine). Traineddata is fetched on first use per language — from
+ * this origin if VITE_TESSERACT_LANG_PATH was set at build time, otherwise from
+ * the CDN named in OCR_ASSET_PROVENANCE — so the first run for a language needs
+ * network unless a mirror is configured. That is surfaced through onProgress
+ * rather than appearing as a hang.
  */
 export async function runOcr(
   source: File | Blob | string,
@@ -183,17 +345,36 @@ export async function runOcr(
 
   const { createWorker } = await import("tesseract.js");
   let worker: any;
+  let coreBuild = "unresolved";
   try {
+    // workerPath and corePath are OUR assets. Without them tesseract.js 7.0.0
+    // fetches dist/worker.min.js and a tesseract.js-core build from
+    // cdn.jsdelivr.net at this exact moment. The `1` is OEM.LSTM_ONLY and must
+    // stay in step with the "-lstm" core resolveOcrEngine returns. langPath is
+    // passed only when a first-party mirror was configured at build time; left
+    // unset, tesseract keeps its own per-language CDN layout, which
+    // OCR_ASSET_PROVENANCE states verbatim in the UI.
+    const engine = await resolveOcrEngine();
+    coreBuild = engine.coreBuild;
     worker = await createWorker(languages, 1, {
+      workerPath: engine.workerPath,
+      corePath: engine.corePath,
+      ...(LOCAL_TRAINEDDATA_PATH ? { langPath: LOCAL_TRAINEDDATA_PATH } : {}),
       logger: (m: any) => onProgress?.({ status: m.status ?? "", progress: m.progress ?? 0 }),
     });
     const result = await worker.recognize(source as any);
     return interpretOcr(result, languages);
   } catch (err: any) {
     throw new MediaError(
-      `OCR failed for [${languages.join(", ")}]: ${err?.message ?? String(err)}. ` +
-        `Language data is downloaded on first use — check network access if this is the ` +
-        `first run for this language.`,
+      `OCR failed for [${languages.join(", ")}] on the ${coreBuild} core: ` +
+        `${err?.message ?? String(err)}. The worker script and WebAssembly engine are served by ` +
+        `this deployment, so this is not a CDN failure. ` +
+        (LOCAL_TRAINEDDATA_PATH
+          ? `Language models are read from ${LOCAL_TRAINEDDATA_PATH}/<lang>.traineddata.gz — ` +
+            `check that every selected language is present there.`
+          : `Language models are still fetched on first use from ` +
+            `cdn.jsdelivr.net/npm/@tesseract.js-data — check network access if this is the ` +
+            `first run for one of these languages.`),
       "ocr",
     );
   } finally {
