@@ -24,12 +24,27 @@ export interface Watchlist {
 
 export interface WatchlistMatch {
   id: string;
-  source: string; // e.g. "News", "Telegram", "Twitter", "Threat Feed"
+  /** Where the match came from, e.g. "News (Reuters)", "Telegram (@channel)". */
+  source: string;
   title: string; // Headline / snippet
   matchValue: string; // The keyword or tag that triggered the match
   matchType: string; // e.g. "Keyword", "Country", "Domain"
-  date: string;
-  severity: "low" | "medium" | "high" | "critical";
+  /**
+   * When the matched item was published, as the upstream reported it.
+   *
+   * Null when it reported none. This was `|| new Date().toISOString()`, so a
+   * match on an undated item was stamped with the moment the check ran and
+   * rendered as though it had just been published.
+   */
+  date: string | null;
+  /**
+   * Severity of the matched item, where the upstream supplied one.
+   *
+   * Null when it did not. This defaulted to "medium" for social and "high" for
+   * Telegram — an invented threat rating attached to a keyword match, which is
+   * a statement about the text, not an assessment of it.
+   */
+  severity: "low" | "medium" | "high" | "critical" | null;
 }
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
@@ -136,8 +151,8 @@ export function getWatchlistMatches(
     list: string[],
     type: string,
     src: string,
-    date: string,
-    sev: any,
+    date: string | null,
+    sev: WatchlistMatch["severity"],
   ) => {
     if (!text) return;
     const txt = text.toLowerCase();
@@ -161,9 +176,12 @@ export function getWatchlistMatches(
   if (searchData.stories?.length) {
     searchData.stories.forEach((s) => {
       const headline = s.primaryTitle || "";
-      const source = s.primarySource || "News Wire";
-      const sev = s.threatLevel || "medium";
-      const date = s.pubDate || new Date().toISOString();
+      // "News Wire" invented an outlet name, "medium" invented a threat rating
+      // and new Date() invented a publication time — three fabrications on one
+      // record, all rendered together as though collected.
+      const source = s.primarySource || "publisher not reported";
+      const sev = s.threatLevel ?? null;
+      const date = s.pubDate ?? null;
       checkText(headline, filters.keywords, "Keyword", `News (${source})`, date, sev);
       checkText(headline, filters.organizations, "Organization", `News (${source})`, date, sev);
       checkText(headline, filters.people, "Person", `News (${source})`, date, sev);
@@ -177,17 +195,31 @@ export function getWatchlistMatches(
   if (searchData.socialMentions?.length) {
     searchData.socialMentions.forEach((m) => {
       const text = m.text || "";
-      const author = m.author || "User";
-      const date = m.pubDate || new Date().toISOString();
-      checkText(text, filters.keywords, "Keyword", `Twitter (@${author})`, date, "medium");
-      checkText(text, filters.hashtags, "Hashtag", `Twitter (@${author})`, date, "medium");
+      const author = m.author || "author not reported";
+      const date = m.pubDate ?? null;
+      checkText(
+        text,
+        filters.keywords,
+        "Keyword",
+        `${m.platform || "social"} (@${author})`,
+        date,
+        null,
+      );
+      checkText(
+        text,
+        filters.hashtags,
+        "Hashtag",
+        `${m.platform || "social"} (@${author})`,
+        date,
+        null,
+      );
       checkText(
         m.platform,
         filters.socialAccounts,
         "Social Account",
-        `Twitter (@${author})`,
+        `${m.platform || "social"} (@${author})`,
         date,
-        "medium",
+        null,
       );
     });
   }
@@ -197,21 +229,18 @@ export function getWatchlistMatches(
     searchData.cyberThreats.forEach((t) => {
       const ip = t.ip || "";
       const malware = t.malware || "";
-      checkText(
-        ip,
-        filters.domains,
-        "Domain/IP",
-        "Threat Feed (Feodo)",
-        new Date().toISOString(),
-        "critical",
-      );
+      // The blocklist rows parsed here carry no per-entry timestamp, and a
+      // keyword match against one is not a severity assessment. Both were
+      // invented: every IP match was stamped "critical" and dated to the moment
+      // the watchlist ran.
+      checkText(ip, filters.domains, "Domain/IP", "Threat Feed (Feodo)", t.date ?? null, null);
       checkText(
         malware,
         filters.keywords,
         "Malware keyword",
         "Threat Feed (Feodo)",
-        new Date().toISOString(),
-        "high",
+        t.date ?? null,
+        null,
       );
     });
   }
@@ -220,17 +249,10 @@ export function getWatchlistMatches(
   if (searchData.telegramPosts?.length) {
     searchData.telegramPosts.forEach((p) => {
       const text = p.text || "";
-      const channel = p.channel || "channel";
-      const date = p.date || new Date().toISOString();
-      checkText(text, filters.keywords, "Keyword", `Telegram (@${channel})`, date, "high");
-      checkText(
-        text,
-        filters.organizations,
-        "Organization",
-        `Telegram (@${channel})`,
-        date,
-        "high",
-      );
+      const channel = p.channel || "channel not reported";
+      const date = p.date ?? null;
+      checkText(text, filters.keywords, "Keyword", `Telegram (@${channel})`, date, null);
+      checkText(text, filters.organizations, "Organization", `Telegram (@${channel})`, date, null);
     });
   }
 
@@ -242,5 +264,11 @@ export function getWatchlistMatches(
   // Fabricated watchlist hits are the most misleading thing this system could
   // put in front of an analyst.
 
-  return matches.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // Undated matches sort last rather than being coerced to the epoch, which
+  // would rank every unreported date as the oldest hit in the list.
+  const ts = (v: string | null) => {
+    const t = v ? new Date(v).getTime() : NaN;
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  return matches.sort((a, b) => ts(b.date) - ts(a.date));
 }

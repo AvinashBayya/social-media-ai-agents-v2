@@ -176,13 +176,13 @@ export async function collectGpsJamming(): Promise<LayerResult> {
     const { fetchGpsInterference } = await import("./gps-interference");
     const data = await fetchGpsInterference();
     if (!data || !data.hexes.length) {
-      return { layer: "infrastructure", records: [], unplaceable: 0, error: null };
+      return { layer: "gpsjam", records: [], unplaceable: 0, error: null };
     }
     const records: GeoRecord[] = data.hexes.slice(0, 100).map((h) => ({
       id: `gpsjam-${h.h3}`,
       title: `GPS Interference (${h.level.toUpperCase()}) — ${h.pct.toFixed(1)}% aircraft affected`,
       locates: "H3 Hex Aircraft Navigation Interference Area",
-      layer: "infrastructure",
+      layer: "gpsjam",
       source: "GPSJam ADS-B Exchange",
       url: "https://gpsjam.org",
       lat: h.lat,
@@ -192,12 +192,15 @@ export async function collectGpsJamming(): Promise<LayerResult> {
       magnitude: h.pct,
       magnitudeLabel: `${h.pct.toFixed(1)}% affected`,
       detail: { hex: h.h3, affected: h.affectedAircraft, total: h.totalAircraft },
-      credibility: h.level === "high" ? 0.9 : 0.6,
+      // null, not 0.9/0.6. The UI labels this field "Module 1 credibility",
+      // and Module 1 has never scored these records — the numbers were a
+      // severity level re-badged as a credibility assessment.
+      credibility: null,
     }));
-    return { layer: "infrastructure", records, unplaceable: 0, error: null };
+    return { layer: "gpsjam", records, unplaceable: 0, error: null };
   } catch (err: any) {
     return {
-      layer: "infrastructure",
+      layer: "gpsjam",
       records: [],
       unplaceable: 0,
       error: `GPSJam feed unavailable: ${err?.message ?? String(err)}`,
@@ -210,13 +213,13 @@ export async function collectRadiation(): Promise<LayerResult> {
     const { fetchRadiationFeed } = await import("./radiation");
     const data = await fetchRadiationFeed();
     if (!data || !data.stations.length) {
-      return { layer: "infrastructure", records: [], unplaceable: 0, error: null };
+      return { layer: "radiation", records: [], unplaceable: 0, error: null };
     }
     const records: GeoRecord[] = data.stations.map((s) => ({
       id: s.id,
       title: `Radiation Level (${s.status.toUpperCase()}): ${s.usvPerHour} µSv/h`,
       locates: `Environmental Radiation Sensor: ${s.name}`,
-      layer: "infrastructure",
+      layer: "radiation",
       source: s.source,
       url: "https://safecast.org",
       lat: s.lat,
@@ -226,12 +229,15 @@ export async function collectRadiation(): Promise<LayerResult> {
       magnitude: s.usvPerHour,
       magnitudeLabel: `${s.usvPerHour} µSv/h`,
       detail: { station: s.name, status: s.status },
-      credibility: s.status === "high" ? 1.0 : s.status === "elevated" ? 0.7 : 0.4,
+      // null for the same reason as GPS jamming: a reading's status band is
+      // not a Module 1 credibility score, and rendering it under that label
+      // asserted an assessment nothing performed.
+      credibility: null,
     }));
-    return { layer: "infrastructure", records, unplaceable: 0, error: null };
+    return { layer: "radiation", records, unplaceable: 0, error: null };
   } catch (err: any) {
     return {
-      layer: "infrastructure",
+      layer: "radiation",
       records: [],
       unplaceable: 0,
       error: `Radiation feed unavailable: ${err?.message ?? String(err)}`,
@@ -265,4 +271,3 @@ export async function collectGeoLayers(query: string): Promise<GeoCollection> {
 export const fetchGeoLayers = createServerFn({ method: "GET" })
   .validator((d: { query?: string } | undefined) => d)
   .handler(async ({ data }) => collectGeoLayers(data?.query ?? ""));
-

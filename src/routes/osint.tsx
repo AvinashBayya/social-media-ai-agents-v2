@@ -4,6 +4,20 @@ import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { containsWord, matchesQuery, parseQueryCached } from "@/utils/search";
 import { buildOverviewModules, formatFeedDate, rssEmptyReason } from "@/utils/osint-summary";
 
+/**
+ * Renders a value the collector did not supply.
+ *
+ * Several fields on this page are now nullable because the upstream feed
+ * genuinely does not carry them - an IOC liveness flag, a per-entry
+ * timestamp, a UCDP conflict id, a casualty count. Every one of those was
+ * previously defaulted to a confident-looking value ("online", "now",
+ * "State Conflict", 0). This is the single place that decides how an
+ * absence looks, so it cannot drift back into a plausible substitute.
+ */
+function NotReported({ what = "not reported" }: { what?: string }) {
+  return <span className="italic text-[#64748B]">{what}</span>;
+}
+
 import { createServerFn } from "@tanstack/react-start";
 import { fetchOSINT } from "./news";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
@@ -158,13 +172,19 @@ export const fetchCyberThreats = createServerFn({ method: "GET" })
               .map((item: any) => ({
                 ip: item.ip_address || item.dst_ip,
                 source: "Feodo Tracker",
-                malware: item.malware || "Unknown botnet",
-                status: item.status || "online",
+                // null, not "Unknown botnet" — that asserted a malware class for an
+                // entry that named none.
+                malware: item.malware || null,
+                // null, never "online". An indicator whose status Feodo did not report
+                // was rendering as a LIVE command-and-control server, beside a
+                // pulsing green dot. "Not reported" and "confirmed online" are
+                // opposite findings.
+                status: item.status || null,
                 severity:
                   item.status === "online" && /emotet|qakbot/i.test(item.malware || "")
                     ? "critical"
                     : "high",
-                date: item.last_online || new Date().toISOString(),
+                date: item.last_online || null,
               }))
           );
         }
@@ -196,9 +216,14 @@ export const fetchCyberThreats = createServerFn({ method: "GET" })
                 ip,
                 source: "C2IntelFeeds",
                 malware: desc.replace("Possible ", "").replace(" C2 IP", ""),
-                status: "active",
+                // The CSV columns parsed here carry no liveness flag and no
+                // per-entry timestamp. Both were being invented: every row was
+                // stamped "active" and dated to the moment of the fetch, so a
+                // 30-day feed rendered as a wall of indicators confirmed live
+                // this second. Presence in the feed is the only real fact.
+                status: null,
                 severity: desc.toLowerCase().includes("cobalt strike") ? "high" : "medium",
-                date: new Date().toISOString(),
+                date: null,
               });
             }
           }
@@ -265,7 +290,7 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
             id: `${handle}-${i}`,
             channel: handle,
             text: texts[texts.length - 1 - i],
-            date: times[times.length - 1 - i] || new Date().toISOString(),
+            date: times[times.length - 1 - i] || null,
           });
         }
         return posts;
@@ -280,7 +305,13 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
       allPosts = allPosts.concat(posts);
     }
 
-    allPosts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Undated posts sort last rather than being coerced to the epoch, which
+    // would have ranked them as the oldest content in the feed.
+    const ts = (v: unknown) => {
+      const t = v ? new Date(String(v)).getTime() : NaN;
+      return Number.isFinite(t) ? t : -Infinity;
+    };
+    allPosts.sort((a, b) => ts(b.date) - ts(a.date));
 
     // An empty result is returned as empty. This used to fall back to four
     // hardcoded "BREAKING" messages — GPS jamming in the Baltic, armour massing
@@ -308,11 +339,20 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
           return list.map((e: any) => ({
             id: e.id,
             country: e.country,
-            deaths: (e.deaths_a || 0) + (e.deaths_b || 0) + (e.deaths_civilians || 0),
+            // An event with NO casualty figures reported is not an event with
+            // zero casualties. Only sum the fields UCDP actually supplied;
+            // null means unreported and renders as such.
+            deaths: [e.deaths_a, e.deaths_b, e.deaths_civilians].some(
+              (v: unknown) => v !== null && v !== undefined && v !== "",
+            )
+              ? Number(e.deaths_a || 0) + Number(e.deaths_b || 0) + Number(e.deaths_civilians || 0)
+              : null,
             latitude: e.latitude,
             longitude: e.longitude,
             date: e.date_start,
-            conflict: e.conflict_new_id || "State Conflict",
+            // null, not "State Conflict" — that invented a conflict
+            // classification for any event whose id UCDP did not supply.
+            conflict: e.conflict_new_id || null,
           }));
         }
       } catch (err) {
@@ -339,7 +379,7 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
             title: a.title,
             url: a.url,
             source: a.source || "GDELT",
-            date: a.seendate || new Date().toISOString(),
+            date: a.seendate || null,
           }));
         }
       } catch (err) {
@@ -360,7 +400,7 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
                 typeof item.source === "object"
                   ? (item.source as any).text
                   : item.source || "Google News",
-              date: item.pubDate || new Date().toISOString(),
+              date: item.pubDate || null,
             }));
           } catch (rssErr) {
             console.error("Geopolitical fallback RSS failed:", rssErr);
@@ -385,7 +425,10 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
       } catch (err) {
         console.error("OpenSky fetch failed:", err);
       }
-      return 4290;
+      // null, never 4290. This was the UNCONDITIONAL error return, so any
+      // OpenSky failure produced an invented flight count labelled "Active
+      // flights tracked globally via OpenSky API".
+      return null;
     };
 
     const [ucdpEventsList, gdeltStoriesList, openSkyFlightCount] = await Promise.all([
@@ -641,7 +684,7 @@ function Page() {
   );
 
   const filteredUcdp = (geopoliticalData?.ucdpEvents || []).filter(
-    (e: any) => matchQuery(e.country, filterText) || matchQuery(e.conflict, filterText),
+    (e: any) => matchQuery(e.country, filterText) || matchQuery(e.conflict ?? "", filterText),
   );
 
   const filteredGdelt = (geopoliticalData?.gdeltStories || []).filter((s: any) =>
@@ -746,26 +789,33 @@ function Page() {
                     <TableRow className="border-[#263548]">
                       <TableCell className="text-[#94A3B8] font-semibold py-2">Registrar</TableCell>
                       <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
-                        {osintProfile?.whois?.Registrar || "GoDaddy"}
+                        {osintProfile?.whois?.Registrar || (
+                          <span className="italic text-[#64748B]">not reported</span>
+                        )}
                       </TableCell>
                     </TableRow>
                     <TableRow className="border-[#263548]">
                       <TableCell className="text-[#94A3B8] font-semibold py-2">Created</TableCell>
                       <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
-                        {osintProfile?.whois?.Created || "2026-07-10"}
+                        {osintProfile?.whois?.Created || (
+                          <span className="italic text-[#64748B]">not reported</span>
+                        )}
                       </TableCell>
                     </TableRow>
                     <TableRow className="border-[#263548]">
                       <TableCell className="text-[#94A3B8] font-semibold py-2">Expires</TableCell>
                       <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
-                        {osintProfile?.whois?.Expires || "2027-07-10"}
+                        {osintProfile?.whois?.Expires || (
+                          <span className="italic text-[#64748B]">not reported</span>
+                        )}
                       </TableCell>
                     </TableRow>
                     <TableRow className="border-0">
                       <TableCell className="text-[#94A3B8] font-semibold py-2">NS</TableCell>
                       <TableCell className="text-[#F3F4F6] text-right font-mono py-2 truncate max-w-[200px]">
-                        {osintProfile?.whois?.NS ||
-                          "ns41.domaincontrol.com, ns42.domaincontrol.com"}
+                        {osintProfile?.whois?.NS || (
+                          <span className="italic text-[#64748B]">not reported</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   </TableBody>
@@ -784,13 +834,17 @@ function Page() {
                 <div>
                   <div className="text-[10px] text-[#94A3B8] font-bold uppercase">A</div>
                   <div className="text-sm font-bold text-[#F3F4F6] mt-0.5">
-                    {osintProfile?.dns?.a || "216.198.79.1"}
+                    {osintProfile?.dns?.a || (
+                      <span className="italic text-[#64748B]">not reported</span>
+                    )}
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[#94A3B8] font-bold uppercase">MX</div>
                   <div className="text-sm font-bold text-[#F3F4F6] mt-0.5">
-                    {osintProfile?.dns?.mx || "No MX record found"}
+                    {osintProfile?.dns?.mx || (
+                      <span className="italic text-[#64748B]">not reported</span>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -974,20 +1028,11 @@ function Page() {
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[#94A3B8] font-mono">
                 <span>Try:</span>
-                {[
-                  "aster-motors.com",
-                  "vector17@proton.me",
-                  "+91 98••••4211",
-                  "0x8a2c…f019",
-                  "@osint_watch",
-                ].map((e) => (
-                  <button
-                    key={e}
-                    className="rounded border border-[#263548] bg-[#0B1220] px-2 py-0.5 hover:bg-[#1A2332] text-[#94A3B8] hover:text-[#F3F4F6] transition-colors"
-                  >
-                    {e}
-                  </button>
-                ))}
+                {/*
+                  REMOVED: five example-target chips that had no onClick.
+                  They looked like one-click targets and did nothing when
+                  pressed. The target box above is the working control.
+                */}
               </div>
             </CardContent>
           </Card>
@@ -1032,31 +1077,14 @@ function Page() {
             })}
           </div>
 
-          <Card className="mt-4 border border-primary/15 bg-primary/5">
-            <CardContent className="p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Aggregate confidence</h3>
-                <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
-                  74 / 100
-                </Badge>
-              </div>
-              <Progress value={74} className="h-2" />
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {[
-                  { l: "Corroborating sources", v: "8 / 12" },
-                  { l: "Recency", v: "83% within 30d" },
-                  { l: "Source diversity", v: "5 domains" },
-                ].map((x) => (
-                  <div key={x.l} className="rounded-md border bg-card p-3">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                      {x.l}
-                    </div>
-                    <div className="mt-1 text-sm font-semibold">{x.v}</div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          {/*
+              REMOVED: an "Aggregate confidence 74 / 100" panel with a filled
+              progress bar, "8 / 12 corroborated", "83% within 30d" and
+              "5 domains". Every figure was hardcoded. It sat directly beneath
+              the six Overview cards whose counts are genuinely derived from
+              collections this page holds, so it read as the same class of
+              measurement. There is no corroboration engine behind it.
+            */}
         </TabsContent>
 
         {/* Tab content 2: Cyber Threat IOCs */}
@@ -1115,7 +1143,7 @@ function Page() {
                           <TableCell className="text-xs capitalize">
                             <span className="flex items-center gap-1.5">
                               <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                              {threat.status}
+                              {threat.status ?? <NotReported />}
                             </span>
                           </TableCell>
                           <TableCell className="text-xs">
@@ -1183,7 +1211,7 @@ function Page() {
                         <div className="flex items-center justify-between border-b pb-2">
                           <span className="text-xs font-bold text-primary">@{post.channel}</span>
                           <span className="text-[10px] text-muted-foreground">
-                            {new Date(post.date).toLocaleString()}
+                            {formatFeedDate(post.date)}
                           </span>
                         </div>
                         <p className="text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap">
@@ -1217,7 +1245,7 @@ function Page() {
                   <Compass className="size-3.5" /> ADS-B Flight Tracking
                 </span>
                 <div className="text-3xl font-extrabold text-foreground">
-                  {geopoliticalData?.flightCount || 4290}
+                  {geopoliticalData?.flightCount ?? "not collected"}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Active flights tracked globally via OpenSky API.
@@ -1289,13 +1317,21 @@ function Page() {
                         <div className="font-semibold text-foreground/95 flex items-center gap-1">
                           <MapPin className="size-3 text-muted-foreground" /> {event.country}
                         </div>
-                        <span className="text-[10px] text-muted-foreground">{event.conflict}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {event.conflict ?? <NotReported what="conflict id not reported" />}
+                        </span>
                       </div>
                       <div className="text-right">
                         <Badge variant="destructive" className="h-5 text-[10px] font-bold">
-                          {event.deaths} casualties
+                          {event.deaths === null ? (
+                            <NotReported what="casualties not reported" />
+                          ) : (
+                            `${event.deaths} casualties`
+                          )}
                         </Badge>
-                        <div className="text-[9px] text-muted-foreground mt-0.5">{event.date}</div>
+                        <div className="text-[9px] text-muted-foreground mt-0.5">
+                          {formatFeedDate(event.date)}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -1335,7 +1371,7 @@ function Page() {
                       </a>
                       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                         <span>Source: {story.source}</span>
-                        <span>{new Date(story.date).toLocaleDateString()}</span>
+                        <span>{formatFeedDate(story.date)}</span>
                       </div>
                     </div>
                   ))
@@ -1527,7 +1563,8 @@ function Page() {
                   <Radio className="size-4 text-[#06B6D4]" /> GPS Interference & ADS-B Jamming Feed
                 </CardTitle>
                 <CardDescription className="text-[10px] text-[#94A3B8]">
-                  Real-time hex map statistics from ADS-B Exchange reporting aircraft navigation disruption.
+                  Real-time hex map statistics from ADS-B Exchange reporting aircraft navigation
+                  disruption.
                 </CardDescription>
               </div>
               {gpsJamData && (
@@ -1541,15 +1578,21 @@ function Page() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
                     <span className="text-[#94A3B8] text-[10px] block">High Severity Hexes</span>
-                    <span className="text-lg font-bold text-[#EF4444]">{gpsJamData.stats.highCount}</span>
+                    <span className="text-lg font-bold text-[#EF4444]">
+                      {gpsJamData.stats.highCount}
+                    </span>
                   </div>
                   <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
                     <span className="text-[#94A3B8] text-[10px] block">Medium Severity Hexes</span>
-                    <span className="text-lg font-bold text-[#F59E0B]">{gpsJamData.stats.mediumCount}</span>
+                    <span className="text-lg font-bold text-[#F59E0B]">
+                      {gpsJamData.stats.mediumCount}
+                    </span>
                   </div>
                   <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
                     <span className="text-[#94A3B8] text-[10px] block">Primary Source</span>
-                    <span className="text-xs font-semibold text-[#F3F4F6] truncate block">{gpsJamData.source}</span>
+                    <span className="text-xs font-semibold text-[#F3F4F6] truncate block">
+                      {gpsJamData.source}
+                    </span>
                   </div>
                 </div>
               ) : (
@@ -1565,10 +1608,12 @@ function Page() {
             <CardHeader className="p-0 pb-3 border-b border-[#263548] mb-3 flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-sm font-bold text-[#F3F4F6] flex items-center gap-2">
-                  <Activity className="size-4 text-[#10B981]" /> Environmental Radiation Sensor Network
+                  <Activity className="size-4 text-[#10B981]" /> Environmental Radiation Sensor
+                  Network
                 </CardTitle>
                 <CardDescription className="text-[10px] text-[#94A3B8]">
-                  Open radiation sensor measurements (Safecast/EURDEP) in microSieverts per hour (µSv/h).
+                  Open radiation sensor measurements (Safecast/EURDEP) in microSieverts per hour
+                  (µSv/h).
                 </CardDescription>
               </div>
               {radiationData && (
@@ -1581,16 +1626,24 @@ function Page() {
               {radiationData ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">Elevated / High Stations</span>
-                    <span className="text-lg font-bold text-[#F59E0B]">{radiationData.elevatedCount}</span>
+                    <span className="text-[#94A3B8] text-[10px] block">
+                      Elevated / High Stations
+                    </span>
+                    <span className="text-lg font-bold text-[#F59E0B]">
+                      {radiationData.elevatedCount}
+                    </span>
                   </div>
                   <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
                     <span className="text-[#94A3B8] text-[10px] block">Normal Baseline Range</span>
-                    <span className="text-xs font-semibold text-[#10B981] block">0.05 – 0.20 µSv/h</span>
+                    <span className="text-xs font-semibold text-[#10B981] block">
+                      0.05 – 0.20 µSv/h
+                    </span>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-8 text-[#94A3B8]">Loading radiation sensor network data...</div>
+                <div className="text-center py-8 text-[#94A3B8]">
+                  Loading radiation sensor network data...
+                </div>
               )}
             </CardContent>
           </Card>

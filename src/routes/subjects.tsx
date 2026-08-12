@@ -496,8 +496,14 @@ function SubjectsPage() {
                     <div key={idx} className="relative pl-4 border-l border-[#263548] pb-1">
                       <span className="absolute left-[-4px] top-1 size-2 rounded-full bg-[#3B82F6]" />
                       <div className="flex justify-between items-center text-[8px] text-[#94A3B8]/60">
-                        <span>{new Date(m.date).toLocaleTimeString()}</span>
-                        <Tone tone={m.severity} />
+                        <span>
+                          {m.date ? new Date(m.date).toLocaleTimeString() : "no date reported"}
+                        </span>
+                        {m.severity ? (
+                          <Tone tone={m.severity} />
+                        ) : (
+                          <span className="italic text-[#64748B]">unrated</span>
+                        )}
                       </div>
                       <p className="text-white text-[9px] mt-0.5 leading-snug truncate">
                         Match hit: "{m.matchValue}" in {m.source}
@@ -550,7 +556,11 @@ function SubjectsPage() {
                             "{m.title}"
                           </td>
                           <td className="p-3 text-right">
-                            <Tone tone={m.severity} />
+                            {m.severity ? (
+                              <Tone tone={m.severity} />
+                            ) : (
+                              <span className="italic text-[#64748B]">unrated</span>
+                            )}
                           </td>
                         </tr>
                       ))

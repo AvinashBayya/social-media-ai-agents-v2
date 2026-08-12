@@ -51,7 +51,14 @@ export const PRECISION_LABEL: Record<GeoPrecision, string> = {
   country: "country-level (±400 km)",
 };
 
-export type GeoLayerId = "conflict" | "seismic" | "news" | "imagery" | "infrastructure";
+export type GeoLayerId =
+  | "conflict"
+  | "seismic"
+  | "news"
+  | "imagery"
+  | "infrastructure"
+  | "gpsjam"
+  | "radiation";
 
 export interface GeoLayer {
   id: GeoLayerId;
@@ -103,6 +110,32 @@ export const GEO_LAYERS: GeoLayer[] = [
       "Not wired. Shodan InternetDB is the keyless endpoint we use and it returns no " +
       "geolocation; host geo needs the paid Shodan API. No coordinates are invented to fill it.",
     colour: "#8B5CF6",
+  },
+  /*
+   * GPS jamming and radiation used to be returned under `layer: "infrastructure"`
+   * — the SAME id as Shodan and as each other. The map resolves a record's layer
+   * with `.find()`, so only the first match won: radiation records were drawn in
+   * Shodan's colour, carrying Shodan's "not wired" provenance, and their count
+   * and error state were unreachable. Observed as 479 markers plotted against
+   * 454 accounted for in the layer cards.
+   */
+  {
+    id: "gpsjam",
+    label: "GPS interference (GPSJam)",
+    provenance:
+      "GPSJam aggregates ADS-B position-quality reports into H3 hexes, so a marker locates " +
+      "an AREA where aircraft reported degraded navigation — not a jammer. Hex centroid, " +
+      "drawn at city precision.",
+    colour: "#F97316",
+  },
+  {
+    id: "radiation",
+    label: "Environmental radiation (Safecast)",
+    provenance:
+      "Safecast is a volunteer sensor network. Device siting and calibration vary between " +
+      "contributors, so readings are comparable over time at one station but not strictly " +
+      "between stations.",
+    colour: "#22D3EE",
   },
 ];
 

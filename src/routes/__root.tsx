@@ -14,6 +14,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { I18nProvider } from "../i18n/i18n-context";
 import { DemoSessionProvider, useDemoSession } from "../components/demo-session";
+import { Toaster } from "../components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -178,6 +179,21 @@ function RootComponent() {
             {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
             <Outlet />
           </DemoGate>
+          {/*
+            The app's entire success/failure channel. `sonner` was a dependency,
+            `ui/sonner.tsx` exported <Toaster />, and 30 `toast.*` call sites
+            across 9 files were writing to it — but nothing ever rendered it, so
+            every message the app tried to show was silently dropped.
+
+            The damaging case was vault.tsx: when SubtleCrypto is unavailable
+            (plain HTTP on a non-localhost origin) evidence hashing fails and
+            `toast.error("Evidence not added…")` fires. The analyst saw nothing
+            at all, and the file was silently not added.
+
+            It sits OUTSIDE DemoGate on purpose — /login raises toasts too, and
+            the gate does not render its children while redirecting.
+          */}
+          <Toaster position="top-right" richColors closeButton />
         </DemoSessionProvider>
       </I18nProvider>
     </QueryClientProvider>

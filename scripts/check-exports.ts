@@ -77,6 +77,7 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "normaliseHost",
     "readVault",
     "writeVault",
+    "VAULT_BACKUP_PATH",
     "resolveCredential",
     "recordCredentialUse",
     "verifyProviderCredential",

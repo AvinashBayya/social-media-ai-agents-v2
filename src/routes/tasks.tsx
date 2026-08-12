@@ -115,17 +115,20 @@ function TasksPage() {
       push(`[FAIL] Module 2 unavailable: ${e?.message ?? e}`);
     }
 
+    // These two lines said "[NOT IMPLEMENTED]" long after both modules were
+    // built. That understated the system as badly as the all-green matrix
+    // overstated it, and the two contradicted each other on the same page.
     push(
-      "[NOT IMPLEMENTED] Module 3: social media analysis. Reddit RSS and Google News site: queries are collected, but bot scoring, influence mapping and narrative alignment are not built. Instagram/Facebook require paid API access.",
+      "[PARTIAL] Module 3: social media analysis. Bluesky Jetstream firehose and public AppView, Mastodon hashtag timelines, Telegram channel previews and CIB signal detection all run. Reddit requires OAuth credentials. Instagram, Facebook and X are not collected — platform terms and pricing make broad collection unavailable, which is a constraint rather than a gap.",
     );
     push(
-      "[NOT IMPLEMENTED] Module 4: image/video and deepfake detection. No vision model is configured; no image is read.",
+      "[PARTIAL] Module 4: media analysis. C2PA Content Credentials, EXIF, OCR across nine Indic scripts, perceptual hashing, keyframe sampling and scene-cut detection all run in the browser. No deepfake classifier, object detector, face matching or audio transcription — those gaps are declared on /images with the reason for each.",
     );
     push(
-      "[PARTIAL] Module 5: report generation runs on the configured open-weight LLM. GIS renders real Natural Earth geometry, but per-event coordinates are not geocoded.",
+      "[PARTIAL] Module 5: report generation runs on the configured open-weight LLM. The GIS map renders CARTO raster tiles; USGS epicentres are exact coordinates, while GDELT records carry the publisher country rather than an event location and are drawn as country-precision uncertainty circles.",
     );
     push(
-      "[SYS] Probe complete. 2 of 5 modules execute; 1 partial; 2 not implemented. This is a prototype, not an accredited system.",
+      "[SYS] Probe complete. Modules 1 and 2 were executed above and their real results are shown. Modules 3, 4 and 5 are implemented with stated limits and are not exercised by this probe — drive them from /social, /images and /reports. This is a prototype, not an accredited system.",
     );
 
     setTesting(false);
@@ -161,6 +164,13 @@ function TasksPage() {
    * against a real collected corpus.
    */
   const evaluateSource = () => {
+    // An empty box previously scored as "Publisher tier score (): 50/100
+    // (Moderate)" — a rating for a publisher the analyst never named.
+    if (!mod1Source.trim()) {
+      setMod1Result(null);
+      toast.error("Enter a news source or domain to evaluate.");
+      return;
+    }
     const domain = domainOf(mod1Source) || mod1Source.trim().toLowerCase();
     const entry = reputationOf(domain);
 
@@ -299,48 +309,88 @@ function TasksPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 space-y-3">
+                  {/*
+                    Every row of this matrix carried a green "Nominal / Verified"
+                    badge — including Modules 3 and 4, which the self-test on
+                    THIS SAME PAGE reports as [NOT IMPLEMENTED], and whose own
+                    tabs say "This module does not produce a result." A false
+                    compliance claim on a compliance console, for a defence
+                    evaluation, is the most expensive kind of overclaim in this
+                    codebase.
+
+                    Status is now stated per module and matches what the rest of
+                    the system says about itself. `features` lists only what is
+                    actually built: "Deepfake Likelihood" and "Object count" are
+                    declared in imaging.ts NOT_IMPLEMENTED and are named here as
+                    gaps rather than delivered features.
+                  */}
                   {[
                     {
                       m: "Module 1",
                       name: "Source Credibility Check",
-                      features: "Credibility Score, Cross Verification, Confidence Rating",
+                      features:
+                        "Seven PS-18 factors, analyst-weighted, per-factor evidence. Six deterministic, one model-backed and opt-in.",
+                      state: "implemented" as const,
+                      note: "Weight profiles are per-browser (localStorage), not per-user and not audited.",
                     },
                     {
                       m: "Module 2",
                       name: "Open Source Content Analysis",
-                      features: "NER, Topic Detection, Clustering, Semantic Search, Summarization",
+                      features:
+                        "TF-IDF clustering, entity extraction, summarisation, language detection, passive external recon.",
+                      state: "implemented" as const,
+                      note: "Model-backed steps require a configured provider; failures surface as errors.",
                     },
                     {
                       m: "Module 3",
                       name: "Social Media Analysis",
-                      features: "Trend Detection, Influencer score, Bot detection, Hashtag growth",
+                      features:
+                        "Bluesky firehose + AppView, Mastodon, Telegram previews, CIB signal detection.",
+                      state: "partial" as const,
+                      note: "Reddit needs OAuth credentials. Instagram, Facebook and X are not collected — the platform terms and pricing make it unavailable, not unimplemented.",
                     },
                     {
                       m: "Module 4",
                       name: "Images & Video Analysis",
-                      features: "OCR, Metadata extraction, Deepfake Likelihood, Object count",
+                      features:
+                        "C2PA Content Credentials, EXIF, OCR (9 Indic scripts), perceptual hashing, keyframes, scene cuts.",
+                      state: "partial" as const,
+                      note: "No deepfake classifier, no object detection, no face matching, no audio transcription — see the declared gaps on /images.",
                     },
                     {
                       m: "Module 5",
                       name: "Report and GIS Visualization",
-                      features: "Executive Dossiers, PDF export, Leaflet interactive map",
+                      features:
+                        "Cited intelligence products with model provenance, PDF/Markdown export, Leaflet map with coordinate-precision rendering.",
+                      state: "partial" as const,
+                      note: "UCDP needs a token; GDELT gives publisher country, not event location. Both are reported rather than hidden.",
                     },
                   ].map((item, idx) => (
                     <div
                       key={idx}
-                      className="flex flex-wrap items-center justify-between border-b border-[#263548]/30 pb-2 text-[10px]"
+                      className="flex flex-wrap items-start justify-between gap-2 border-b border-[#263548]/30 pb-2 text-[10px]"
                     >
-                      <div className="space-y-0.5">
-                        <div className="text-white font-bold">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="font-bold text-white">
                           {item.m} · {item.name}
                         </div>
-                        <div className="text-[#94A3B8]/60 text-[9px]">{item.features}</div>
+                        <div className="text-[9px] text-[#94A3B8]/60">{item.features}</div>
+                        <div className="text-[9px] italic text-[#64748B]">{item.note}</div>
                       </div>
                       <Badge
                         variant="outline"
-                        className="text-green-500 border-green-500/20 bg-green-500/5 uppercase font-bold text-[8px] h-5 rounded-none flex items-center gap-1"
+                        className={`flex h-5 items-center gap-1 rounded-none text-[8px] font-bold uppercase ${
+                          item.state === "implemented"
+                            ? "border-green-500/20 bg-green-500/5 text-green-500"
+                            : "border-amber-500/20 bg-amber-500/5 text-amber-500"
+                        }`}
                       >
-                        <CheckCircle2 className="size-3" /> Nominal / Verified
+                        {item.state === "implemented" ? (
+                          <CheckCircle2 className="size-3" />
+                        ) : (
+                          <AlertTriangle className="size-3" />
+                        )}
+                        {item.state === "implemented" ? "Implemented" : "Partial — see note"}
                       </Badge>
                     </div>
                   ))}

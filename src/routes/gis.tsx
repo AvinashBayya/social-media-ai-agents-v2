@@ -87,6 +87,11 @@ function GISPage() {
     news: true,
     imagery: true,
     infrastructure: true,
+    // GPS jamming and radiation previously shared the "infrastructure" id, so
+    // toggling that one checkbox silently controlled three unrelated sources
+    // and only one of them could ever render.
+    gpsjam: true,
+    radiation: true,
   });
   const [timeWindow, setTimeWindow] = useState<[number, number] | null>(null);
 

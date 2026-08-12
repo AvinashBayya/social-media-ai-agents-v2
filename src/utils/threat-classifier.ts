@@ -12,22 +12,53 @@ export type ThreatDomain = "military" | "cyber" | "geopolitical" | "unrest" | "i
 export type ThreatSeverity = "low" | "medium" | "high" | "critical";
 
 export interface ThreatEvaluation {
-  primaryDomain: ThreatDomain;
-  severity: ThreatSeverity;
-  score: number;
+  /** null when no indicator matched — the text is unclassified, not geopolitical. */
+  primaryDomain: ThreatDomain | null;
+  /** null when no indicator matched. "low" is a measurement; absence is not. */
+  severity: ThreatSeverity | null;
+  /** null when no indicator matched. Never a floor value. */
+  score: number | null;
   indicators: string[];
   rationale: string;
 }
 
-const DOMAIN_INDICATORS: Record<ThreatDomain, { critical: string[]; high: string[]; medium: string[] }> = {
+const DOMAIN_INDICATORS: Record<
+  ThreatDomain,
+  { critical: string[]; high: string[]; medium: string[] }
+> = {
   military: {
-    critical: ["airstrike", "ballistic missile", "troop invasion", "nuclear threat", "full mobilization"],
-    high: ["artillery barrage", "naval blockade", "air defense active", "fighter jet intercept", "drone strike"],
+    critical: [
+      "airstrike",
+      "ballistic missile",
+      "troop invasion",
+      "nuclear threat",
+      "full mobilization",
+    ],
+    high: [
+      "artillery barrage",
+      "naval blockade",
+      "air defense active",
+      "fighter jet intercept",
+      "drone strike",
+    ],
     medium: ["military exercise", "border patrol", "weapon deployment", "military convoy"],
   },
   cyber: {
-    critical: ["critical infrastructure offline", "power grid hack", "zero-day exploit wild", "wiper attack"],
-    high: ["ransomware operational", "c2 server", "c2 intel", "malware host", "ddos state infrastructure", "data exfiltration", "exfiltration"],
+    critical: [
+      "critical infrastructure offline",
+      "power grid hack",
+      "zero-day exploit wild",
+      "wiper attack",
+    ],
+    high: [
+      "ransomware operational",
+      "c2 server",
+      "c2 intel",
+      "malware host",
+      "ddos state infrastructure",
+      "data exfiltration",
+      "exfiltration",
+    ],
     medium: ["phishing campaign", "vulnerability disclosed", "port scanning", "credential leak"],
   },
   geopolitical: {
@@ -36,7 +67,12 @@ const DOMAIN_INDICATORS: Record<ThreatDomain, { critical: string[]; high: string
     medium: ["state summit", "diplomatic warning", "trade dispute", "border dispute"],
   },
   unrest: {
-    critical: ["state of emergency", "curfew imposed", "violent riots", "government building stormed"],
+    critical: [
+      "state of emergency",
+      "curfew imposed",
+      "violent riots",
+      "government building stormed",
+    ],
     high: ["tear gas deployed", "mass protest", "clashes police", "roadblock burning"],
     medium: ["peaceful demonstration", "strike action", "public rally", "picket line"],
   },
@@ -50,18 +86,30 @@ const DOMAIN_INDICATORS: Record<ThreatDomain, { critical: string[]; high: string
 export function classifyThreatText(text: string): ThreatEvaluation {
   if (!text || text.trim().length === 0) {
     return {
-      primaryDomain: "geopolitical",
-      severity: "low",
-      score: 0.1,
+      primaryDomain: null,
+      severity: null,
+      score: null,
       indicators: [],
-      rationale: "Empty or insufficient content for threat evaluation.",
+      rationale: "No text supplied, so nothing was evaluated.",
     };
   }
 
   const textLower = text.toLowerCase();
-  let highestSeverity: ThreatSeverity = "low";
-  let highestScore = 0.2;
-  let winningDomain: ThreatDomain = "geopolitical";
+  /*
+   * These start null, not at a floor.
+   *
+   * They were `severity = "low"`, `score = 0.2`, `domain = "geopolitical"`, so
+   * text matching NOTHING in any taxonomy still produced
+   * "Domain: GEOPOLITICAL · Severity: LOW · Confidence Score: 20%" — a
+   * measurement presented for an evaluation that found nothing, in a file whose
+   * own header promises "zero synthetic risk scores".
+   *
+   * `highestScore` is compared numerically below, so it keeps a numeric working
+   * value; it is only published when an indicator actually matched.
+   */
+  let highestSeverity: ThreatSeverity | null = null;
+  let highestScore = 0;
+  let winningDomain: ThreatDomain | null = null;
   let matchedIndicators: string[] = [];
 
   for (const [domainStr, taxonomy] of Object.entries(DOMAIN_INDICATORS)) {
@@ -95,14 +143,20 @@ export function classifyThreatText(text: string): ThreatEvaluation {
     }
   }
 
+  const matched = matchedIndicators.length > 0;
+
   return {
-    primaryDomain: winningDomain,
-    severity: highestSeverity,
-    score: highestScore,
+    // A taxonomy that matched nothing yields no domain, no severity and no
+    // score. "Nothing matched" and "matched at the lowest level" are different
+    // findings and an analyst acts differently on each.
+    primaryDomain: matched ? winningDomain : null,
+    severity: matched ? highestSeverity : null,
+    score: matched ? highestScore : null,
     indicators: matchedIndicators,
-    rationale:
-      matchedIndicators.length > 0
-        ? `Matched ${matchedIndicators.length} indicator(s) in ${winningDomain} taxonomy (${matchedIndicators.join(", ")}).`
-        : "No explicit high-risk indicators matched; baseline geopolitical monitoring level assigned.",
+    rationale: matched
+      ? `Matched ${matchedIndicators.length} indicator(s) in ${winningDomain} taxonomy (${matchedIndicators.join(", ")}).`
+      : "No indicator from any domain taxonomy matched this text. This is not a " +
+        "finding that the subject is low risk — it is the absence of a keyword match, " +
+        "and the taxonomies cover a deliberately narrow set of terms.",
   };
 }

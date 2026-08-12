@@ -11,15 +11,30 @@ describe("Multi-Domain Threat Classifier & Focal Point Engine", () => {
   });
 
   test("classifyThreatText identifies cyber threat indicators", () => {
-    const res = classifyThreatText("Alert: Active C2 server host identified with exfiltration payloads.");
+    const res = classifyThreatText(
+      "Alert: Active C2 server host identified with exfiltration payloads.",
+    );
     expect(res.primaryDomain).toBe("cyber");
     expect(res.severity).toBe("high");
     expect(res.indicators).toContain("c2 server");
   });
 
-  test("classifyThreatText falls back gracefully for neutral text", () => {
+  test("text matching no taxonomy is unclassified, not low-risk", () => {
+    // This previously asserted severity === "low", enshrining a fabricated
+    // floor: unmatched text returned "geopolitical / low / 20%" as though it
+    // had been assessed. Absence of a keyword match is not a risk finding.
     const res = classifyThreatText("Scheduled quarterly meeting completed successfully.");
-    expect(res.severity).toBe("low");
+    expect(res.severity).toBeNull();
+    expect(res.primaryDomain).toBeNull();
+    expect(res.score).toBeNull();
+    expect(res.indicators).toEqual([]);
+    expect(res.rationale).toContain("not a finding that the subject is low risk");
+  });
+
+  test("empty input reports that nothing was evaluated", () => {
+    const res = classifyThreatText("   ");
+    expect(res.score).toBeNull();
+    expect(res.severity).toBeNull();
   });
 
   test("detectFocalPoints clusters events within spatio-temporal threshold", () => {

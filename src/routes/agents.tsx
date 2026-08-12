@@ -151,12 +151,21 @@ function AgentsPage() {
     const cap = selectedCapability;
     const activeTarget = activeCaseObj ? activeCaseObj.target : selectedEntityA || "General Target";
 
+    // Only the capabilities that actually call a model may log model activity.
+    // THREAT_CLASSIFY and FOCAL_POINT are deterministic and make ZERO network
+    // calls, yet both printed the full "[LLM] Dispatching prompt…" /
+    // "[LLM] Response received." trace — fabricated telemetry for work no model
+    // did, on the one panel an evaluator reads to see the model being used.
+    const usesModel = !["THREAT_CLASSIFY", "FOCAL_POINT"].includes(cap);
+
     setTerminalLog([
-      "[SYS] Connecting to configured LLM provider...",
+      ...(usesModel
+        ? ["[SYS] Connecting to configured LLM provider..."]
+        : ["[SYS] Deterministic capability — no model provider is contacted."]),
       "[SYS] Fetching workspace telemetry...",
       `[CRAWLER] Case: ${selectedCaseId || "GLOBAL"} | Target: ${activeTarget}`,
       `[ANALYSER] Capability: ${cap}`,
-      "[LLM] Dispatching prompt...",
+      usesModel ? "[LLM] Dispatching prompt..." : "[SYS] Running local analysis...",
     ]);
 
     try {
@@ -211,26 +220,57 @@ function AgentsPage() {
         title = `MULTI-DOMAIN THREAT EVALUATION: "${activeTarget}"`;
         const { classifyThreatText } = await import("@/utils/threat-classifier");
         const evalResult = classifyThreatText(
-          activeCaseObj?.description || `${activeTarget} military cyber infrastructure activity`
+          activeCaseObj?.description || `${activeTarget} military cyber infrastructure activity`,
         );
         blocks = [
           {
             heading: `Deterministic Threat Assessment`,
-            text: `Domain: ${evalResult.primaryDomain.toUpperCase()}\nSeverity: ${evalResult.severity.toUpperCase()}\nConfidence Score: ${(evalResult.score * 100).toFixed(0)}%\nIndicators: ${evalResult.indicators.join(", ") || "None"}\n\nRationale:\n${evalResult.rationale}`,
+            text: [
+              `Domain: ${evalResult.primaryDomain?.toUpperCase() ?? "not classified"}`,
+              `Severity: ${evalResult.severity?.toUpperCase() ?? "not assessed"}`,
+              `Confidence Score: ${
+                evalResult.score === null ? "not scored" : `${(evalResult.score * 100).toFixed(0)}%`
+              }`,
+              `Indicators: ${evalResult.indicators.join(", ") || "none matched"}`,
+              "",
+              "Rationale:",
+              evalResult.rationale,
+            ].join("\n"),
           },
         ];
       } else if (cap === "FOCAL_POINT") {
         title = `SPATIO-TEMPORAL FOCAL POINT CONVERGENCE`;
-        const { detectFocalPoints } = await import("@/utils/focal-point");
-        const clusters = detectFocalPoints([
-          { id: "ev1", lat: 31.76, lon: 35.21, timestamp: new Date().toISOString(), title: "Event Alpha", source: "OSINT" },
-          { id: "ev2", lat: 31.80, lon: 35.25, timestamp: new Date().toISOString(), title: "Event Beta", source: "Social" },
-          { id: "ev3", lat: 31.78, lon: 35.22, timestamp: new Date().toISOString(), title: "Event Gamma", source: "News" },
-        ]);
-        const text = clusters.length > 0
-          ? clusters.map(c => `Cluster ${c.id}: ${c.eventCount} events converged at (${c.centerLat}°, ${c.centerLon}°). Score: ${c.convergenceScore}`).join("\n\n")
-          : "No multi-event spatio-temporal convergence clusters detected.";
-        blocks = [{ heading: `Hotspot Convergence Analysis`, text }];
+        /*
+         * This fed THREE HARDCODED EVENTS into the focal-point detector and
+         * rendered the output as analysis:
+         *
+         *   { id: "ev1", lat: 31.76, lon: 35.21, title: "Event Alpha", ... }
+         *   { id: "ev2", lat: 31.80, lon: 35.25, title: "Event Beta",  ... }
+         *   { id: "ev3", lat: 31.78, lon: 35.22, title: "Event Gamma", ... }
+         *
+         * Those coordinates are Jerusalem. The panel then printed "3 events
+         * converged at (31.78°, 35.2267°). Score: 6.5" — an invented
+         * geographic finding, in the same application whose GIS module
+         * documents removing exactly this class of thing.
+         *
+         * Convergence needs real located events. The map layers on /gis hold
+         * them (USGS epicentres, UCDP events); this panel does not, and until
+         * it is wired to them it must say so rather than demonstrate on
+         * fictional input.
+         */
+        blocks = [
+          {
+            heading: `Hotspot Convergence Analysis`,
+            text:
+              "Not run. Convergence detection requires a set of real located, timestamped " +
+              "events, and this panel is not yet wired to a collection that supplies them.\n\n" +
+              "The detector itself (src/utils/focal-point.ts) is implemented and tested. " +
+              "Located events are currently held by the GIS layers on /gis — USGS epicentres " +
+              "and UCDP conflict events — and connecting those is the outstanding work.\n\n" +
+              "This panel previously demonstrated the detector on three hardcoded coordinates " +
+              "and presented the result as a finding.",
+          },
+        ];
       } else if (cap === "COMPARE_ENTITIES") {
         title = `CORRELATION INDEX: "${selectedEntityA}" vs "${selectedEntityB}"`;
         const res = await llmExecutiveBrief({
@@ -267,7 +307,7 @@ function AgentsPage() {
       });
       setTerminalLog((prev) => [
         ...prev,
-        "[LLM] Response received.",
+        usesModel ? "[LLM] Response received." : "[SYS] Local analysis complete.",
         "[SYS] Compilation complete. Output rendered in intel workspace.",
       ]);
       toast.success("AI analysis complete.");
@@ -286,7 +326,10 @@ function AgentsPage() {
     const success = pinToInvestigation(selectedCaseId, {
       kind: "note",
       title: outputResult.title,
-      source: `AI briefing — ${outputResult.model ?? "configured model"}`,
+      // `model` is never written by setOutputResult, so this recorded the
+      // literal string "configured model" on every pinned briefing. The
+      // producing model is named in the block heading instead.
+      source: "AI briefing (see heading for the model that produced it)",
       publishedAt: new Date().toISOString(),
       excerpt: outputResult.blocks.map((b: any) => [b.heading, b.text].join("\n")).join("\n\n"),
       credibility: null,
@@ -514,7 +557,7 @@ function AgentsPage() {
                   {/* Actions footer */}
                   <div className="pt-4 border-t border-[#263548]/40 flex justify-between items-center flex-wrap gap-3 mt-auto">
                     <span className="text-[8px] text-[#94A3B8]/40 uppercase tracking-widest font-mono">
-                      Verified cryptographic output · Sentinel AI
+                      AI-generated · not signed, not verified · Sentinel AI
                     </span>
                     <div className="flex gap-2">
                       <Button

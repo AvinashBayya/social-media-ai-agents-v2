@@ -775,12 +775,24 @@ export const fetchReviews = createServerFn({ method: "GET" })
         `Overall index score is ${overallRating}/5 based on ${reviewsList.length} verified news & media sources.`,
       );
 
+      /*
+       * These were `overallRating || 4.0`, `posPct || 70`, `neuPct || 20`,
+       * `negPct || 10` — so a computation that yielded nothing published a
+       * 4.0-of-5 rating and a tidy 70/20/10 sentiment split as though both had
+       * been measured.
+       *
+       * This handler has no call site today, which is the only reason those
+       * figures never reached a screen. Left as they were, the first caller
+       * would have surfaced four invented numbers. Zero is a real result here
+       * (no matching words found); null means nothing was analysed at all.
+       */
+      const analysed = reviewsList.length > 0;
       return {
-        rating: overallRating || 4.0,
+        rating: analysed ? overallRating : null,
         maxRating: 5,
-        positive: posPct || 70,
-        neutral: neuPct || 20,
-        negative: negPct || 10,
+        positive: analysed ? posPct : null,
+        neutral: analysed ? neuPct : null,
+        negative: analysed ? negPct : null,
         takeaways,
         reviews: activeReviews,
       };
@@ -1357,27 +1369,23 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
         }
       }
 
-      // 3. Dynamic candidate fallback generator for unregistered targets
-      if (xHandle === "No public profile found") {
-        const clean = q.toLowerCase().replace(/[^a-z0-9]/g, "");
-        xHandle = "@" + (clean || "target");
-        xStatus = "Monitored · Active Ingestion";
-        xFollowers = "N/A";
-      }
-      if (liHandle === "No public profile found") {
-        const hyphen = q
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/[^a-z0-9-]/g, "");
-        liHandle = hyphen || "target";
-        liStatus = "Monitored · Active Ingestion";
-        liFollowers = "N/A";
-      }
-      if (subReddit === "No public profile found") {
-        const clean = q.toLowerCase().replace(/[^a-z0-9]/g, "");
-        subReddit = clean || "target";
-        subRedditStatus = "Monitored · Active Ingestion";
-      }
+      /*
+       * REMOVED: a candidate fallback generator.
+       *
+       * When a lookup found no profile for the target, this MANUFACTURED one
+       * from the query string:
+       *
+       *   xHandle = "@" + q.toLowerCase().replace(/[^a-z0-9]/g, "");
+       *   xStatus = "Monitored - Active Ingestion";
+       *
+       * ...and did the same for LinkedIn and Reddit. That asserted two untrue
+       * things at once: that an account by that name exists, and that this
+       * system is ingesting it. Nothing had resolved it and nothing ingests any
+       * of the three. /agents and /subjects consume these values.
+       *
+       * "No public profile found" is the honest outcome and is already what the
+       * resolvers above return when they find nothing.
+       */
 
       const profiles = [
         {
@@ -1873,7 +1881,14 @@ function Page() {
                             validTones.has(lead.threatLevel) ? (lead.threatLevel as any) : "neutral"
                           }
                         />
-                        <Tone tone={lead.isAlert ? "unverified" : "verified"} />
+                        {/*
+                        This rendered "Verified" for any headline whose threat
+                        keywords did not fire. isAlert is a keyword match, not a
+                        verification, and nothing in this system verifies a
+                        story. The badge now names the threat classification it
+                        is actually derived from.
+                      */}
+                        <Tone tone={lead.isAlert ? "high" : "low"} />
                       </div>
                     </div>
 
