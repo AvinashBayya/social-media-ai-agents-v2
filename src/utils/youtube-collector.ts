@@ -47,6 +47,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { recordCredentialUse, resolveCredential } from "./credential-vault";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -906,7 +907,189 @@ async function _getDownloadUrl(
   };
 }
 
+// ─── Comments (official Data API v3) ─────────────────────────────────────────
+
+/**
+ * A top-level comment and its reply count.
+ *
+ * Comments are the one part of YouTube collection that needs a key, because
+ * they are the one part not carried by the player endpoint. They are also
+ * personal data: each one names an identifiable author. They are fetched for
+ * display and analysis on request and are not bulk-persisted — under the DPDP
+ * Act 2023 the fact that a comment is publicly visible is not a lawful basis
+ * for retaining a corpus of them.
+ */
+export interface YoutubeComment {
+  id: string;
+  author: string;
+  /** Channel URL of the author, where the API supplies one. */
+  authorChannelUrl: string | null;
+  text: string;
+  publishedAt: string;
+  /** Null when the API omitted it — never defaulted to 0. */
+  likeCount: number | null;
+  replyCount: number | null;
+}
+
+export interface YoutubeCommentsResponse {
+  id: string;
+  comments: YoutubeComment[];
+  /** Opaque cursor for the next page, or null at the end of the thread list. */
+  nextPageToken: string | null;
+  /** Units this call is estimated to have spent against the 10,000/day quota. */
+  quotaUnitsSpent: number;
+  provenance: {
+    source: string;
+    model: string;
+    fetchedAt: string;
+  };
+}
+
+const YT_DATA_API = "https://www.googleapis.com/youtube/v3";
+
+/**
+ * Top-level comments on a video, via the official `commentThreads.list`.
+ *
+ * Every failure is typed and distinguishable, following the same rule as the
+ * Reddit collector: a missing key, a rejected key, an exhausted quota, comments
+ * disabled by the uploader, and a video that genuinely has no comments are five
+ * different facts. Only the last returns an empty array.
+ *
+ * The disabled-comments case is the one most easily got wrong — the API answers
+ * 403 with reason `commentsDisabled`, which is a real finding about the video
+ * and must not be reported as a credential problem.
+ */
+export async function fetchYoutubeComments(
+  videoId: string,
+  limit = 100,
+  pageToken?: string,
+): Promise<ServerResponse<YoutubeCommentsResponse>> {
+  const id = String(videoId ?? "").trim();
+  if (!/^[\w-]{11}$/.test(id)) {
+    return {
+      success: false,
+      error: "CommentsUnavailable",
+      cause: `"${videoId}" is not a valid YouTube video id.`,
+    };
+  }
+
+  const cred = await resolveCredential("youtube");
+  if (!cred) {
+    return {
+      success: false,
+      error: "CommentsUnavailable",
+      cause:
+        "Comment collection requires a YouTube Data API key. Metadata and captions do not — " +
+        "they come from the player endpoint — so this affects comments only. Add a YouTube key " +
+        "on the Settings page, or set YOUTUBE_API_KEY. No comments are shown because there is " +
+        "no credential, not because the video has none.",
+    };
+  }
+
+  const params = new URLSearchParams({
+    part: "snippet",
+    videoId: id,
+    maxResults: String(Math.min(Math.max(limit, 1), 100)),
+    order: "relevance",
+    textFormat: "plainText",
+    key: cred.secret,
+  });
+  if (pageToken) params.set("pageToken", pageToken);
+
+  let res: Response;
+  try {
+    res = await fetch(`${YT_DATA_API}/commentThreads?${params.toString()}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err: any) {
+    return {
+      success: false,
+      error: "CommentsUnavailable",
+      cause: `YouTube Data API request failed: ${err?.message ?? String(err)}.`,
+    };
+  }
+
+  const json: any = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const reason: string = json?.error?.errors?.[0]?.reason ?? json?.error?.status ?? "";
+    const message: string = json?.error?.message ?? `HTTP ${res.status}`;
+
+    if (reason === "commentsDisabled") {
+      return {
+        success: false,
+        error: "CommentsDisabled",
+        cause: `The uploader has disabled comments on '${id}'. This is a fact about the video, not a collection failure.`,
+      };
+    }
+    if (reason === "quotaExceeded" || reason === "RESOURCE_EXHAUSTED") {
+      return {
+        success: false,
+        error: "QuotaExceeded",
+        cause:
+          "The YouTube Data API daily quota (10,000 units) is exhausted, so no comments could " +
+          "be retrieved. The quota resets at midnight Pacific. This is not a finding that the " +
+          "video has no comments.",
+      };
+    }
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      return {
+        success: false,
+        error: "CommentsUnavailable",
+        cause: `Google refused the API key (HTTP ${res.status}${reason ? `, ${reason}` : ""}): ${message}. Verify the key on the Settings page.`,
+      };
+    }
+    return {
+      success: false,
+      error: "CommentsUnavailable",
+      cause: `YouTube Data API returned HTTP ${res.status}: ${message}`,
+    };
+  }
+
+  const comments: YoutubeComment[] = [];
+  for (const item of json?.items ?? []) {
+    const top = item?.snippet?.topLevelComment;
+    const s = top?.snippet;
+    if (!top?.id || typeof s?.textDisplay !== "string") continue;
+    comments.push({
+      id: String(top.id),
+      author: String(s.authorDisplayName ?? "unknown"),
+      authorChannelUrl: typeof s.authorChannelUrl === "string" ? s.authorChannelUrl : null,
+      text: s.textOriginal ?? s.textDisplay,
+      publishedAt: String(s.publishedAt ?? ""),
+      likeCount: typeof s.likeCount === "number" ? s.likeCount : null,
+      replyCount:
+        typeof item?.snippet?.totalReplyCount === "number" ? item.snippet.totalReplyCount : null,
+    });
+  }
+
+  await recordCredentialUse("youtube", cred.entryId);
+
+  return {
+    success: true,
+    data: {
+      id,
+      comments,
+      nextPageToken: typeof json?.nextPageToken === "string" ? json.nextPageToken : null,
+      // commentThreads.list is documented at 1 unit per call regardless of page
+      // size. Reported so an operator can see the budget being spent rather
+      // than discovering it as a 403 later.
+      quotaUnitsSpent: 1,
+      provenance: {
+        source: "youtube",
+        model: "youtube-data-api-v3",
+        fetchedAt: new Date().toISOString(),
+      },
+    },
+  };
+}
+
 // ─── TanStack Start Server Functions ─────────────────────────────────────────
+
+export const serverFetchYoutubeComments = createServerFn({ method: "POST" })
+  .validator((data: { videoId: string; limit?: number; pageToken?: string }) => data)
+  .handler(async ({ data }) => fetchYoutubeComments(data.videoId, data.limit, data.pageToken));
 
 export const serverFetchYoutubeMetadata = createServerFn({ method: "POST" })
   .validator((data: { url: string }) => data)

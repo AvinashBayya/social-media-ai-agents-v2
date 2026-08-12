@@ -275,6 +275,25 @@ export const CREDENTIAL_PROVIDERS: CredentialProvider[] = [
     verifiable: true,
   },
   {
+    id: "youtube",
+    label: "YouTube — Data API v3 key",
+    category: "social",
+    collectable: true,
+    identifierLabel: "Project / key name",
+    identifierHint: "For your own records; Google authenticates on the key alone",
+    identifierRequired: false,
+    secretLabel: "API key",
+    secretHint: "Google Cloud console → APIs & Services → Credentials → API key",
+    envSecret: "YOUTUBE_API_KEY",
+    unlocks:
+      "Comment collection via commentThreads.list. Metadata and captions already work without " +
+      "a key (they come from the InnerTube player endpoint), so this buys comments and nothing " +
+      "else. Quota is 10,000 units/day, and a commentThreads page costs 1 unit.",
+    consumedBy: "fetchYoutubeComments() in youtube-collector.ts — the /youtube comments panel",
+    howTo: "console.cloud.google.com → enable 'YouTube Data API v3' → create an API key. Free.",
+    verifiable: true,
+  },
+  {
     id: "instagram",
     label: "Instagram",
     category: "blocked",
@@ -792,6 +811,44 @@ export async function verifyProviderCredential(
           providerId,
           `UCDP GED accepted the token${total !== null ? `; ${total} events in this version` : ""}. ` +
             `The GIS conflict layer will now populate.`,
+        );
+      }
+
+      case "youtube": {
+        // videos.list on a known-good id costs 1 unit — the cheapest call that
+        // still exercises the key. A quota failure is NOT a bad key, and the
+        // two must not collapse: one is fixed by waiting, the other by
+        // reissuing.
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=id&id=dQw4w9WgXcQ&key=${encodeURIComponent(secret)}`,
+          { headers: { accept: "application/json" }, signal: signal() },
+        );
+        const json: any = await res.json().catch(() => null);
+        const reason = json?.error?.errors?.[0]?.reason ?? json?.error?.status ?? null;
+        if (reason === "quotaExceeded" || reason === "RESOURCE_EXHAUSTED") {
+          return {
+            providerId,
+            status: "unverified",
+            detail:
+              "The key is recognised but its 10,000 unit/day quota is exhausted, so it could " +
+              "not be tested. This is a quota state, not a rejection — it resets at midnight " +
+              "Pacific.",
+            checkedAt: new Date().toISOString(),
+          };
+        }
+        if (res.status === 400 || res.status === 401 || res.status === 403) {
+          return rejected(
+            providerId,
+            `Google refused the key (HTTP ${res.status}${reason ? `, ${reason}` : ""}). Check ` +
+              `that "YouTube Data API v3" is enabled on the project and that no HTTP-referrer ` +
+              `restriction blocks server-side use.`,
+          );
+        }
+        if (!res.ok) return rejected(providerId, `YouTube Data API returned HTTP ${res.status}.`);
+        return ok(
+          providerId,
+          "YouTube Data API accepted the key. Comment collection is available at 10,000 " +
+            "units/day (1 unit per 100-comment page).",
         );
       }
 

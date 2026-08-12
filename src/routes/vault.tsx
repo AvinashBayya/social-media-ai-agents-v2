@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
+import { sha256OfFile } from "@/utils/evidence";
 import { EmptyState } from "@/components/workspace-ui";
 import {
   FileArchive,
@@ -185,28 +186,12 @@ function VaultPage() {
     setIsDragging(false);
   };
 
-  /**
-   * Compute a real SHA-256 over the file bytes.
-   *
-   * The hash was previously 64 random hex characters. An evidence integrity hash
-   * that is not derived from the evidence defeats the entire purpose of recording
-   * one — two identical files would hash differently, and a tampered file would
-   * still "verify". This uses SubtleCrypto, which needs a secure context; over
-   * plain HTTP on a non-localhost origin it is unavailable, and we report that
-   * rather than falling back to something that looks like a hash.
-   */
-  const sha256OfFile = async (file: File): Promise<string> => {
-    if (!globalThis.crypto?.subtle) {
-      throw new Error(
-        "SubtleCrypto unavailable — a secure context (HTTPS) is required to hash evidence.",
-      );
-    }
-    const buf = await file.arrayBuffer();
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", buf);
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  };
+  // The real SHA-256 now lives in utils/evidence.ts, unchanged in behaviour and
+  // still refusing to fall back. It moved because the manual capture panel on
+  // /social needs the identical hash under the identical secure-context rules,
+  // and two copies is how two evidence records end up disagreeing about what
+  // "the same file" means. See the history note in that module: this digest was
+  // once 64 random hex characters.
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();

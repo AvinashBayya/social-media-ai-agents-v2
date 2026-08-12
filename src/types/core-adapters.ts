@@ -71,6 +71,25 @@ export interface PostDegradation {
 }
 
 /**
+ * Why a contract-sourced post never carries media, stated once at the seam.
+ *
+ * The frozen `Post` has no media field, and widening it is a contract change
+ * rather than the additive one the freeze permits. Media crosses to Dev 1 as
+ * `MediaAsset` after analysis instead — `MediaAssetSchema` already names
+ * "analyst upload" among its sources and carries the hashes and provenance that
+ * a bare URL on a Post could not.
+ *
+ * The consequence for a reader is that `SocialPost.media` is left **undefined**
+ * on a contract-sourced post, never `[]`. Undefined means not collected; `[]`
+ * means an extractor ran and the post genuinely had none. Collapsing them would
+ * show a post that really carried four images as a clean text-only record.
+ */
+export const CONTRACT_MEDIA_LIMITATION =
+  "The frozen Post contract carries no media field, so images and video on a contract-sourced " +
+  "post are not transferred with it. Their absence here is 'not collected', not 'the post had " +
+  "none' — media reaches Module 4 as a MediaAsset after analysis, not as a URL on a Post.";
+
+/**
  * Contract → internal.
  *
  * LOSSY IN ONE DIRECTION, and that matters. Appendix B's Post has no stable
@@ -113,7 +132,17 @@ export function toSocialPost(post: Post): {
       consequence: "No declared language tags, so language-mix signals are unavailable.",
     });
   }
-
+  // NOTE ON MEDIA — deliberately NOT pushed into `degraded`.
+  //
+  // `degraded` means "the producer could have supplied this and did not", which
+  // is why a fully populated fixture must report zero entries. Media is not that
+  // kind of gap: the frozen Post has no media field at all, so no producer can
+  // ever supply it and flagging it on every post would make the list describe
+  // the seam rather than the record, and stop distinguishing a thin producer
+  // from a complete one.
+  //
+  // The limitation is real and is stated once, as CONTRACT_MEDIA_LIMITATION
+  // below, for the UI to surface at the seam instead of per post.
   return {
     post: {
       id: post.id,

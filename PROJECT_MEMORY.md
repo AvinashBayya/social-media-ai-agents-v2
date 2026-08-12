@@ -8,7 +8,7 @@
 
 ### Current Focus
 
-- **Task:** v1 Feature & Intelligence Merge — OSINT tools, agents, crawlers & real-time data sources integrated (Complete)
+- **Task:** Browser-audit remediation — Phases 1, 2 and 4 complete; Phase 3 asset bundling and Phase 5 repeatability outstanding
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
 - **Last Verified:** 2026-08-12 — **567 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **123 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
 
@@ -18,6 +18,7 @@
 **470 JS/TS unit tests passing**, **5 Python unit tests passing**, **`tsc --noEmit` clean**.
 
 #### YouTube Feature Architecture (v23+, rewritten 2026-08-12) — CRITICAL FOR AI TO KNOW
+
 - **Self-contained**: no FastAPI backend. All logic runs in TanStack Start **server functions**.
 - **Primary source is YouTube's own InnerTube `player` endpoint**, not ytdl-core. Public, keyless,
   and — crucially — its URLs need **no deciphering**, so the player-signature arms race cannot
@@ -26,7 +27,7 @@
     has no ffmpeg, so adaptive-only clients give streams we cannot join.
   - **IOS second** — metadata and captions; 32 formats, none muxed.
   - **WEB is excluded from playback** — it answers `UNPLAYABLE — "Video unavailable"` for videos
-    ANDROID serves fine. It is used *only* for `microformat`, the sole source of an upload date.
+    ANDROID serves fine. It is used _only_ for `microformat`, the sole source of an upload date.
 - **ytdl-core is now a lazy-loaded fallback**, `await import()` inside the fallback branch. A static
   import took the whole module down under Bun (`http-cookie-agent` calls `this.compose` on a
   Dispatcher that lacks it).
@@ -45,6 +46,7 @@
   2020-11-10, 347 caption segments from 93,199 bytes, download HEAD 200 `video/mp4` 22,830,807 bytes.
 
 #### Deployment Commands (run from `d:\social_media_research`)
+
 ```bash
 # Build image
 az acr build --registry sentinelacr4821 --image sentinel-web:vXX --no-logs .
@@ -64,14 +66,24 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 | Bluesky AppView   | Working      | `getProfile` / `getProfiles` / `getAuthorFeed`                                                                       |
 | Mastodon          | Working      | Keyless hashtag timelines; per-instance, some return 422                                                             |
 | Telegram          | Working      | `t.me/s/{channel}` previews & topic classification                                                                   |
-| GPSJam ADS-B      | Working      | Navigation interference hex feed & regional classifier                                                                |
-| Safecast Rad      | Working      | Open environmental radiation sensor network (µSv/h)                                                                 |
+| GPSJam ADS-B      | Working      | Navigation interference hex feed & regional classifier                                                               |
+| Safecast Rad      | Working      | Open environmental radiation sensor network (µSv/h)                                                                  |
 | CISA KEV          | Working      | Known Exploited Vulnerabilities cyber threat feed                                                                    |
 | **Reddit**        | **Blocked**  | **All unauthenticated endpoints now 403. Needs `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` from a free script app.** |
 | crt.sh            | Flaky        | Same URL gave 404 / timeout / 200-in-43s. Retries once; 50s budget                                                   |
 | GDELT             | Rate limited | 429 at 1 req/5s, as documented                                                                                       |
 
 ### Completed Milestones
+
+- [x] **Browser-audit remediation, Phases 1, 2 and 4 (2026-08-12)**: Six agents drove all 31 routes in real Chrome, clicking every control on a fresh page load. The finding: the analytical core is sound and the presentation layer was not.
+
+  **Phase 1 — `0ab3d44`, fabrication removal.** Verified absent from the SERVED HTML, not just the source. `/live` was discarding real article text and substituting invented Spanish, French and Hindi prose attributed to El Pais, Le Monde and Dainik Jagran — the code comment read "Simulating different languages based on index" — with platform, handle, location and credibility all manufactured from the array index, so Google News RSS rendered as X/Twitter posts while `/social` correctly declared X uncollectable. `/osint` carried five WHOIS/DNS literals ("GoDaddy", nameservers, an A record), a hardcoded "Aggregate confidence 74/100" sitting beneath six genuinely-derived counts, `status || "online"` rendering an unmeasured indicator as a live C2 beside a pulsing green dot, and `return 4290` as the unconditional OpenSky error value. `/agents` fed three hardcoded Jerusalem coordinates into the focal-point detector and printed the result as convergence analysis. `/tasks` badged all five modules "Nominal / Verified" on a compliance console, including two the same page's self-test called NOT IMPLEMENTED. **`<Toaster />` was never mounted**, so all 30 `toast.*` call sites were silent — including the vault path that rejects evidence when SubtleCrypto is unavailable, which failed invisibly.
+
+  **Phase 2 — `e564b60`, correctness in working features.** Module 1 was rating `news.google.com` for every article, because a queried corpus comes from the Google News search feed whose links are all redirects; `src/utils/rss-source.ts` recovers the real publisher from the `<source url>` attribute in the raw XML, which rss-parser discards (verified live: 104 items, 104 index-aligned slots, 10 distinct publishers). TF-IDF ran over raw HTML and reported `nbsp`, `href` and `6f6f6f` among its dominant terms. The GPS and radiation collectors ran in the BROWSER, were CORS-blocked, and swallowed the failure into a permanent "Loading…"; the GPSJam endpoint also did not exist — it publishes a daily CSV of H3 cells, now parsed with `h3-js` (3,425 real cells). Spike detection bucketed on author-declared `createdAt`, running a median 2.8 hours behind, so `SocialPost.observedAt` records arrival instead. `validateCitations` accepted "Corroborated by two sources" while citing one.
+
+  **Phases 3-4 — `c96912f` and `f3a21e0`.** EXIF capture time was run through `new Date(...).toISOString()` over a timezone-naive camera clock, applying the analyst machine's offset and appending a Z; `readExifCaptureTime` keeps the wall clock and fills `absolute` only when the file records a real offset. `/watchlists` had zero controls while importing six unused symbols. `/alerts` rendered 178 characters with no empty state. `/graph` had eight dead controls and its sample banner nested inside a button. The notification bell had no handler and a permanent unread dot. The evidence vault carried three invented SHA-256 digests — one of them 66 hex characters, not a SHA-256 at all, and unnoticed until now.
+
+  **567 unit tests passing**, **`tsc --noEmit` clean**, **123 core exports verified**, `bun run build` green.
 
 - [x] **YouTube module repaired — InnerTube rewrite (2026-08-12)**: Every panel on `/youtube` was failing at once and looked like one fault; it was three. (a) `@distube/ytdl-core@4.16.12` can no longer parse YouTube's player script ("Could not parse decipher function"), so metadata degraded to oEmbed and showed Unknown duration/views/date, and downloads died on "Failed to find any playable formats". (b) Both subtitle strategies called the **unsigned** `api/timedtext` endpoint, which now returns HTTP 200 with a **zero-length body** — they could never have succeeded for any video. (c) `&fmt=vtt` is ignored by YouTube, so the one strategy that did fetch captions ran a WebVTT parser over `<timedtext format="3">` XML, found nothing, and reported "no subtitles available" for 93,199 bytes of captions. Rebuilt on the InnerTube `player` endpoint (see the architecture note above), added `parseTimedTextXml`/`parseSubtitleBody`, and removed two fabrications: a hardcoded `available_subtitles` English entry and an invented "age-restricted or region-locked" cause printed on every download failure. Also removed the unused `export default` from `timeline.tsx` and `tasks.tsx`, which was the source of the router's code-split warnings on every page load. **567 unit tests passing** (+56), **`tsc --noEmit` clean**, **123 core exports verified**, `bun run build` green.
 - [x] **Credentials Vault wired to the collectors (2026-08-12)**: The Settings page was a write-only box — it saved `data/credentials.json` and nothing in the system ever read it, so an operator could add a key, watch it save, see it badged "Active", and collect exactly as much as before. New `src/utils/credential-vault.ts` is now the store the collectors resolve from, with a nine-provider registry, env-first resolution, real per-provider verification probes, masked listing plus a separate reveal call, and a computed capability matrix. Two fabrications removed: `status: "Active"` written at save time for an untested secret (now `unverified` until a live call says otherwise, and legacy `"Active"` rows are read back as `unverified`), and `lastUsed: "Never"` stored as data (now `null`). **New collection unlocked:** authenticated Bluesky `searchPosts` (`fetchBlueskySearch`) — historical keyword search, previously listed as a stated limitation because it 403s unauthenticated — and authenticated Mastodon `api/v2/search` (`fetchMastodonSearch`), reaching posts that carry no hashtag. Reddit, UCDP and GitHub now resolve from the vault as well as the environment. **511 unit tests passing** (+41), **`tsc --noEmit` clean**, **113 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see the note below.

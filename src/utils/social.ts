@@ -85,6 +85,50 @@ export interface SocialPost {
    * rather than the live socket; consumers fall back to createdAt.
    */
   observedAt?: number;
+  /**
+   * Media the platform hosts on this post. Optional and additive.
+   *
+   * Absent means **not collected** — a post from a source whose extractor has
+   * not run, or one mapped before this field existed. An empty array means the
+   * extractor ran and the post genuinely carries no media. Consumers must not
+   * collapse the two: "we didn't look" and "there is nothing" are different
+   * findings, which is the same rule `accountAgeDays` follows in the contract.
+   */
+  media?: SocialMedia[];
+}
+
+/**
+ * One media item on a post.
+ *
+ * URLS ONLY, DELIBERATELY. We record where the platform serves the file and
+ * render from there; we do not fetch and store the bytes. Two reasons, and both
+ * are binding rather than stylistic:
+ *
+ *  - Re-hosting is redistribution, which the open-social APIs permit us to read
+ *    but not to republish.
+ *  - Under the DPDP Act 2023 these are images of identifiable individuals.
+ *    Bulk-retaining them would be processing personal data at scale on the
+ *    strength of the images being publicly visible, and public visibility is
+ *    not consent.
+ *
+ * Bytes are fetched only when an analyst sends one specific asset to Module 4
+ * for provenance analysis — a deliberate, per-item act, not a collection
+ * default.
+ */
+export interface SocialMedia {
+  /** Full-size URL as the platform publishes it. Never re-hosted by us. */
+  url: string;
+  type: "image" | "video" | "unknown";
+  /** Smaller preview where the platform offers one, else null. */
+  thumbnailUrl: string | null;
+  /**
+   * Uploader-supplied alt text, or null when they supplied none.
+   *
+   * Null rather than "" on purpose: an empty string would make "no description
+   * given" indistinguishable from "described as nothing", and alt text is
+   * frequently the only human-written account of what an image shows.
+   */
+  altText: string | null;
 }
 
 // ─── 1. Jetstream consumer (browser) ───────────────────────────────────────
@@ -175,6 +219,271 @@ function linksFrom(record: NonNullable<NonNullable<JetstreamEvent["commit"]>["re
   return Array.from(out);
 }
 
+// ─── Media extraction ──────────────────────────────────────────────────────
+//
+// Every shape below was captured from a live response on 2026-08-12 rather than
+// taken from documentation, because two of them do not match what the docs
+// imply. Bluesky ships a `gallery` embed (up to 10 images) whose fields are
+// `items[].thumbnail` — not the `images[].thumb` of the older embed — so a
+// single extractor written from the `images` shape silently drops every
+// carousel post. Telegram's page contains 85 `background-image` declarations of
+// which 4 are post photos; the rest are avatars and emoji, so the selector must
+// be class-scoped or it will report a channel's avatar as evidence.
+//
+// LINK-CARD THUMBNAILS ARE DELIBERATELY NOT MEDIA. `app.bsky.embed.external`
+// carries a preview image for a URL the post links to. That image belongs to
+// the linked page, not to the post, and the link itself is already captured by
+// `linksFrom`. Counting it as post media would inflate media counts and would
+// attribute a third party's image to the poster.
+
+const BSKY_CDN = "https://cdn.bsky.app/img";
+const BSKY_VIDEO = "https://video.bsky.app/watch";
+
+function bskyImageUrls(did: string, cid: string): { url: string; thumbnailUrl: string } {
+  return {
+    url: `${BSKY_CDN}/feed_fullsize/plain/${did}/${cid}`,
+    thumbnailUrl: `${BSKY_CDN}/feed_thumbnail/plain/${did}/${cid}`,
+  };
+}
+
+/** Alt text, or null when the uploader gave none. Never "". */
+function altOrNull(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  return s ? s : null;
+}
+
+/**
+ * Media from a RAW Bluesky post record — the shape Jetstream emits.
+ *
+ * The record stores blobs by CID, not URL, so the CDN address is composed from
+ * the author's DID and the blob CID. `did` is therefore required: without it
+ * there is no way to address the blob, and a URL guessed without it would 404.
+ */
+export function blueskyMediaFromRecord(embed: any, did: string): SocialMedia[] {
+  if (!embed || !did) return [];
+  const out: SocialMedia[] = [];
+
+  const type = String(embed.$type ?? "");
+
+  // recordWithMedia wraps one of the other embeds; recurse into the media half.
+  if (type === "app.bsky.embed.recordWithMedia") {
+    return blueskyMediaFromRecord(embed.media, did);
+  }
+
+  // `images` (up to 4) and `gallery` (up to 10) differ only in the array name.
+  const imageItems: any[] = Array.isArray(embed.images)
+    ? embed.images
+    : Array.isArray(embed.items)
+      ? embed.items
+      : [];
+  for (const item of imageItems) {
+    const cid = item?.image?.ref?.$link;
+    if (typeof cid !== "string" || !cid) continue;
+    const { url, thumbnailUrl } = bskyImageUrls(did, cid);
+    out.push({ url, type: "image", thumbnailUrl, altText: altOrNull(item.alt) });
+  }
+
+  const videoCid = embed?.video?.ref?.$link;
+  if (typeof videoCid === "string" && videoCid) {
+    const encoded = encodeURIComponent(did);
+    out.push({
+      url: `${BSKY_VIDEO}/${encoded}/${videoCid}/playlist.m3u8`,
+      type: "video",
+      thumbnailUrl: `${BSKY_VIDEO}/${encoded}/${videoCid}/thumbnail.jpg`,
+      altText: altOrNull(embed.alt),
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Media from an AppView embed VIEW — the shape getAuthorFeed and searchPosts
+ * return, where the CDN URLs are already resolved.
+ *
+ * Preferred over the record shape wherever both are present: the server has
+ * already done the blob-to-URL resolution, so there is nothing for us to get
+ * wrong.
+ */
+export function blueskyMediaFromView(embed: any): SocialMedia[] {
+  if (!embed) return [];
+  const type = String(embed.$type ?? "");
+
+  if (type.startsWith("app.bsky.embed.recordWithMedia")) {
+    return blueskyMediaFromView(embed.media);
+  }
+
+  const out: SocialMedia[] = [];
+
+  // images#view → images[].thumb / .fullsize
+  for (const img of Array.isArray(embed.images) ? embed.images : []) {
+    if (typeof img?.fullsize !== "string" && typeof img?.thumb !== "string") continue;
+    out.push({
+      url: String(img.fullsize ?? img.thumb),
+      type: "image",
+      thumbnailUrl: typeof img.thumb === "string" ? img.thumb : null,
+      altText: altOrNull(img.alt),
+    });
+  }
+
+  // gallery#view → items[].thumbnail / .fullsize. Different field name for the
+  // same thing; missing this is how carousel posts vanish.
+  for (const item of Array.isArray(embed.items) ? embed.items : []) {
+    if (typeof item?.fullsize !== "string" && typeof item?.thumbnail !== "string") continue;
+    out.push({
+      url: String(item.fullsize ?? item.thumbnail),
+      type: "image",
+      thumbnailUrl: typeof item.thumbnail === "string" ? item.thumbnail : null,
+      altText: altOrNull(item.alt),
+    });
+  }
+
+  // video#view → playlist (HLS) + thumbnail
+  if (typeof embed.playlist === "string" && embed.playlist) {
+    out.push({
+      url: embed.playlist,
+      type: "video",
+      thumbnailUrl: typeof embed.thumbnail === "string" ? embed.thumbnail : null,
+      altText: altOrNull(embed.alt),
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Media from a Reddit listing child's `data` object.
+ *
+ * NOT VERIFIED AGAINST LIVE TRAFFIC — Reddit refuses unauthenticated requests
+ * on every endpoint, and no OAuth credential is configured in this environment,
+ * so this is written from the documented shape and is the one extractor here
+ * whose fixture is hand-built rather than captured. Confirm it against a real
+ * response once a script-app credential is in place.
+ *
+ * Reddit escapes `&` as `&amp;` inside preview URLs; an unescaped URL 403s
+ * because the signature parameters are part of the query string.
+ */
+export function redditMediaFrom(data: any): SocialMedia[] {
+  if (!data) return [];
+  const out: SocialMedia[] = [];
+  const unescape = (u: unknown): string => String(u ?? "").replace(/&amp;/g, "&");
+
+  // Native video.
+  const video = data?.media?.reddit_video ?? data?.secure_media?.reddit_video;
+  if (typeof video?.fallback_url === "string" && video.fallback_url) {
+    out.push({
+      url: unescape(video.fallback_url),
+      type: "video",
+      thumbnailUrl:
+        typeof data.thumbnail === "string" && data.thumbnail.startsWith("http")
+          ? unescape(data.thumbnail)
+          : null,
+      altText: null,
+    });
+  }
+
+  // Gallery: media_metadata is keyed by id, so iterate values not indices.
+  if (data.is_gallery && data.media_metadata && typeof data.media_metadata === "object") {
+    for (const meta of Object.values<any>(data.media_metadata)) {
+      const source = meta?.s;
+      const url = source?.u ?? source?.gif ?? source?.mp4;
+      if (typeof url !== "string" || !url) continue;
+      out.push({
+        url: unescape(url),
+        type: source?.mp4 || source?.gif ? "video" : "image",
+        thumbnailUrl: null,
+        altText: null,
+      });
+    }
+  }
+
+  // Preview images on a link or image post.
+  for (const img of data?.preview?.images ?? []) {
+    const url = img?.source?.url;
+    if (typeof url !== "string" || !url) continue;
+    const resolutions = Array.isArray(img.resolutions) ? img.resolutions : [];
+    const thumb = resolutions.length ? resolutions[0]?.url : null;
+    out.push({
+      url: unescape(url),
+      type: "image",
+      thumbnailUrl: typeof thumb === "string" ? unescape(thumb) : null,
+      altText: null,
+    });
+  }
+
+  // A direct i.redd.it link with no preview block.
+  if (
+    out.length === 0 &&
+    typeof data.url === "string" &&
+    /^https?:\/\/i\.redd\.it\//.test(data.url)
+  ) {
+    out.push({ url: data.url, type: "image", thumbnailUrl: null, altText: null });
+  }
+
+  // Deduplicate: a gallery post can list the same asset under preview as well.
+  const seen = new Set<string>();
+  return out.filter((m) => (seen.has(m.url) ? false : (seen.add(m.url), true)));
+}
+
+/**
+ * Media from ONE Telegram message block's HTML.
+ *
+ * Must be given a single message's slice, not the whole page. The page carries
+ * 85 `background-image` declarations of which only 4 are post photos — channel
+ * avatars, reply previews and emoji make up the rest — so both selectors here
+ * are scoped to the specific `tgme_widget_message_*` classes.
+ *
+ * Telegram serves only a poster frame for video in the web preview, never the
+ * video file, so a video is recorded with its thumbnail as the URL and typed
+ * `video` rather than being reported as an image.
+ */
+export function telegramMediaFrom(blockHtml: string): SocialMedia[] {
+  if (!blockHtml) return [];
+  const out: SocialMedia[] = [];
+
+  const photoRe =
+    /class="tgme_widget_message_photo_wrap[^"]*"[^>]*style="[^"]*background-image:url\('([^']+)'\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = photoRe.exec(blockHtml)) !== null) {
+    out.push({ url: m[1], type: "image", thumbnailUrl: m[1], altText: null });
+  }
+
+  const videoRe =
+    /class="tgme_widget_message_video_thumb"[^>]*style="[^"]*background-image:url\('([^']+)'\)/g;
+  while ((m = videoRe.exec(blockHtml)) !== null) {
+    out.push({
+      // The poster frame, not the video. Typed `video` so a reviewer is not
+      // told a still image is the whole asset.
+      url: m[1],
+      type: "video",
+      thumbnailUrl: m[1],
+      altText: null,
+    });
+  }
+
+  const seen = new Set<string>();
+  return out.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true)));
+}
+
+/** Media from a Mastodon status. `description` is the instance's alt-text field. */
+export function mastodonMediaFrom(status: any): SocialMedia[] {
+  const out: SocialMedia[] = [];
+  for (const att of status?.media_attachments ?? []) {
+    const url = att?.url ?? att?.remote_url;
+    if (typeof url !== "string" || !url) continue;
+    const kind = String(att?.type ?? "");
+    out.push({
+      url,
+      // gifv is a silent looping video, not an image — typing it as an image
+      // would send a video file into the still-image analysis path.
+      type: kind === "image" ? "image" : kind === "video" || kind === "gifv" ? "video" : "unknown",
+      thumbnailUrl: typeof att?.preview_url === "string" ? att.preview_url : null,
+      altText: altOrNull(att?.description),
+    });
+  }
+  return out;
+}
+
 export function eventToPost(evt: JetstreamEvent, now: number = Date.now()): SocialPost | null {
   if (evt?.kind !== "commit") return null;
   const commit = evt.commit;
@@ -199,6 +508,9 @@ export function eventToPost(evt: JetstreamEvent, now: number = Date.now()): Soci
     url: `https://bsky.app/profile/${did}/post/${commit.rkey}`,
     langs: Array.isArray(record.langs) ? record.langs : [],
     links: linksFrom(record),
+    // Jetstream carries the raw record, so blobs are CIDs and the CDN URL has
+    // to be composed from the author's DID.
+    media: blueskyMediaFromRecord(record.embed, did),
     // Arrival, measured here. now is injectable so this stays pure under test.
     observedAt: now,
   };
@@ -748,6 +1060,9 @@ export async function fetchAuthorFeed(actor: string, limit = 50): Promise<Social
       url: `https://bsky.app/profile/${post.author?.handle ?? post.author?.did}/post/${rkey}`,
       langs: Array.isArray(record.langs) ? record.langs : [],
       links: linksFrom(record),
+      // The AppView has already resolved blobs to CDN URLs; prefer that view
+      // over re-deriving them from the record.
+      media: blueskyMediaFromView(post.embed),
     });
   }
   cacheSet(genericCache, key, posts);
@@ -938,6 +1253,7 @@ export async function fetchBlueskySearch(
       url: `https://bsky.app/profile/${handle}/post/${rkey}`,
       langs: Array.isArray(record.langs) ? record.langs : [],
       links: linksFrom(record),
+      media: blueskyMediaFromView(post.embed),
     });
   }
 
@@ -1159,6 +1475,7 @@ export async function fetchRedditSearch(query: string, limit = 50): Promise<Soci
     const text = `${d.title ?? ""}${d.selftext ? `\n\n${d.selftext}` : ""}`.trim();
     if (!text) continue;
     posts.push({
+      media: redditMediaFrom(d),
       id: `t3_${d.id}`,
       platform: "reddit",
       author: d.author ? `u/${d.author}` : "unknown",
@@ -1172,6 +1489,86 @@ export async function fetchRedditSearch(query: string, limit = 50): Promise<Soci
   }
   cacheSet(genericCache, key, posts);
   return posts;
+}
+
+/**
+ * Split a t.me/s/ page into one HTML slice per message.
+ *
+ * REPLACES A MISATTRIBUTION BUG. The previous parser scanned the whole page
+ * three times into parallel arrays — `ids`, `texts`, `times` — and then zipped
+ * them by index. Any message without a text block, which is exactly what a
+ * photo-only or video-only post is, shifted every later text up one slot. So a
+ * channel posting [text A][photo][text B] produced post 2 carrying text B under
+ * the photo's id, URL and timestamp: real text attributed to the wrong message,
+ * with a permalink that did not contain it. The function's own error string
+ * ("or post only media") shows the media-only case was known about; the
+ * consequence for alignment was not.
+ *
+ * Slicing on `data-post="` boundaries keeps every field of a message together,
+ * which is also the only way media can be attached to the right post.
+ */
+export function splitTelegramMessages(html: string): string[] {
+  if (!html) return [];
+  const marker = /data-post="[^"]+"/g;
+  const starts: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = marker.exec(html)) !== null) starts.push(m.index);
+  if (starts.length === 0) return [];
+
+  // Each slice runs from its own marker to the start of the next. The trailing
+  // slice runs to end of document.
+  return starts.map((start, i) =>
+    html.slice(start, i + 1 < starts.length ? starts[i + 1] : html.length),
+  );
+}
+
+/** Decode the entity set Telegram's preview HTML actually emits. */
+function decodeTelegramHtml(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+/**
+ * One message slice to a post, or null when the slice carries neither text nor
+ * media.
+ *
+ * A media-only post now yields a real post with empty text rather than being
+ * dropped — dropping it was what desynchronised the arrays, and a photo posted
+ * without a caption is still a post.
+ */
+export function telegramBlockToPost(block: string, handle: string): SocialPost | null {
+  const idMatch = block.match(/data-post="([^"]+)"/);
+  const postId = idMatch ? idMatch[1] : null;
+  if (!postId) return null;
+
+  const textMatch = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+  const text = textMatch ? decodeTelegramHtml(textMatch[1]) : "";
+
+  const timeMatch = block.match(/<time[^>]*datetime="([^"]+)"/);
+  const media = telegramMediaFrom(block);
+
+  // Neither words nor pictures — a separator or a join notice, not a message.
+  if (!text && media.length === 0) return null;
+
+  return {
+    id: `tg:${postId}`,
+    platform: "telegram",
+    author: `@${handle}`,
+    authorId: handle,
+    text,
+    createdAt: timeMatch ? timeMatch[1] : "",
+    url: `https://t.me/${postId}`,
+    langs: [],
+    links: [],
+    media,
+  };
 }
 
 /**
@@ -1221,45 +1618,10 @@ export async function fetchTelegramChannel(channel: string, limit = 30): Promise
 
   const html = await res.text();
   const posts: SocialPost[] = [];
-  const blockRe =
-    /<div class="tgme_widget_message(?:_wrap)?[\s\S]*?data-post="([^"]+)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
-  const textRe = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
-  const timeRe = /<time[^>]*datetime="([^"]+)"/g;
-
-  const ids: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = blockRe.exec(html)) !== null) ids.push(m[1]);
-
-  const texts: string[] = [];
-  while ((m = textRe.exec(html)) !== null) {
-    const clean = m[1]
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<[^>]*>/g, "")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .trim();
-    if (clean) texts.push(clean);
-  }
-
-  const times: string[] = [];
-  while ((m = timeRe.exec(html)) !== null) times.push(m[1]);
-
-  for (let i = 0; i < texts.length && posts.length < limit; i += 1) {
-    const postId = ids[i] ?? `${handle}/${i}`;
-    posts.push({
-      id: `tg:${postId}`,
-      platform: "telegram",
-      author: `@${handle}`,
-      authorId: handle,
-      text: texts[i],
-      createdAt: times[i] ?? "",
-      url: `https://t.me/${postId}`,
-      langs: [],
-      links: [],
-    });
+  for (const block of splitTelegramMessages(html)) {
+    if (posts.length >= limit) break;
+    const post = telegramBlockToPost(block, handle);
+    if (post) posts.push(post);
   }
 
   if (posts.length === 0) {
@@ -1472,6 +1834,7 @@ export function mastodonStatusToPost(raw: MastodonStatus, host: string): SocialP
     // detection, matching how `langs` is sourced for Bluesky.
     langs: typeof raw.language === "string" && raw.language ? [raw.language] : [],
     links: mastodonLinks(html, raw.card?.url),
+    media: mastodonMediaFrom(raw),
   };
 }
 
@@ -1596,6 +1959,15 @@ export interface PlatformNote {
    * of nine providers is the relevant one.
    */
   credentialProvider?: string;
+  /**
+   * Row in `COLLECTION_POLICIES` (collection-policy.ts) governing this platform.
+   *
+   * `available` above answers "does this deployment collect it"; the policy
+   * answers "may it be collected, on what basis, and by what route". They are
+   * different questions and both are needed — YouTube is permitted for text and
+   * forbidden for frames, which no boolean can say.
+   */
+  policyId?: string;
   method: string;
   limitation: string;
 }
@@ -1611,6 +1983,7 @@ export const PLATFORM_NOTES: PlatformNote[] = [
     platform: "Bluesky",
     available: true,
     credentialProvider: "bluesky",
+    policyId: "open-social",
     method:
       "Jetstream WebSocket firehose (unauthenticated) + public AppView; " +
       "app.bsky.feed.searchPosts once an app password is configured",
@@ -1630,6 +2003,7 @@ export const PLATFORM_NOTES: PlatformNote[] = [
     available: false,
     requiresCredential: "REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET (or the Settings vault)",
     credentialProvider: "reddit",
+    policyId: "open-social",
     method: "OAuth client-credentials against oauth.reddit.com (free script app)",
     limitation:
       "Unauthenticated access is blocked outright — search.json, old.reddit.com, api.reddit.com " +
@@ -1642,6 +2016,7 @@ export const PLATFORM_NOTES: PlatformNote[] = [
     platform: "Mastodon",
     available: true,
     credentialProvider: "mastodon",
+    policyId: "open-social",
     method:
       "public hashtag timelines, unauthenticated (api/v1/timelines/tag); " +
       "full-text status search (api/v2/search) once an instance token is configured",
@@ -1657,6 +2032,7 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   {
     platform: "Telegram",
     available: true,
+    policyId: "open-social",
     method: "public channel preview at t.me/s/{channel}",
     limitation:
       "Public channels only, and only those with web preview enabled. Private channels " +
@@ -1665,6 +2041,7 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   {
     platform: "Instagram",
     available: false,
+    policyId: "meta",
     method: "none",
     limitation:
       "Meta's terms prohibit scraping, and the Graph API grants access only to Pages and " +
@@ -1674,14 +2051,34 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   {
     platform: "Facebook",
     available: false,
+    policyId: "meta",
     method: "none",
     limitation:
       "Same constraint as Instagram. CrowdTangle, the research access programme that once " +
       "permitted this, was shut down in August 2024.",
   },
   {
+    // Added 2026-08-12. YouTube was absent from this list entirely, which is
+    // how a platform the system genuinely collects from ended up undeclared —
+    // the boolean had no way to say "text yes, frames no", so the honest answer
+    // was neither `true` nor `false` and the row was simply omitted.
+    platform: "YouTube",
+    available: true,
+    policyId: "youtube",
+    method:
+      "InnerTube player endpoint for metadata and captions; commentThreads.list for comments " +
+      "(needs a YouTube Data API key)",
+    limitation:
+      "Text only. Metadata, captions and comments are collected; video frames are not, because " +
+      "systematically extracting and storing them falls outside YouTube's terms. Frames enter " +
+      "only through an analyst-initiated download of a single video, which is audit logged. " +
+      "Comment collection additionally needs a Data API key and spends a 10,000 unit/day quota, " +
+      "so a quota exhaustion is reported as quota — never as a video having no comments.",
+  },
+  {
     platform: "X / Twitter",
     available: false,
+    policyId: "x-twitter",
     method: "none",
     limitation:
       "No free API tier for search or streaming since 2023. Access starts at a paid plan, " +

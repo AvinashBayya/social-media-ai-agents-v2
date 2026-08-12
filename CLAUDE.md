@@ -139,6 +139,34 @@ Approved models:
 
 **Never fabricate data.** If something fails, surface an explicit error. Do not write fallbacks that return plausible-looking placeholder results, invented scores, or synthetic content. This is a defence intelligence tool; a fake confidence value is worse than a visible failure.
 
+**The three shapes this keeps coming back as.** A six-agent browser audit on 2026-08-12
+found 14 live fabrications; **nine matched one of three grep patterns**. They are cheap
+to reintroduce and cheap to catch, so check for them before committing:
+
+```sh
+grep -rn "|| new Date()" src/          # 1. timestamp invention
+grep -rnE '\|\|\s*"[A-Z]' src/         # 2. string literal as a measurement
+grep -rnE '\?\?\s*0\b|\|\|\s*0\b' src/ # 3. numeric zero-flattening
+```
+
+1. **`x || new Date().toISOString()`** stamps _now_ onto an undated record. Found at
+   ten sites, including posts attributed to real named Telegram channels. Use `null`.
+2. **A string literal fallback that renders as a measurement** — `Registrar || "GoDaddy"`,
+   `status || "online"`, `conflict_new_id || "State Conflict"`, `primarySource || "News Wire"`.
+   An honest absence marker (`|| "not reported"`, `?? "issuer not reported"`, `|| "—"`) is
+   fine and is the intended replacement; the test is whether a reader would take the value
+   for a finding.
+3. **`?? 0` / `|| 0` in collector mapping** flattens _unreported_ into a measured zero:
+   unreported casualties rendered as "0 casualties", an unreported radiation reading was
+   classified "normal", and `lat ?? 0` produced the exact `0,0` sentinel `toGeoPoint` exists
+   to reject. Loop accumulators and config defaults are fine — this is about values that
+   reach a screen.
+
+The same audit found a fourth class worth naming: **a control with no handler**. `/vault`'s
+Download button had `onClick: undefined`, `/graph` had eight, and the notification bell had
+none while showing a permanent unread dot. A control that cannot act tells the analyst a
+capability exists. Wire it or remove it.
+
 **Free-tier tooling only.** Zero budget for licences and APIs.
 
 **Deployment target** is Azure Container Apps in Central India.

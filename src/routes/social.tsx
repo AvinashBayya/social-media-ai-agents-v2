@@ -47,6 +47,14 @@ import {
 } from "@/utils/cib";
 import { assessSocialCorpus } from "@/utils/social-credibility";
 import { PinButton } from "@/components/pin-button";
+import { ManualCapturePanel } from "@/components/manual-capture-panel";
+import {
+  COLLECTION_POLICIES,
+  MODE_LABELS,
+  BASIS_LABELS,
+  BASIS_DETAIL,
+  type CollectionMode,
+} from "@/utils/collection-policy";
 
 export const Route = createFileRoute("/social")({
   head: () => ({ meta: [{ title: "Social Intelligence — Sentinel AI" }] }),
@@ -345,35 +353,92 @@ function SocialPage() {
           </CardContent>
         </Card>
 
+        {/* Collection policy.
+            Was a two-state badge over PLATFORM_NOTES: green "collected" or red
+            "unavailable". That boolean could not say "text yes, frames no" for
+            YouTube — which is why YouTube had no row at all — nor "not
+            automated, but an analyst may capture it" for Meta, which made a
+            legitimate ingestion route look like a dead end. It also gave a
+            terms-of-service prohibition and a missing free tier the same red
+            badge, when one is law and the other is budget. */}
         <Card className={`${CARD} sm:col-span-2`}>
           <CardContent className="p-3.5">
             <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
               <Ban className="size-3.5 text-[#F59E0B]" />
-              Platform coverage and its limits
+              Collection policy — what may be collected, and how it gets in
             </h3>
-            <div className="mt-2 space-y-1.5">
-              {PLATFORM_NOTES.map((p) => (
-                <div
-                  key={p.platform}
-                  className="flex items-start gap-2 text-[10px] leading-relaxed"
-                >
-                  <Badge
-                    variant="outline"
-                    className={`mt-0.5 shrink-0 text-[9px] font-normal ${
-                      p.available
-                        ? "border-[#10B981]/40 bg-[#10B981]/10 text-[#10B981]"
-                        : "border-[#EF4444]/40 bg-[#EF4444]/10 text-[#EF4444]"
-                    }`}
+            <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">
+              Automated collection is not a capability question but a permission one. Each row
+              states the basis and the route content actually takes.
+            </p>
+            <div className="mt-2 space-y-2">
+              {COLLECTION_POLICIES.map((policy) => {
+                const notes = PLATFORM_NOTES.filter((n) => n.policyId === policy.id);
+                return (
+                  <div
+                    key={policy.id}
+                    className="rounded border border-[#263548]/70 bg-[#0B1220]/50 p-2 text-[10px] leading-relaxed"
                   >
-                    {p.available ? "collected" : "unavailable"}
-                  </Badge>
-                  <div className="min-w-0">
-                    <span className="font-semibold text-white">{p.platform}</span>
-                    <span className="text-[#64748B]"> · {p.method}</span>
-                    <p className="text-[#94A3B8]">{p.limitation}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={`shrink-0 text-[9px] font-normal ${MODE_STYLE[policy.mode]}`}
+                      >
+                        {MODE_LABELS[policy.mode]}
+                      </Badge>
+                      <span className="font-semibold text-white">{policy.sources.join(", ")}</span>
+                      {policy.basis.map((b) => (
+                        <Badge
+                          key={b}
+                          variant="outline"
+                          title={BASIS_DETAIL[b]}
+                          className="h-4 shrink-0 border-[#263548] bg-[#111827] px-1.5 text-[8px] font-normal text-[#94A3B8]"
+                        >
+                          {BASIS_LABELS[b]}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    <p className="mt-1 text-[#94A3B8]">{policy.rationale}</p>
+
+                    {policy.mode === "partial" && (
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px]">
+                        <span className="text-[#10B981]">
+                          Permitted: {policy.permitted.join(", ")}
+                        </span>
+                        <span className="text-[#EF4444]">
+                          Withheld: {policy.withheld.join(", ")}
+                        </span>
+                      </div>
+                    )}
+
+                    <p className="mt-1 text-[9px] text-[#64748B]">
+                      <span className="text-[#06B6D4]">How content gets in:</span>{" "}
+                      {policy.ingestionRoute}
+                    </p>
+
+                    {notes.length > 0 && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[9px] text-[#64748B] hover:text-white">
+                          Per-platform detail ({notes.length})
+                        </summary>
+                        <div className="mt-1 space-y-1 border-l border-[#263548] pl-2">
+                          {notes.map((n) => (
+                            <div key={n.platform} className="text-[9px]">
+                              <span className="font-semibold text-white">{n.platform}</span>
+                              <span className="text-[#64748B]">
+                                {" "}
+                                · {n.available ? "collecting" : "not collecting"} · {n.method}
+                              </span>
+                              <p className="text-[#94A3B8]">{n.limitation}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
