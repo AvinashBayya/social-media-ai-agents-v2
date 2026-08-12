@@ -104,10 +104,13 @@ export function extractYoutubeId(url: string): string | null {
   return match ? match[1] : null;
 }
 
-/** Parse YYYYMMDD → readable date string */
+/** Parse upload date — handles YYYYMMDD or YYYY-MM-DD → readable date string */
 function fmtUploadDate(raw?: string): string | undefined {
-  if (!raw || raw.length !== 8) return undefined;
-  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  if (!raw) return undefined;
+  // Strip dashes: "2009-10-25" → "20091025"
+  const digits = raw.replace(/-/g, "");
+  if (digits.length !== 8 || !/^\d{8}$/.test(digits)) return undefined;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 
 // ─── Core implementations (run server-side) ───────────────────────────────────
@@ -135,7 +138,7 @@ async function _getMetadata(url: string): Promise<YoutubeMetadata> {
       description: details.description || "",
       uploader: details.author?.name || details.ownerChannelName || "Unknown Uploader",
       channel_id: details.author?.channel_url || details.author?.id || "",
-      upload_date: fmtUploadDate(details.uploadDate?.replace(/-/g, "") || (details as any).uploadDate),
+      upload_date: fmtUploadDate(details.uploadDate),
       duration: parseInt(details.lengthSeconds, 10) || undefined,
       view_count: parseInt(details.viewCount, 10) || undefined,
       thumbnails,
@@ -319,10 +322,12 @@ async function _getDownloadUrl(url: string, quality = "720p"): Promise<YoutubeDo
     const info = await ytdl.getInfo(url.trim());
     const videoId = info.videoDetails.videoId;
 
-    // Get best mp4 format at or below requested height
+    // Get best muxed mp4 format (videoandaudio) — no ffmpeg in runtime, so separate streams can't be merged
     const formats = ytdl.filterFormats(info.formats, "videoandaudio");
-    const mp4Formats = formats.filter((f) => f.container === "mp4" && (f.height ?? 0) <= maxHeight);
-    const best = mp4Formats.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0] || formats[0];
+    const mp4Formats = formats
+      .filter((f) => f.container === "mp4")
+      .sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
+    const best = mp4Formats[0] || formats[0];
 
     if (!best?.url) {
       throw { error: "DownloadFailed", cause: "No downloadable format found for this video." } as YoutubeError;
@@ -331,7 +336,7 @@ async function _getDownloadUrl(url: string, quality = "720p"): Promise<YoutubeDo
     return {
       id: videoId,
       directUrl: best.url,
-      format: `mp4 (${best.height ?? "?"}p)`,
+      format: `mp4 (${best.height ?? "?"}p muxed)`,
       filesize: best.contentLength ? parseInt(best.contentLength, 10) : undefined,
       provenance: {
         source: "youtube",
