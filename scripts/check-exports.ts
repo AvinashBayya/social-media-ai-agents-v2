@@ -54,9 +54,34 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "fetchProfiles",
     "fetchAuthorFeed",
     "redditCredentials",
+    "resolveRedditCredentials",
     "resetRedditToken",
     "fetchRedditSearch",
     "fetchTelegramChannel",
+    "fetchBlueskySearch",
+    "resetBlueskySession",
+    "mastodonStatusToPost",
+    "fetchMastodonSearch",
+  ],
+  "src/utils/credential-vault.ts": [
+    "CREDENTIAL_PROVIDERS",
+    "CredentialVaultError",
+    "providerById",
+    "normaliseStatus",
+    "normaliseEntry",
+    "normaliseVault",
+    "maskSecret",
+    "secretTail",
+    "redactEntry",
+    "redactVault",
+    "normaliseHost",
+    "readVault",
+    "writeVault",
+    "resolveCredential",
+    "recordCredentialUse",
+    "verifyProviderCredential",
+    "buildCapabilityMatrix",
+    "githubHeaders",
   ],
   "src/utils/cib.ts": [
     "analyseCib",
@@ -106,10 +131,17 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
   "src/utils/social-velocity.ts": ["calculateSocialVelocity"],
   "src/utils/threat-classifier.ts": ["classifyThreatText"],
   "src/utils/focal-point.ts": ["detectFocalPoints"],
+  // Corrected 2026-08-12: this listed fetchYoutubeMetadata /
+  // fetchYoutubeSubtitles / downloadYoutubeVideo, which the module has never
+  // exported under those names — the public symbols are the createServerFn
+  // wrappers below, over private _getMetadata / _getSubtitles / _getDownloadUrl.
+  // The audit had therefore failed on every run since the YouTube feature
+  // landed, which is worse than not running it: a permanently red gate is one
+  // nobody reads, and a real deletion would have hidden among these three.
   "src/utils/youtube-collector.ts": [
-    "fetchYoutubeMetadata",
-    "fetchYoutubeSubtitles",
-    "downloadYoutubeVideo",
+    "serverFetchYoutubeMetadata",
+    "serverFetchYoutubeSubtitles",
+    "serverDownloadYoutubeVideo",
     "isYoutubeUrl",
     "extractYoutubeId",
   ],

@@ -22,7 +22,8 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { redditCredentials } from "./social";
+import { resolveRedditCredentials } from "./social";
+import { resolveCredential } from "./credential-vault";
 
 export type ProbeStatus =
   /** Answered as expected. */
@@ -233,7 +234,7 @@ function unprobeable(): CollectorProbe[] {
 }
 
 /** Reddit is credential-gated, so its probe depends on configuration. */
-function redditProbe(): CollectorProbe {
+async function redditProbe(): Promise<CollectorProbe> {
   const checkedAt = new Date().toISOString();
   const base = {
     id: "reddit",
@@ -245,27 +246,77 @@ function redditProbe(): CollectorProbe {
     checkedAt,
   };
 
-  if (!redditCredentials()) {
+  // Async now: the credential may come from the operator's vault as well as the
+  // environment, and reading the vault touches the filesystem. Reporting
+  // "no-credential" while a working vault entry sits on the Settings page would
+  // be exactly the stale-declaration problem this module was built to remove.
+  const resolved = await resolveRedditCredentials();
+  if (!resolved) {
     return {
       ...base,
       status: "no-credential",
       detail:
         "Unauthenticated Reddit access began returning 403 on every endpoint (2026-08-10). Set " +
-        "REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET from a free script app to re-enable search.",
+        "REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET from a free script app, or add the pair on " +
+        "the Settings page, to re-enable search.",
     };
   }
   return {
     ...base,
     status: "not-probeable",
     detail:
-      "Credentials are configured. Not probed here because a probe would spend a token request " +
-      "and a query against the 100/minute budget; run a Reddit pull on the Social page to test it.",
+      `Credentials are configured (source: ${resolved.source}). Not probed here because a probe ` +
+      "would spend a token request and a query against the 100/minute budget; run a Reddit pull " +
+      "on the Social page to test it.",
+  };
+}
+
+/**
+ * Bluesky historical search is credential-gated in the same way, and its absence
+ * is easy to mistake for the firehose being down. It is reported separately from
+ * the Jetstream probe because the two fail independently: the socket can be
+ * healthy while search is unavailable, and that is the default state.
+ */
+async function blueskySearchProbe(): Promise<CollectorProbe> {
+  const checkedAt = new Date().toISOString();
+  const base = {
+    id: "bluesky-search",
+    name: "Bluesky keyword search",
+    module: "M3" as const,
+    endpoint: "https://bsky.social/xrpc/app.bsky.feed.searchPosts",
+    httpStatus: null,
+    latencyMs: null,
+    checkedAt,
+  };
+
+  const resolved = await resolveCredential("bluesky");
+  if (!resolved) {
+    return {
+      ...base,
+      status: "no-credential",
+      detail:
+        "app.bsky.feed.searchPosts returns 403 unauthenticated, so historical search is " +
+        "unavailable. The Jetstream firehose is unaffected and still collects forward from " +
+        "connection. Add a Bluesky app password on the Settings page to enable search.",
+    };
+  }
+  return {
+    ...base,
+    status: "not-probeable",
+    detail:
+      `An app password is configured (source: ${resolved.source}). Not probed here because a ` +
+      "probe would open a session against the login rate limit; run a search on the Social page " +
+      "to test it.",
   };
 }
 
 export async function probeCollectors(): Promise<CollectorProbe[]> {
-  const probed = await Promise.all(SPECS.map(probeOne));
-  return [...probed, redditProbe(), ...unprobeable()];
+  const [probed, reddit, blueskySearch] = await Promise.all([
+    Promise.all(SPECS.map(probeOne)),
+    redditProbe(),
+    blueskySearchProbe(),
+  ]);
+  return [...probed, reddit, blueskySearch, ...unprobeable()];
 }
 
 export const collectorHealth = createServerFn({ method: "GET" })

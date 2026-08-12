@@ -100,17 +100,20 @@ function YoutubePage() {
     setIframeActivated(false); // reset poster on new video
 
     try {
-      const data = await serverFetchYoutubeMetadata({ data: { url: targetUrl } });
-      setMetadata(data);
-      // Default to first available subtitle language if 'en' is missing
-      if (data.available_subtitles.length > 0) {
-        const hasEn = data.available_subtitles.some((s) => s.code === "en");
-        if (!hasEn) {
-          setSelectedLang(data.available_subtitles[0].code);
+      const res = await serverFetchYoutubeMetadata({ data: { url: targetUrl } });
+      if (res.success) {
+        setMetadata(res.data);
+        if (res.data.available_subtitles.length > 0) {
+          const hasEn = res.data.available_subtitles.some((s) => s.code === "en");
+          if (!hasEn) {
+            setSelectedLang(res.data.available_subtitles[0].code);
+          }
         }
+      } else {
+        setMetaError({ error: res.error, cause: res.cause });
       }
     } catch (err: any) {
-      setMetaError(err as YoutubeError);
+      setMetaError({ error: "MetadataError", cause: err?.message || String(err) });
     } finally {
       setFetchingMeta(false);
     }
@@ -124,10 +127,15 @@ function YoutubePage() {
     setSubsError(null);
 
     try {
-      const data = await serverFetchYoutubeSubtitles({ data: { url: activeUrl, lang } });
-      setSubtitles(data);
+      const res = await serverFetchYoutubeSubtitles({ data: { url: activeUrl, lang } });
+      if (res.success) {
+        setSubtitles(res.data);
+      } else {
+        setSubsError({ error: res.error, cause: res.cause });
+        setSubtitles(null);
+      }
     } catch (err: any) {
-      setSubsError(err as YoutubeError);
+      setSubsError({ error: "SubtitlesError", cause: err?.message || String(err) });
       setSubtitles(null);
     } finally {
       setFetchingSubs(false);
@@ -141,19 +149,22 @@ function YoutubePage() {
     setDownloadError(null);
 
     try {
-      const data = await serverDownloadYoutubeVideo({ data: { url: activeUrl, quality: "720p" } });
-      setDownloadResult(data);
-      // Trigger browser download via the direct stream URL
-      const anchor = document.createElement("a");
-      anchor.href = data.directUrl;
-      anchor.download = `${data.id}_720p.mp4`;
-      anchor.target = "_blank";
-      anchor.rel = "noopener noreferrer";
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
+      const res = await serverDownloadYoutubeVideo({ data: { url: activeUrl, quality: "720p" } });
+      if (res.success) {
+        setDownloadResult(res.data);
+        const anchor = document.createElement("a");
+        anchor.href = res.data.directUrl;
+        anchor.download = `${res.data.id}_720p.mp4`;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+      } else {
+        setDownloadError({ error: res.error, cause: res.cause });
+      }
     } catch (err: any) {
-      setDownloadError(err as YoutubeError);
+      setDownloadError({ error: "DownloadError", cause: err?.message || String(err) });
     } finally {
       setDownloading(false);
     }

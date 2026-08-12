@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { githubHeaders } from "@/utils/credential-vault";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -973,15 +974,19 @@ export const fetchOSINT = createServerFn({ method: "GET" })
       }
     };
 
+    // Authenticated when a GitHub PAT is configured in the environment or the
+    // credentials vault, unauthenticated otherwise — the token raises search
+    // from 10 requests/minute to 30 and the core API from 60/hour to 5,000. The
+    // sweep below makes three calls per subject, so the unauthenticated ceiling
+    // is roughly three subjects a minute before results start thinning.
+    const ghHeaders = await githubHeaders();
+
     try {
       // Step A: Search repositories by name/query
       const gitResponse = await fetch(
         `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc`,
         {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-          },
+          headers: ghHeaders,
           signal: AbortSignal.timeout(8000),
         },
       );
@@ -1004,7 +1009,7 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         const userResponse = await fetch(
           `https://api.github.com/search/users?q=${encodeURIComponent(variant)}`,
           {
-            headers: { "User-Agent": "Mozilla/5.0" },
+            headers: ghHeaders,
             signal: AbortSignal.timeout(8000),
           },
         );
@@ -1024,7 +1029,7 @@ export const fetchOSINT = createServerFn({ method: "GET" })
         const userReposResponse = await fetch(
           `https://api.github.com/users/${username}/repos?sort=updated&per_page=5`,
           {
-            headers: { "User-Agent": "Mozilla/5.0" },
+            headers: ghHeaders,
             signal: AbortSignal.timeout(8000),
           },
         );

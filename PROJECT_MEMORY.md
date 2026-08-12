@@ -10,7 +10,7 @@
 
 - **Task:** v1 Feature & Intelligence Merge — OSINT tools, agents, crawlers & real-time data sources integrated (Complete)
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-11 — **470 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **85 core exports verified**, `bun run build` green.
+- **Last Verified:** 2026-08-12 — **511 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **113 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
 
 ### Deployed state — 2026-08-12 ✅ LATEST
 
@@ -56,6 +56,7 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **Credentials Vault wired to the collectors (2026-08-12)**: The Settings page was a write-only box — it saved `data/credentials.json` and nothing in the system ever read it, so an operator could add a key, watch it save, see it badged "Active", and collect exactly as much as before. New `src/utils/credential-vault.ts` is now the store the collectors resolve from, with a nine-provider registry, env-first resolution, real per-provider verification probes, masked listing plus a separate reveal call, and a computed capability matrix. Two fabrications removed: `status: "Active"` written at save time for an untested secret (now `unverified` until a live call says otherwise, and legacy `"Active"` rows are read back as `unverified`), and `lastUsed: "Never"` stored as data (now `null`). **New collection unlocked:** authenticated Bluesky `searchPosts` (`fetchBlueskySearch`) — historical keyword search, previously listed as a stated limitation because it 403s unauthenticated — and authenticated Mastodon `api/v2/search` (`fetchMastodonSearch`), reaching posts that carry no hashtag. Reddit, UCDP and GitHub now resolve from the vault as well as the environment. **511 unit tests passing** (+41), **`tsc --noEmit` clean**, **113 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see the note below.
 - [x] **YouTube Ingestion for OSINT & Social Intelligence (2026-08-11)**: Implemented full YouTube video ingestion with a Python FastAPI backend (`yt-dlp` Python API) and a TanStack Start frontend route (`/youtube`). Includes URL host validation (`youtube.com`/`youtu.be`), metadata extraction without video download, subtitle timestamp segment parsing (`[{start, end, text}]`), analyst-initiated single-video MP4 artifact download into `YT_DOWNLOAD_DIR` with audit logging, privacy-mode embed player (`youtube-nocookie.com`), clickable timestamp seeking, handoff to video analysis pipeline (`/videos`), 5 Python unit tests passing (`pytest tests_py/`), 470 JS/TS unit tests passing (`bun test`), 90 core exports verified, and `tsc --noEmit` clean.
 - [x] **v1 Feature & Intelligence Merge (2026-08-11)**: Merged missing working functions, APIs, resources, OSINT tools, agents, crawlers, and GIS data sources from `social-media-ai-agents-` (v1) into `v2`. Added real-time GPS jamming feed (`gps-interference.ts`), environmental radiation monitoring network (`radiation.ts`), CISA KEV cyber intelligence (`cyber-intel.ts`), social velocity & posting volume spike calculator (`social-velocity.ts`), Telegram topic classifier (`telegram-intel.ts`), multi-domain threat classifier (`threat-classifier.ts`), spatio-temporal focal point convergence engine (`focal-point.ts`), OSINT route updates, and collector health probes. **470 unit tests passing**, **85 core exported symbols verified**, **`tsc --noEmit` clean**.
 - [x] **Fabrication sweep + gate repair (2026-08-11)**: Removed the last three fabricated outputs — `osint.tsx`'s invented RSS fallbacks (real outlet names, current timestamps), its six hardcoded Overview cards ("3 repos leak internal endpoints"), and `tasks.tsx`'s synthetic Module 1 probe with its `50` / `0.5` defaults. Also fixed a live `ReferenceError` on the Tasks page, and an entity-key regex covering only U+0900–U+0DFF that silently merged every Urdu entity name into one. `tsc --noEmit` clean for the first time; lint 10,051 → 224 problems (all `no-explicit-any`). New `src/utils/osint-summary.ts` + 21 tests; `fromSocialPost` now refuses a platform the frozen contract does not define rather than remapping it.
@@ -69,12 +70,40 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 - [x] **Module 5 (Reports & GIS)**: Provider-agnostic LLM client (`llm.ts`), citation validator, PDF export, UCDP/USGS/GDELT integration in `reports.ts`, `geo.ts`, `geo-sources.ts`.
 - [x] **Project Memory & Preservation System (2026-08-10)**: Created `PROJECT_MEMORY.md`, `.claude/rules/memory-and-preservation.md`, updated `CLAUDE.md`, and added `scripts/check-exports.ts`.
 
+### Two pre-existing defects fixed on 2026-08-12
+
+Both were found while wiring the vault and both silently disabled a safety net.
+
+1. **`.gitignore` was ignoring the entire repository.** Commit `d935aef` ("ignore root
+   `*.js`") appended the pattern as **UTF-16LE**, so the bytes on disk were
+   `* \0 . \0 j \0 s \0`. Git parses the line up to the NUL and reads the pattern as bare
+   **`*`** — every untracked file in the tree, matched. Since that commit no new file could
+   be `git add`ed without `-f`, including the two added here. Replaced with a correct
+   `/*.js`. **If a new source file ever seems to vanish from `git status`, check this line
+   first.**
+2. **`scripts/check-exports.ts` had failed on every run since the YouTube feature landed.**
+   It required `fetchYoutubeMetadata`, `fetchYoutubeSubtitles` and `downloadYoutubeVideo`
+   from `youtube-collector.ts`, which has never exported those names — the public symbols
+   are the `serverFetch*` / `serverDownload*` `createServerFn` wrappers over private
+   `_getMetadata` / `_getSubtitles` / `_getDownloadUrl`. A permanently red gate is worse
+   than no gate: a real deletion would have hidden among those three. Registry corrected;
+   the audit now passes at 113 symbols.
+
 ### Pending Backlog / Roadmap
 
-0. **Obtain the Reddit credential** — free script app at reddit.com/prefs/apps. Reddit collection is dead without it, and it is the only blocker on a third live platform.
-1. **Module 1 Enhancement**: Persist custom weight profiles to a backend API (currently localStorage `sentinel_credibility_profiles`).
-2. **Module 5 GIS Enhancement**: Add UCDP API Token configuration UI for conflict event layer.
-3. **vLLM Self-Hosted Migration**: Prepare config switch once Azure NC8as-T4 GPU quota is approved.
+0. **Obtain the Reddit credential** — free script app at reddit.com/prefs/apps. Reddit
+   collection is dead without it. **No longer needs a redeploy**: enter the client ID and
+   secret on `/settings` and press Verify. `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` stay
+   the durable path, and still take precedence.
+1. **Obtain a Bluesky app password** — the largest single collection gain available, and
+   free. It turns Bluesky from forward-only firehose monitoring into historical keyword
+   search. Same route: `/settings` → Bluesky → Verify.
+2. **Module 1 Enhancement**: Persist custom weight profiles to a backend API (currently localStorage `sentinel_credibility_profiles`).
+3. **Module 5 GIS Enhancement**: ~~Add UCDP API Token configuration UI~~ — **done 2026-08-12**, the token is a vault provider. Still needs the token itself from ucdp.uu.se.
+4. **Vault durability**: `data/` is not a mounted volume and is excluded from the build
+   context, so a vault credential dies with the replica on Container Apps. Fine for a demo;
+   a real deployment needs Key Vault (which the env path already uses) or a mounted secret.
+5. **vLLM Self-Hosted Migration**: Prepare config switch once Azure NC8as-T4 GPU quota is approved.
 
 ---
 
@@ -126,8 +155,12 @@ This registry lists key files and their exported symbols. When adding features, 
   - Exports: `scoreArticle`, `scoreCorpus`, `defaultFactors`, `TIER_SCORES`, `DOMAIN_REPUTATION`.
 - **[credibility-llm.ts](file:///d:/social_media_research/src/utils/credibility-llm.ts)**: Module 1 linguistic factor via LLM.
   - Exports: `assessArticleLanguage`, `assessLanguageFor`, `assessmentSummary`.
+- **[credential-vault.ts](file:///d:/social_media_research/src/utils/credential-vault.ts)**: The credential store the collectors resolve from, and the backend of `/settings`. Resolution order is **environment first, vault second** — Key Vault `secretref:` env vars are the audited path and must not be shadowed by a file on an ephemeral replica. `status` is measured by a live call, never asserted at save time; a non-collectable provider (Instagram, Facebook) is permanently `unusable` and can never be verified.
+  - Exports: `CREDENTIAL_PROVIDERS`, `CredentialVaultError`, `STATUS_LABELS`, `providerById`, `normaliseStatus`, `normaliseEntry`, `normaliseVault`, `maskSecret`, `secretTail`, `redactEntry`, `redactVault`, `normaliseHost`, `readVault`, `writeVault`, `resolveCredential`, `recordCredentialUse`, `verifyProviderCredential`, `buildCapabilityMatrix`, `githubHeaders`, plus the server functions `listCredentialProviders`, `listCredentials`, `addCredential`, `deleteCredential`, `revealCredential`, `verifyCredential`, `capabilityMatrix`.
+  - **Do not re-add an Instagram or Facebook collector behind these entries.** The bottom of the file records exactly what v1's `agent_scraper.py` / `agent-scraper.js` did with these same rows — instaloader login, then a Google-News-RSS fallback relabelled as Meta posts, then hardcoded posts with 842 and 420 likes. That decision is settled.
 - **[social.ts](file:///d:/social_media_research/src/utils/social.ts)**: Module 3 collection & monitors.
-  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchMastodonTag`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`.
+  - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resolveRedditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchBlueskySearch`, `resetBlueskySession`, `fetchMastodonTag`, `mastodonStatusToPost`, `fetchMastodonSearch`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialBlueskySearch`, `socialMastodonSearch`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`.
+  - `redditCredentials()` stays **synchronous and env-only** — call sites depend on that and its tests pin it. `resolveRedditCredentials()` is the async superset the collector uses, which also reads the vault.
   - **Removed 2026-08-10 (deliberate, not a regression):** `socialCache`. It read `data/social_cache.json`, whose only writers were `scripts/agent-scraper.js` and `scripts/agent_scraper.py` — both fabricated Instagram/Facebook posts with `Math.random()` engagement counts. All 128 records were invented. Both scripts and the reader are deleted; do not restore them (see §4 rule 2).
 - **[collector-health.ts](file:///d:/social_media_research/src/utils/collector-health.ts)**: Live reachability probe for every collector endpoint (replaces the invented `/crawlers` telemetry).
   - Exports: `probeCollectors`, `collectorHealth`, `CollectorProbe`, `ProbeStatus`.

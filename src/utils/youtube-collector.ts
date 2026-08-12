@@ -117,16 +117,33 @@ function fmtUploadDate(raw?: string): string | undefined {
 
 // ─── Core implementations (run server-side) ───────────────────────────────────
 
-async function _getMetadata(url: string): Promise<YoutubeMetadata> {
+export type ServerResponse<T> = 
+  | { success: true; data: T }
+  | { success: false; error: string; cause: string };
+
+async function _getMetadata(url: string): Promise<ServerResponse<YoutubeMetadata>> {
   if (!isYoutubeUrl(url)) {
-    throw { error: "VideoUnavailable", cause: "Invalid URL. Only youtube.com and youtu.be links are supported." } as YoutubeError;
+    return {
+      success: false,
+      error: "VideoUnavailable",
+      cause: "Invalid URL. Only youtube.com and youtu.be links are supported.",
+    };
   }
 
+  const videoId = extractYoutubeId(url);
+  if (!videoId) {
+    return {
+      success: false,
+      error: "VideoUnavailable",
+      cause: "Invalid YouTube URL format. Could not extract video ID.",
+    };
+  }
+
+  let ytdlErrorMsg = "";
   // Try ytdl-core for full metadata first
   try {
     const info = await ytdl.getInfo(url.trim());
     const details = info.videoDetails;
-    const formats = info.formats;
 
     const thumbnails: YoutubeThumbnail[] = (details.thumbnails || []).map((t: any) => ({
       url: t.url,
@@ -135,66 +152,79 @@ async function _getMetadata(url: string): Promise<YoutubeMetadata> {
     }));
 
     return {
-      id: details.videoId,
-      title: details.title,
-      description: details.description || "",
-      uploader: details.author?.name || details.ownerChannelName || "Unknown Uploader",
-      channel_id: details.author?.channel_url || details.author?.id || "",
-      upload_date: fmtUploadDate(details.uploadDate),
-      duration: parseInt(details.lengthSeconds, 10) || undefined,
-      view_count: parseInt(details.viewCount, 10) || undefined,
-      thumbnails,
-      webpage_url: details.video_url || url.trim(),
-      available_subtitles: [
-        { code: "en", name: "English", isAuto: true },
-      ],
-      provenance: {
-        source: "youtube",
-        model: "ytdl-core",
-        fetchedAt: new Date().toISOString(),
+      success: true,
+      data: {
+        id: details.videoId,
+        title: details.title,
+        description: details.description || "",
+        uploader: details.author?.name || details.ownerChannelName || "Unknown Uploader",
+        channel_id: details.author?.channel_url || details.author?.id || "",
+        upload_date: fmtUploadDate(details.uploadDate),
+        duration: parseInt(details.lengthSeconds, 10) || undefined,
+        view_count: parseInt(details.viewCount, 10) || undefined,
+        thumbnails,
+        webpage_url: details.video_url || url.trim(),
+        available_subtitles: [
+          { code: "en", name: "English", isAuto: true },
+        ],
+        provenance: {
+          source: "youtube",
+          model: "ytdl-core",
+          fetchedAt: new Date().toISOString(),
+        },
       },
     };
   } catch (ytdlErr: any) {
-    // Fallback to oEmbed for basic metadata when ytdl-core is blocked
-    const videoId = extractYoutubeId(url);
-    if (!videoId) {
-      throw { error: "VideoUnavailable", cause: "Invalid YouTube URL format." } as YoutubeError;
-    }
+    ytdlErrorMsg = ytdlErr?.message || String(ytdlErr);
+  }
 
+  // Fallback to oEmbed for basic metadata when ytdl-core is blocked
+  try {
     const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url.trim())}&format=json`;
-    const res = await fetch(oembedUrl, { headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null);
+    const res = await fetch(oembedUrl, { headers: { "User-Agent": "Mozilla/5.0" } }).catch((e) => {
+      throw new Error(`fetch failed: ${e?.message || e}`);
+    });
 
-    if (!res || !res.ok) {
-      throw {
-        error: "VideoUnavailable",
-        cause: `Video '${videoId}' is unavailable, private, or deleted.`,
-      } as YoutubeError;
+    if (!res.ok) {
+      throw new Error(`status ${res.status}`);
     }
 
-    const data = await res.json().catch(() => null);
+    const data = await res.json().catch((e) => {
+      throw new Error(`json parse failed: ${e?.message || e}`);
+    });
+
     if (!data) {
-      throw { error: "VideoUnavailable", cause: "Failed parsing video metadata." } as YoutubeError;
+      throw new Error("empty json response");
     }
 
     return {
-      id: videoId,
-      title: data.title || "Untitled Video",
-      description: `Channel: ${data.author_name || "YouTube Uploader"}\nURL: ${data.author_url || ""}`,
-      uploader: data.author_name || "YouTube Uploader",
-      channel_id: data.author_url || "",
-      upload_date: undefined,
-      duration: undefined,
-      view_count: undefined,
-      thumbnails: data.thumbnail_url
-        ? [{ url: data.thumbnail_url, width: data.thumbnail_width, height: data.thumbnail_height }]
-        : [{ url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, width: 480, height: 360 }],
-      webpage_url: `https://www.youtube.com/watch?v=${videoId}`,
-      available_subtitles: [{ code: "en", name: "English", isAuto: true }],
-      provenance: {
-        source: "youtube",
-        model: "yt-oembed-fallback",
-        fetchedAt: new Date().toISOString(),
+      success: true,
+      data: {
+        id: videoId,
+        title: data.title || "Untitled Video",
+        description: `Channel: ${data.author_name || "YouTube Uploader"}\nURL: ${data.author_url || ""}`,
+        uploader: data.author_name || "YouTube Uploader",
+        channel_id: data.author_url || "",
+        upload_date: undefined,
+        duration: undefined,
+        view_count: undefined,
+        thumbnails: data.thumbnail_url
+          ? [{ url: data.thumbnail_url, width: data.thumbnail_width, height: data.thumbnail_height }]
+          : [{ url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, width: 480, height: 360 }],
+        webpage_url: `https://www.youtube.com/watch?v=${videoId}`,
+        available_subtitles: [{ code: "en", name: "English", isAuto: true }],
+        provenance: {
+          source: "youtube",
+          model: "yt-oembed-fallback",
+          fetchedAt: new Date().toISOString(),
+        },
       },
+    };
+  } catch (oembedErr: any) {
+    return {
+      success: false,
+      error: "VideoUnavailable",
+      cause: `Metadata extraction failed. ytdl-core error: "${ytdlErrorMsg}". oEmbed fallback error: "${oembedErr?.message || oembedErr}".`,
     };
   }
 }
@@ -227,15 +257,17 @@ function parseVttSegments(text: string): SubtitleSegment[] {
   return segments;
 }
 
-async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitlesResponse> {
+async function _getSubtitles(url: string, lang = "en"): Promise<ServerResponse<YoutubeSubtitlesResponse>> {
   if (!isYoutubeUrl(url)) {
-    throw { error: "SubsUnavailable", cause: "Invalid YouTube URL." } as YoutubeError;
+    return { success: false, error: "SubsUnavailable", cause: "Invalid YouTube URL." };
   }
 
   const videoId = extractYoutubeId(url);
-  if (!videoId) throw { error: "SubsUnavailable", cause: "Could not extract video ID from URL." } as YoutubeError;
+  if (!videoId) {
+    return { success: false, error: "SubsUnavailable", cause: "Could not extract video ID from URL." };
+  }
 
-  // Strategy 1: YouTube public timedtext API (no auth needed, works for auto-captions)
+  // Strategy 1: YouTube timedtext API (auto)
   const timedTextUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=vtt&kind=asr`;
   try {
     const res = await fetch(timedTextUrl, {
@@ -246,11 +278,14 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
       const segments = parseVttSegments(vttText);
       if (segments.length > 0) {
         return {
-          id: videoId,
-          lang,
-          isAuto: true,
-          segments,
-          provenance: { source: "youtube", model: "timedtext-api", fetchedAt: new Date().toISOString() },
+          success: true,
+          data: {
+            id: videoId,
+            lang,
+            isAuto: true,
+            segments,
+            provenance: { source: "youtube", model: "timedtext-api", fetchedAt: new Date().toISOString() },
+          },
         };
       }
     }
@@ -258,7 +293,7 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
     // fall through
   }
 
-  // Strategy 2: Manual subtitle track
+  // Strategy 2: Manual timedtext API
   const manualUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=vtt`;
   try {
     const res = await fetch(manualUrl, {
@@ -269,11 +304,14 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
       const segments = parseVttSegments(vttText);
       if (segments.length > 0) {
         return {
-          id: videoId,
-          lang,
-          isAuto: false,
-          segments,
-          provenance: { source: "youtube", model: "timedtext-manual", fetchedAt: new Date().toISOString() },
+          success: true,
+          data: {
+            id: videoId,
+            lang,
+            isAuto: false,
+            segments,
+            provenance: { source: "youtube", model: "timedtext-manual", fetchedAt: new Date().toISOString() },
+          },
         };
       }
     }
@@ -281,7 +319,7 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
     // fall through
   }
 
-  // Strategy 3: ytdl-core to get caption tracks
+  // Strategy 3: ytdl-core caption tracks
   try {
     const info = await ytdl.getInfo(url.trim());
     const playerResponse = (info as any).player_response;
@@ -294,11 +332,14 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
         const segments = parseVttSegments(vttText);
         if (segments.length > 0) {
           return {
-            id: videoId,
-            lang: track.languageCode || lang,
-            isAuto: track.kind === "asr",
-            segments,
-            provenance: { source: "youtube", model: "ytdl-captions", fetchedAt: new Date().toISOString() },
+            success: true,
+            data: {
+              id: videoId,
+              lang: track.languageCode || lang,
+              isAuto: track.kind === "asr",
+              segments,
+              provenance: { source: "youtube", model: "ytdl-captions", fetchedAt: new Date().toISOString() },
+            },
           };
         }
       }
@@ -307,24 +348,22 @@ async function _getSubtitles(url: string, lang = "en"): Promise<YoutubeSubtitles
     // fall through
   }
 
-  throw {
+  return {
+    success: false,
     error: "SubsUnavailable",
     cause: `No subtitles or auto-captions available for video '${videoId}' in language '${lang}'. This video may have subtitles disabled by the uploader.`,
-  } as YoutubeError;
+  };
 }
 
-async function _getDownloadUrl(url: string, quality = "720p"): Promise<YoutubeDownloadResponse> {
+async function _getDownloadUrl(url: string, quality = "720p"): Promise<ServerResponse<YoutubeDownloadResponse>> {
   if (!isYoutubeUrl(url)) {
-    throw { error: "DownloadFailed", cause: "Invalid YouTube URL." } as YoutubeError;
+    return { success: false, error: "DownloadFailed", cause: "Invalid YouTube URL." };
   }
-
-  const maxHeight = parseInt(quality.replace("p", ""), 10) || 720;
 
   try {
     const info = await ytdl.getInfo(url.trim());
     const videoId = info.videoDetails.videoId;
 
-    // Get best muxed mp4 format (videoandaudio) — no ffmpeg in runtime, so separate streams can't be merged
     const formats = ytdl.filterFormats(info.formats, "videoandaudio");
     const mp4Formats = formats
       .filter((f) => f.container === "mp4")
@@ -332,26 +371,29 @@ async function _getDownloadUrl(url: string, quality = "720p"): Promise<YoutubeDo
     const best = mp4Formats[0] || formats[0];
 
     if (!best?.url) {
-      throw { error: "DownloadFailed", cause: "No downloadable format found for this video." } as YoutubeError;
+      return { success: false, error: "DownloadFailed", cause: "No downloadable format found for this video." };
     }
 
     return {
-      id: videoId,
-      directUrl: best.url,
-      format: `mp4 (${best.height ?? "?"}p muxed)`,
-      filesize: best.contentLength ? parseInt(best.contentLength, 10) : undefined,
-      provenance: {
-        source: "youtube",
-        model: "ytdl-core-stream",
-        fetchedAt: new Date().toISOString(),
+      success: true,
+      data: {
+        id: videoId,
+        directUrl: best.url,
+        format: `mp4 (${best.height ?? "?"}p muxed)`,
+        filesize: best.contentLength ? parseInt(best.contentLength, 10) : undefined,
+        provenance: {
+          source: "youtube",
+          model: "ytdl-core-stream",
+          fetchedAt: new Date().toISOString(),
+        },
       },
     };
   } catch (err: any) {
-    if (err?.error) throw err;
-    throw {
+    return {
+      success: false,
       error: "DownloadFailed",
       cause: `Could not retrieve download URL: ${err?.message || "Unknown error"}. The video may be age-restricted or region-locked.`,
-    } as YoutubeError;
+    };
   }
 }
 

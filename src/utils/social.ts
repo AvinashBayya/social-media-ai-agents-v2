@@ -33,6 +33,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { recordCredentialUse, resolveCredential, normaliseHost } from "./credential-vault";
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -721,6 +722,197 @@ export async function fetchAuthorFeed(actor: string, limit = 50): Promise<Social
   return posts;
 }
 
+// ─── 3b. Authenticated Bluesky keyword search ──────────────────────────────
+
+/**
+ * Historical keyword search over Bluesky.
+ *
+ * This is the one collection gap a credential closes outright. Jetstream is a
+ * live firehose: it can only ever show what is posted after the analyst's tab
+ * connects, so a subject that trended yesterday is unreachable no matter how
+ * long the socket stays open. `app.bsky.feed.searchPosts` searches the indexed
+ * past — and returns 403 unauthenticated (re-verified against the public AppView
+ * on 2026-08-12), which is why it was previously listed as a stated limitation
+ * rather than implemented.
+ *
+ * An app password (not the account password) resolves that. Authenticated XRPC
+ * goes to the PDS at bsky.social, which proxies to the AppView.
+ */
+const BSKY_PDS = "https://bsky.social/xrpc";
+
+/** Cached session JWT, mirroring the Reddit token cache: per-process, lost on restart. */
+let bskySession: { jwt: string; did: string; handle: string; issuedAt: number } | null = null;
+
+/** Exported so tests can reset it; nothing in the app should call this. */
+export function resetBlueskySession(): void {
+  bskySession = null;
+}
+
+/**
+ * accessJwt lifetime is not advertised in the response, so it is refreshed on a
+ * conservative fixed interval rather than on a guessed expiry. A 401 mid-flight
+ * also drops it — see fetchBlueskySearch.
+ */
+const BSKY_SESSION_TTL_MS = 90 * 60_000;
+
+async function blueskySession(): Promise<{ jwt: string; handle: string }> {
+  if (bskySession && Date.now() - bskySession.issuedAt < BSKY_SESSION_TTL_MS) {
+    return { jwt: bskySession.jwt, handle: bskySession.handle };
+  }
+
+  const cred = await resolveCredential("bluesky");
+  if (!cred?.identifier) {
+    throw new SocialUnavailableError(
+      "Bluesky keyword search requires an app password. app.bsky.feed.searchPosts returns 403 " +
+        "unauthenticated, so historical search cannot run — the live Jetstream firehose is " +
+        "unaffected and keeps collecting forward. Add a Bluesky app password on the Settings " +
+        "page, or set BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD. No results are shown " +
+        "because there is no credential, not because nothing matched.",
+      "bluesky",
+      403,
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${BSKY_PDS}/com.atproto.server.createSession`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        identifier: cred.identifier.replace(/^@/, ""),
+        password: cred.secret,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err: any) {
+    throw new SocialUnavailableError(
+      `Bluesky session request failed: ${err?.message ?? String(err)}`,
+      "bluesky",
+    );
+  }
+
+  const json: any = await res.json().catch(() => null);
+  if (res.status === 401) {
+    throw new SocialUnavailableError(
+      `Bluesky refused the app password (HTTP 401): ${json?.message ?? "AuthenticationRequired"}. ` +
+        `This must be an App Password from Settings → Privacy and security, not the account ` +
+        `password.`,
+      "bluesky",
+      401,
+    );
+  }
+  if (!res.ok || typeof json?.accessJwt !== "string") {
+    throw new SocialUnavailableError(
+      `Bluesky createSession returned HTTP ${res.status}${json?.error ? ` (${json.error})` : ""}.`,
+      "bluesky",
+      res.status,
+    );
+  }
+
+  bskySession = {
+    jwt: json.accessJwt,
+    did: String(json.did ?? ""),
+    handle: String(json.handle ?? cred.identifier),
+    issuedAt: Date.now(),
+  };
+  await recordCredentialUse("bluesky", cred.entryId);
+  return { jwt: bskySession.jwt, handle: bskySession.handle };
+}
+
+export type BlueskySearchSort = "latest" | "top";
+
+/**
+ * Search indexed Bluesky posts by keyword.
+ *
+ * Failure modes stay distinguishable, as everywhere else in this file: a missing
+ * credential, a rejected credential, a rate limit and a genuinely empty result
+ * set are four different facts. Only the last returns `[]`.
+ */
+export async function fetchBlueskySearch(
+  query: string,
+  limit = 50,
+  sort: BlueskySearchSort = "latest",
+): Promise<SocialPost[]> {
+  const q = query.trim();
+  if (!q) throw new SocialUnavailableError("No query supplied for Bluesky search.", "bluesky");
+
+  const key = `bsky-search:${q}:${limit}:${sort}`;
+  const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
+  if (hit) return hit;
+
+  const { jwt } = await blueskySession();
+  const url =
+    `${BSKY_PDS}/app.bsky.feed.searchPosts?q=${encodeURIComponent(q)}` +
+    `&limit=${Math.min(Math.max(limit, 1), 100)}&sort=${sort}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { authorization: `Bearer ${jwt}`, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err: any) {
+    throw new SocialUnavailableError(
+      `Bluesky search request failed: ${err?.message ?? String(err)}`,
+      "bluesky",
+    );
+  }
+
+  if (res.status === 401) {
+    // The cached JWT expired earlier than the fixed TTL assumed. Drop it so the
+    // next call re-authenticates rather than replaying a token we know is dead.
+    resetBlueskySession();
+    throw new SocialUnavailableError(
+      "Bluesky rejected the session token (HTTP 401). It has been discarded; retry to " +
+        "re-authenticate.",
+      "bluesky",
+      401,
+    );
+  }
+  if (res.status === 429) {
+    throw new SocialUnavailableError(
+      "Bluesky rate limited this search (HTTP 429). No results were returned — this is not " +
+        "the same as no matching posts.",
+      "bluesky",
+      429,
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new SocialUnavailableError(
+      `Bluesky searchPosts returned HTTP ${res.status}: ${body.slice(0, 200)}`,
+      "bluesky",
+      res.status,
+    );
+  }
+
+  const json: any = await res.json();
+  const posts: SocialPost[] = [];
+  for (const post of json?.posts ?? []) {
+    const record = post?.record;
+    if (!post?.uri || typeof record?.text !== "string") continue;
+    const rkey = String(post.uri).split("/").pop() ?? "";
+    const handle = post.author?.handle ?? post.author?.did ?? "";
+    posts.push({
+      id: String(post.uri),
+      platform: "bluesky",
+      author: handle,
+      authorId: post.author?.did ?? "",
+      text: record.text,
+      // indexedAt is when the AppView saw it, createdAt when the author says
+      // they wrote it. The author's claim is what every other collector here
+      // reports, so it stays primary for consistency across platforms.
+      createdAt: record.createdAt ?? post.indexedAt ?? "",
+      url: `https://bsky.app/profile/${handle}/post/${rkey}`,
+      langs: Array.isArray(record.langs) ? record.langs : [],
+      links: linksFrom(record),
+    });
+  }
+
+  cacheSet(genericCache, key, posts);
+  return posts;
+}
+
 // ─── 4. Reddit and Telegram collectors (server-side) ───────────────────────
 
 /**
@@ -749,6 +941,37 @@ export function redditCredentials(): { id: string; secret: string } | null {
 }
 
 /**
+ * Reddit credentials from the environment OR the operator's credentials vault.
+ *
+ * `redditCredentials()` above is env-only and stays that way: it is synchronous,
+ * several call sites depend on that, and its tests pin the behaviour. This is
+ * the async superset the collector actually uses, so a credential entered on the
+ * Settings page during a demo works without a redeploy. Environment still wins —
+ * see the resolution note in credential-vault.ts.
+ *
+ * Returns the vault entry id alongside, so a successful call can stamp
+ * `lastUsed` on the row the operator is looking at.
+ */
+export async function resolveRedditCredentials(): Promise<{
+  id: string;
+  secret: string;
+  source: "env" | "vault";
+  entryId: string | null;
+} | null> {
+  const env = redditCredentials();
+  if (env) return { ...env, source: "env", entryId: null };
+
+  const resolved = await resolveCredential("reddit");
+  if (!resolved?.identifier) return null;
+  return {
+    id: resolved.identifier,
+    secret: resolved.secret,
+    source: resolved.source,
+    entryId: resolved.entryId,
+  };
+}
+
+/**
  * Cached bearer token. Per-process and lost on restart, like the LLM cache —
  * acceptable because a token round-trip is one extra request, not a wrong answer.
  */
@@ -760,13 +983,14 @@ export function resetRedditToken(): void {
 }
 
 async function redditAccessToken(): Promise<string> {
-  const creds = redditCredentials();
+  const creds = await resolveRedditCredentials();
   if (!creds) {
     throw new SocialUnavailableError(
       "Reddit requires OAuth credentials. Unauthenticated access now returns 403 on every " +
         "endpoint (verified 2026-08-10), so no query can run. Register a free script app at " +
-        "reddit.com/prefs/apps and set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET. Nothing is " +
-        "shown — that is a missing credential, not a finding that no posts matched.",
+        "reddit.com/prefs/apps, then either set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET or " +
+        "add the pair on the Settings page. Nothing is shown — that is a missing credential, " +
+        "not a finding that no posts matched.",
       "reddit",
       403,
     );
@@ -824,6 +1048,9 @@ async function redditAccessToken(): Promise<string> {
 
   const ttlSeconds = typeof json?.expires_in === "number" ? json.expires_in : 3600;
   redditToken = { value: token, expiresAt: Date.now() + ttlSeconds * 1000 };
+  // Records against the vault row only; an env credential has no row to stamp.
+  // Non-throwing by contract — bookkeeping must not fail a working collection.
+  await recordCredentialUse("reddit", creds.entryId);
   return token;
 }
 
@@ -1044,7 +1271,7 @@ export const MASTODON_INSTANCES = ["mastodon.social", "mstdn.social"] as const;
 export const MASTODON_DEFAULT_INSTANCE = MASTODON_INSTANCES[0];
 
 /** Mastodon status fields we read. Everything is optional upstream. */
-interface MastodonStatus {
+export interface MastodonStatus {
   id?: unknown;
   created_at?: unknown;
   url?: unknown;
@@ -1170,34 +1397,147 @@ export async function fetchMastodonTag(
 
   const posts: SocialPost[] = [];
   for (const raw of json as MastodonStatus[]) {
-    const id = typeof raw?.id === "string" ? raw.id : null;
-    const acct = typeof raw?.account?.acct === "string" ? raw.account.acct : null;
-    if (!id || !acct) continue;
-
-    const html = typeof raw.content === "string" ? raw.content : "";
-    const text = stripMastodonHtml(html);
-    if (!text) continue;
-
-    // A bare local handle is ambiguous across instances; qualify it so the same
-    // account is not counted as two, and two accounts are not merged into one.
-    const qualified = acct.includes("@") ? acct : `${acct}@${host}`;
-
-    posts.push({
-      id: `mastodon:${host}:${id}`,
-      platform: "mastodon",
-      author: `@${qualified}`,
-      authorId: qualified,
-      text,
-      createdAt: typeof raw.created_at === "string" ? raw.created_at : "",
-      url: typeof raw.url === "string" ? raw.url : typeof raw.uri === "string" ? raw.uri : "",
-      // The instance reports the author's declared language; this is not our
-      // detection, matching how `langs` is sourced for Bluesky.
-      langs: typeof raw.language === "string" && raw.language ? [raw.language] : [],
-      links: mastodonLinks(html, raw.card?.url),
-    });
+    const post = mastodonStatusToPost(raw, host);
+    if (post) posts.push(post);
   }
 
   posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  cacheSet(genericCache, key, posts);
+  return posts;
+}
+
+/**
+ * Map one Mastodon status onto the common post shape, or null if it carries no
+ * usable content.
+ *
+ * Extracted so the hashtag timeline and the authenticated full-text search
+ * produce identical records — two mappers would drift, and a post found by
+ * search would end up subtly different from the same post found by hashtag,
+ * which would then read as two accounts to the CIB handle-family signals.
+ */
+export function mastodonStatusToPost(raw: MastodonStatus, host: string): SocialPost | null {
+  const id = typeof raw?.id === "string" ? raw.id : null;
+  const acct = typeof raw?.account?.acct === "string" ? raw.account.acct : null;
+  if (!id || !acct) return null;
+
+  const html = typeof raw.content === "string" ? raw.content : "";
+  const text = stripMastodonHtml(html);
+  if (!text) return null;
+
+  // A bare local handle is ambiguous across instances; qualify it so the same
+  // account is not counted as two, and two accounts are not merged into one.
+  const qualified = acct.includes("@") ? acct : `${acct}@${host}`;
+
+  return {
+    id: `mastodon:${host}:${id}`,
+    platform: "mastodon",
+    author: `@${qualified}`,
+    authorId: qualified,
+    text,
+    createdAt: typeof raw.created_at === "string" ? raw.created_at : "",
+    url: typeof raw.url === "string" ? raw.url : typeof raw.uri === "string" ? raw.uri : "",
+    // The instance reports the author's declared language; this is not our
+    // detection, matching how `langs` is sourced for Bluesky.
+    langs: typeof raw.language === "string" && raw.language ? [raw.language] : [],
+    links: mastodonLinks(html, raw.card?.url),
+  };
+}
+
+/**
+ * Authenticated full-text status search on one Mastodon instance.
+ *
+ * `api/v2/search` needs a token on every instance tested, which is why keyless
+ * collection is limited to hashtag timelines — and why an unhashtagged post is
+ * invisible without this. Coverage is still per-instance: this searches what
+ * `host` has federated in, not the whole network, and that limit is a property
+ * of Mastodon rather than of this implementation.
+ */
+export async function fetchMastodonSearch(
+  query: string,
+  instance?: string,
+  limit = 40,
+): Promise<SocialPost[]> {
+  const q = query.trim();
+  if (!q) throw new SocialUnavailableError("No query supplied for Mastodon search.", "mastodon");
+
+  const cred = await resolveCredential("mastodon");
+  if (!cred) {
+    throw new SocialUnavailableError(
+      "Mastodon full-text search requires an instance access token — api/v2/search returns 401 " +
+        "without one on every instance tested. Hashtag timelines keep working unauthenticated. " +
+        "Add a Mastodon token on the Settings page, or set MASTODON_ACCESS_TOKEN. No posts are " +
+        "shown because there is no credential, not because nothing matched.",
+      "mastodon",
+      401,
+    );
+  }
+
+  // The token is only valid on the instance that issued it, so the credential's
+  // own host wins over any instance the caller passed.
+  const host = normaliseHost(cred.identifier ?? "") || normaliseHost(instance ?? "") ||
+    MASTODON_DEFAULT_INSTANCE;
+
+  const key = `mastodon-search:${host}:${q}:${limit}`;
+  const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
+  if (hit) return hit;
+
+  const url =
+    `https://${host}/api/v2/search?q=${encodeURIComponent(q)}&type=statuses` +
+    `&limit=${Math.min(Math.max(limit, 1), 40)}&resolve=true`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { authorization: `Bearer ${cred.secret}`, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err: any) {
+    throw new SocialUnavailableError(
+      `Mastodon search on ${host} failed: ${err?.message ?? String(err)}`,
+      "mastodon",
+    );
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    throw new SocialUnavailableError(
+      `${host} refused the access token (HTTP ${res.status}). A Mastodon token is only valid on ` +
+        `the instance that issued it — confirm the stored instance host matches.`,
+      "mastodon",
+      res.status,
+    );
+  }
+  if (res.status === 429) {
+    throw new SocialUnavailableError(
+      `${host} rate limited this search (HTTP 429). No results were returned — this is not the ` +
+        `same as no matching posts.`,
+      "mastodon",
+      429,
+    );
+  }
+  if (!res.ok) {
+    throw new SocialUnavailableError(
+      `Mastodon instance ${host} returned HTTP ${res.status}.`,
+      "mastodon",
+      res.status,
+    );
+  }
+
+  const json: any = await res.json().catch(() => null);
+  if (!Array.isArray(json?.statuses)) {
+    throw new SocialUnavailableError(
+      `Mastodon instance ${host} returned an unexpected search payload (no statuses array).`,
+      "mastodon",
+    );
+  }
+
+  const posts: SocialPost[] = [];
+  for (const raw of json.statuses as MastodonStatus[]) {
+    const post = mastodonStatusToPost(raw, host);
+    if (post) posts.push(post);
+  }
+
+  posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  await recordCredentialUse("mastodon", cred.entryId);
   cacheSet(genericCache, key, posts);
   return posts;
 }
@@ -1215,6 +1555,13 @@ export interface PlatformNote {
   available: boolean;
   /** Env vars that enable it, when availability is credential-gated. */
   requiresCredential?: string;
+  /**
+   * Registry id in credential-vault.ts for the credential that lifts this
+   * limitation, where one exists. Lets the UI link a stated limit straight to
+   * the form that resolves it, instead of leaving the operator to guess which
+   * of nine providers is the relevant one.
+   */
+  credentialProvider?: string;
   method: string;
   limitation: string;
 }
@@ -1229,11 +1576,16 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   {
     platform: "Bluesky",
     available: true,
-    method: "Jetstream WebSocket firehose (unauthenticated) + public AppView",
+    credentialProvider: "bluesky",
+    method:
+      "Jetstream WebSocket firehose (unauthenticated) + public AppView; " +
+      "app.bsky.feed.searchPosts once an app password is configured",
     limitation:
       "Live and complete for the public network. app.bsky.feed.searchPosts requires " +
-      "authentication (returns 403), so historical keyword search is unavailable without " +
-      "an account; monitoring runs forward from connection.",
+      "authentication (returns 403), so without a credential monitoring runs forward from " +
+      "connection and nothing posted earlier is reachable. Adding a Bluesky app password on " +
+      "the Settings page — or BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD — enables historical " +
+      "keyword search over the indexed past.",
   },
   {
     platform: "Reddit",
@@ -1242,7 +1594,8 @@ export const PLATFORM_NOTES: PlatformNote[] = [
     // anti-bot page. Leaving this as available claimed a collector the system
     // no longer has.
     available: false,
-    requiresCredential: "REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET",
+    requiresCredential: "REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET (or the Settings vault)",
+    credentialProvider: "reddit",
     method: "OAuth client-credentials against oauth.reddit.com (free script app)",
     limitation:
       "Unauthenticated access is blocked outright — search.json, old.reddit.com, api.reddit.com " +
@@ -1254,14 +1607,18 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   {
     platform: "Mastodon",
     available: true,
-    method: "public hashtag timelines, unauthenticated (api/v1/timelines/tag)",
+    credentialProvider: "mastodon",
+    method:
+      "public hashtag timelines, unauthenticated (api/v1/timelines/tag); " +
+      "full-text status search (api/v2/search) once an instance token is configured",
     limitation:
       "Federated, so coverage is per-instance rather than network-wide: a tag timeline shows " +
       "what that instance has seen, not everything posted anywhere. Instances also choose " +
       "individually whether to serve anonymous readers — mastodon.social and mstdn.social do, " +
       "infosec.exchange returns 422 — so an instance refusing us is reported as a refusal, not " +
       "as an unused hashtag. Full-text search needs a token on every instance tested, so " +
-      "collection is by hashtag.",
+      "keyless collection is by hashtag; adding an instance access token on the Settings page " +
+      "enables api/v2/search and reaches posts that carry no hashtag at all.",
   },
   {
     platform: "Telegram",
@@ -1324,6 +1681,16 @@ export const socialMastodon = createServerFn({ method: "POST" })
   .validator((d: { tag: string; instance?: string; limit?: number }) => d)
   .handler(async ({ data }) => fetchMastodonTag(data.tag, data.instance, data.limit));
 
+/** Historical Bluesky keyword search. Requires a configured app password. */
+export const socialBlueskySearch = createServerFn({ method: "POST" })
+  .validator((d: { query: string; limit?: number; sort?: BlueskySearchSort }) => d)
+  .handler(async ({ data }) => fetchBlueskySearch(data.query, data.limit, data.sort));
+
+/** Full-text Mastodon status search. Requires a configured instance token. */
+export const socialMastodonSearch = createServerFn({ method: "POST" })
+  .validator((d: { query: string; instance?: string; limit?: number }) => d)
+  .handler(async ({ data }) => fetchMastodonSearch(data.query, data.instance, data.limit));
+
 /**
  * Reports whether Reddit collection is actually configured.
  *
@@ -1333,7 +1700,14 @@ export const socialMastodon = createServerFn({ method: "POST" })
  */
 export const socialCredentials = createServerFn({ method: "GET" })
   .validator((d: undefined) => d)
-  .handler(async () => ({ reddit: redditCredentials() !== null }));
+  .handler(async () => ({
+    // `reddit` keeps its original meaning and shape for existing callers, but
+    // now answers from the vault as well as the environment — a credential the
+    // operator entered on the Settings page is a configured credential.
+    reddit: (await resolveRedditCredentials()) !== null,
+    bluesky: (await resolveCredential("bluesky")) !== null,
+    mastodon: (await resolveCredential("mastodon")) !== null,
+  }));
 
 /*
  * `socialCache` was REMOVED on 2026-08-10, along with `scripts/agent-scraper.js`

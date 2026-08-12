@@ -19,6 +19,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { recordCredentialUse, resolveCredential } from "./credential-vault";
 import {
   fromGdeltArticle,
   fromUcdpEvent,
@@ -87,16 +88,20 @@ export async function collectSeismic(): Promise<LayerResult> {
  * no conflicts anywhere in the world, which is what an empty array would imply.
  */
 export async function collectConflict(): Promise<LayerResult> {
-  const token = process.env.UCDP_API_TOKEN;
+  // Environment first, then the operator's credentials vault — the same
+  // resolution order every other credential-gated collector uses. An analyst
+  // adding the token on the Settings page enables this layer without a redeploy.
+  const resolved = await resolveCredential("ucdp");
+  const token = resolved?.secret;
   if (!token) {
     return {
       layer: "conflict",
       records: [],
       unplaceable: 0,
       error:
-        "UCDP requires an API token (the endpoint returns 401 without one). Set UCDP_API_TOKEN " +
-        "to enable this layer. No events are shown — which is a missing credential, not a " +
-        "finding that no conflicts occurred.",
+        "UCDP requires an API token (the endpoint returns 401 without one). Set UCDP_API_TOKEN, " +
+        "or add a UCDP token on the Settings page, to enable this layer. No events are shown — " +
+        "which is a missing credential, not a finding that no conflicts occurred.",
     };
   }
 
@@ -104,6 +109,7 @@ export async function collectConflict(): Promise<LayerResult> {
     const data = await getJson("https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=200", {
       "x-ucdp-access-token": token,
     });
+    await recordCredentialUse("ucdp", resolved.entryId);
     const events: any[] = data?.Result ?? [];
     const records: GeoRecord[] = [];
     let unplaceable = 0;
