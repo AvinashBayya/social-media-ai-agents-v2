@@ -172,7 +172,12 @@ export function buildAttestedCapture(input: AttestedCaptureInput): AttestedCaptu
   }
 
   return {
-    id: input.id ?? `CAP-${new Date(parsed).toISOString().replace(/[^0-9]/g, "").slice(0, 14)}-${input.sha256.slice(0, 8)}`,
+    id:
+      input.id ??
+      `CAP-${new Date(parsed)
+        .toISOString()
+        .replace(/[^0-9]/g, "")
+        .slice(0, 14)}-${input.sha256.slice(0, 8)}`,
     platform: input.platform,
     sourceUrl,
     capturedAt: new Date(parsed).toISOString(),
@@ -205,7 +210,9 @@ export function buildAttestedCapture(input: AttestedCaptureInput): AttestedCaptu
  */
 export function attestedCaptureToMediaAsset(
   capture: AttestedCapture,
-  extras: Partial<Pick<MediaAsset, "exif" | "c2pa" | "ocrText" | "gps" | "detections" | "faces">> = {},
+  extras: Partial<
+    Pick<MediaAsset, "exif" | "c2pa" | "ocrText" | "gps" | "detections" | "faces">
+  > = {},
 ): MediaAsset {
   if (!capture.phash) {
     throw new AttestationError(

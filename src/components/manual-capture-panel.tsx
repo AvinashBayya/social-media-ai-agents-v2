@@ -12,7 +12,7 @@
  * reviewer will run against it are all going to come back empty.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,14 +70,37 @@ export function ManualCapturePanel() {
   const [platform, setPlatform] = useState<CapturePlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
   const [capturedBy, setCapturedBy] = useState("");
-  const [capturedAt, setCapturedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  /**
+   * `datetime-local` reads and writes LOCAL wall-clock time.
+   *
+   * This seeded it with `new Date().toISOString().slice(0,16)` — a UTC wall
+   * clock. The input then displayed that as a local time, and submit ran
+   * `new Date(value)`, which parses a bare `datetime-local` string as local and
+   * converts back to UTC — subtracting the offset a second time. At IST every
+   * attested capture was therefore stamped 5h30m before it was taken, and the
+   * vault row labelled that instant "UTC". On a record whose entire purpose is
+   * to say when a screen was observed, that is the one field that must be right.
+   *
+   * Shifting by the offset here means the input shows real local time, and the
+   * round trip on submit is exact.
+   */
+  const [capturedAt, setCapturedAt] = useState(() => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
   const [note, setNote] = useState("");
   const [caseId, setCaseId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ field: string; message: string } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const cases = useMemo(() => (typeof window === "undefined" ? [] : getInvestigations()), []);
+  // Read AFTER mount, not during render. A useMemo over localStorage returns []
+  // on the server and the real list on the client, so the <select> rendered two
+  // different option sets and React logged a hydration mismatch on every load
+  // of /social.
+  const [cases, setCases] = useState<{ id: string }[]>([]);
+  useEffect(() => setCases(getInvestigations()), []);
 
   const submit = async () => {
     setError(null);
@@ -92,11 +115,18 @@ export function ManualCapturePanel() {
       // whose integrity cannot be established later is worse than none.
       const sha256 = await sha256OfFile(file);
 
+      // Pass the raw field through. Converting here ran
+      // `new Date("").toISOString()` when the analyst cleared the field, which
+      // throws RangeError BEFORE buildAttestedCapture can validate — so its
+      // field-specific "a valid capture time is required, and it is the time of
+      // capture, not the time the post was published" message was unreachable
+      // dead code, and the generic "Invalid time value" landed in the unattached
+      // error blob with no indication of which field was wrong.
       const capture = buildAttestedCapture({
         platform,
         sourceUrl,
         capturedBy,
-        capturedAt: new Date(capturedAt).toISOString(),
+        capturedAt,
         note,
         sha256,
         filename: file.name,
@@ -107,28 +137,19 @@ export function ManualCapturePanel() {
         phash: null,
       });
 
-      appendEvidence({
-        id: capture.id,
-        title: `${CAPTURE_PLATFORM_LABELS[capture.platform]} capture — ${capture.filename}`,
-        type: file.type.includes("pdf") ? "PDF" : "Screenshot",
-        timestamp: capture.capturedAt.replace("T", " ").slice(0, 19) + " UTC",
-        source: `Analyst capture by ${capture.capturedBy} — ${capture.sourceUrl}`,
-        hash: capture.sha256,
-        geo: "Not established",
-        entities: [],
-        caseId,
-        // Never auto-scored. An analyst rates it or it stays unrated, matching
-        // the rule the evidence vault already follows.
-        risk: null,
-        tags: ["analyst-capture", capture.platform, "manual-only"],
-        fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-      });
-
+      let pinned = false;
       if (caseId) {
-        pinToInvestigation(caseId, {
+        pinned = pinToInvestigation(caseId, {
           kind: "note",
           title: `${CAPTURE_PLATFORM_LABELS[capture.platform]} capture — ${capture.filename}`,
           source: `Analyst capture by ${capture.capturedBy}`,
+          // The post address, carried explicitly. Omitting it left
+          // PinnedEvidence.url as "", which dropped the URL from every generated
+          // citation — the one field buildAttestedCapture refuses a capture
+          // without, because "the capture cannot be traced back to what it
+          // depicts" — and left the store's duplicate guard, which keys on url,
+          // inert for captures so the same one pinned repeatedly.
+          url: capture.sourceUrl,
           publishedAt: capture.capturedAt,
           excerpt: capture.note || `Captured from ${capture.sourceUrl}`,
           credibility: null,
@@ -140,15 +161,52 @@ export function ManualCapturePanel() {
         });
       }
 
-      toast.success(
-        `Capture ${capture.id} recorded as analyst-attested evidence${caseId ? ` and pinned to ${caseId}` : ""}.`,
-      );
+      // Written AFTER the pin, and carrying the case id only if the pin really
+      // landed. Storing the requested id regardless made /vault show the capture
+      // as belonging to a case that has no record of it.
+      appendEvidence({
+        id: capture.id,
+        title: `${CAPTURE_PLATFORM_LABELS[capture.platform]} capture — ${capture.filename}`,
+        type: file.type.includes("pdf") ? "PDF" : "Screenshot",
+        timestamp: capture.capturedAt.replace("T", " ").slice(0, 19) + " UTC",
+        source: `Analyst capture by ${capture.capturedBy} — ${capture.sourceUrl}`,
+        hash: capture.sha256,
+        geo: "Not established",
+        entities: [],
+        caseId: pinned ? caseId : "",
+        // Never auto-scored. An analyst rates it or it stays unrated, matching
+        // the rule the evidence vault already follows.
+        risk: null,
+        tags: ["analyst-capture", capture.platform, "manual-only"],
+        fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+      });
+
+      // pinToInvestigation returns false without throwing when the case no
+      // longer exists or the URL is already pinned. Dropping that return and
+      // toasting success regardless reported a pin that had not happened — a
+      // fabricated success in the one panel whose purpose is not asserting more
+      // than the evidence supports.
+      if (!caseId) {
+        toast.success(`Capture ${capture.id} recorded as analyst-attested evidence.`);
+      } else if (pinned) {
+        toast.success(`Capture ${capture.id} recorded and pinned to ${caseId}.`);
+      } else {
+        toast.warning(
+          `Capture ${capture.id} was recorded in the evidence vault, but NOT pinned to ${caseId} — ` +
+            `that case no longer exists, or this source URL is already pinned to it.`,
+        );
+      }
       setFile(null);
+      // Clearing state alone leaves the <input type="file"> holding the old
+      // selection, so re-picking the same file fires no change event and the
+      // drop zone reads "no file" while the element still has one.
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setSourceUrl("");
       setNote("");
     } catch (err: any) {
       if (err instanceof AttestationError) setError({ field: err.field, message: err.message });
-      else if (err instanceof EvidenceIntegrityError) setError({ field: "file", message: err.message });
+      else if (err instanceof EvidenceIntegrityError)
+        setError({ field: "file", message: err.message });
       else setError({ field: "", message: err?.message ?? String(err) });
     } finally {
       setBusy(false);
@@ -165,7 +223,9 @@ export function ManualCapturePanel() {
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <UploadCloud className="size-4 text-[#F59E0B]" />
-          <h3 className="text-xs font-bold uppercase text-white">Manual capture — Meta and other</h3>
+          <h3 className="text-xs font-bold uppercase text-white">
+            Manual capture — Meta and other
+          </h3>
           <Badge
             variant="outline"
             className="h-4 border-[#F59E0B]/40 bg-[#F59E0B]/10 px-1.5 text-[8px] font-normal text-[#F59E0B]"
@@ -195,11 +255,14 @@ export function ManualCapturePanel() {
             if (f) setFile(f);
           }}
           className={`flex min-h-[70px] cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed p-3 text-center transition-colors ${
-            dragging ? "border-[#F59E0B] bg-[#F59E0B]/5" : "border-[#263548] hover:border-[#F59E0B]/50"
+            dragging
+              ? "border-[#F59E0B] bg-[#F59E0B]/5"
+              : "border-[#263548] hover:border-[#F59E0B]/50"
           }`}
         >
           <label className="cursor-pointer">
             <input
+              ref={fileInputRef}
               type="file"
               className="hidden"
               accept="image/*,application/pdf"
@@ -314,7 +377,11 @@ export function ManualCapturePanel() {
           disabled={busy}
           className="h-8 w-full gap-1.5 bg-[#F59E0B] text-[10px] font-bold uppercase text-black hover:bg-[#F59E0B]/90"
         >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <ShieldCheck className="size-3.5" />
+          )}
           {busy ? "Hashing and recording…" : "Record attested capture"}
         </Button>
 

@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
+  fetchYoutubeComments,
   YT_INNERTUBE_CLIENTS,
   captionTracksOf,
   captionTracksToLangs,
@@ -130,7 +131,9 @@ describe("parseTimedTextXml", () => {
   });
 
   test("a cue with no duration still yields a segment", () => {
-    const one = parseTimedTextXml(`<timedtext format="3"><body><p t="5000">hello</p></body></timedtext>`);
+    const one = parseTimedTextXml(
+      `<timedtext format="3"><body><p t="5000">hello</p></body></timedtext>`,
+    );
     expect(one).toEqual([{ start: 5, end: 5, text: "hello" }]);
   });
 
@@ -281,5 +284,89 @@ describe("YT_INNERTUBE_CLIENTS", () => {
       expect(String(c.context.clientVersion ?? "").length).toBeGreaterThan(0);
       expect(c.key).toMatch(/^innertube-/);
     }
+  });
+});
+
+// ─── Comments: a 200 is not evidence of an empty comment list ──────────────
+
+describe("fetchYoutubeComments", () => {
+  const KEY = "YOUTUBE_API_KEY";
+  const original = process.env[KEY];
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  test("a 200 whose body will not parse is an error, not zero comments", async () => {
+    // THE REGRESSION. res.json().catch(() => null) swallowed the parse failure
+    // and execution fell through to `json?.items ?? []`, returning
+    // success:true with an empty, provenance-stamped comment list — a
+    // measured-looking assertion produced from a response never read. A
+    // connection reset mid-body or an intercepting proxy answering 200 with
+    // HTML both land here.
+    process.env[KEY] = "test-key";
+    globalThis.fetch = (async () =>
+      new Response("<html>proxy</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch;
+
+    const r = await fetchYoutubeComments("b6g6rDDt9x8");
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.cause).toMatch(/could not be parsed|no 'items' array/);
+  });
+
+  test("a 200 with no items array is also an error", async () => {
+    process.env[KEY] = "test-key";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ kind: "youtube#commentThreadListResponse" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const r = await fetchYoutubeComments("b6g6rDDt9x8");
+    expect(r.success).toBe(false);
+  });
+
+  test("an empty but well-formed items array IS a real empty result", async () => {
+    // The one case that legitimately returns no comments.
+    process.env[KEY] = "test-key";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const r = await fetchYoutubeComments("b6g6rDDt9x8");
+    expect(r.success).toBe(true);
+    expect(r.success === true && r.data.comments).toEqual([]);
+  });
+
+  test("comments disabled by the uploader is its own outcome", async () => {
+    process.env[KEY] = "test-key";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { errors: [{ reason: "commentsDisabled" }] } }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const r = await fetchYoutubeComments("b6g6rDDt9x8");
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.error).toBe("CommentsDisabled");
+  });
+
+  test("quota exhaustion is quota, never 'no comments'", async () => {
+    process.env[KEY] = "test-key";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { errors: [{ reason: "quotaExceeded" }] } }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const r = await fetchYoutubeComments("b6g6rDDt9x8");
+    expect(r.success === false && r.error).toBe("QuotaExceeded");
   });
 });

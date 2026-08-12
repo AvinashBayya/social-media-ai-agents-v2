@@ -47,6 +47,23 @@ const ROOT = join(import.meta.dir, "..");
 const SCAN_DIRS = ["src/routes", "src/components"];
 const SKIP_DIRS = ["src/components/ui"];
 
+/**
+ * Individual `src/utils` files that hold USER-FACING DISPLAY STRINGS.
+ *
+ * Added 2026-08-12 after a real escape. `PLATFORM_NOTES` in social.ts claimed
+ * single-video downloads are "audit logged" — no audit trail exists anywhere in
+ * this system — and `COLLECTION_POLICIES` repeated it. Both strings render on
+ * /social inside the policy card, so the claim was on screen and unguarded,
+ * because moving copy from a route into a util took it out of SCAN_DIRS while
+ * leaving it in front of the analyst.
+ *
+ * Scoped to named files rather than all of `src/utils`: most of that directory
+ * is implementation whose comments discuss these very concepts, and scanning it
+ * wholesale would drown real findings. **Any module whose strings reach the UI
+ * belongs on this list.**
+ */
+const SCAN_FILES = ["src/utils/collection-policy.ts", "src/utils/social.ts"];
+
 function posix(p: string): string {
   return relative(ROOT, p).split("\\").join("/");
 }
@@ -249,9 +266,15 @@ export function scanSource(file: string, raw: string, patterns: Pattern[]): Hit[
   return hits;
 }
 
+function scannedFiles(): string[] {
+  return [
+    ...SCAN_DIRS.flatMap((d) => walk(join(ROOT, d))),
+    ...SCAN_FILES.map((f) => join(ROOT, f)),
+  ].sort();
+}
+
 function scanTree(patterns: Pattern[]): Hit[] {
-  const files = SCAN_DIRS.flatMap((d) => walk(join(ROOT, d))).sort();
-  return files.flatMap((f) => scanSource(posix(f), readFileSync(f, "utf8"), patterns));
+  return scannedFiles().flatMap((f) => scanSource(posix(f), readFileSync(f, "utf8"), patterns));
 }
 
 /** Rendered into the assertion value so a failure names every offender. */
@@ -356,9 +379,16 @@ describe("the overclaim detector itself", () => {
   });
 
   test("it actually reads the shipped routes", () => {
-    const files = SCAN_DIRS.flatMap((d) => walk(join(ROOT, d)));
+    const files = scannedFiles();
     expect(files.length).toBeGreaterThan(20);
     expect(files.some((f) => posix(f) === "src/routes/index.tsx")).toBe(true);
     expect(files.some((f) => posix(f) === "src/components/not-implemented.tsx")).toBe(true);
+  });
+
+  test("it also reads the util modules whose strings render on screen", () => {
+    // The escape this list exists to close: an "audit logged" claim sitting in
+    // PLATFORM_NOTES and COLLECTION_POLICIES, rendered on /social, unscanned.
+    const files = scannedFiles().map(posix);
+    for (const f of SCAN_FILES) expect(files).toContain(f);
   });
 });

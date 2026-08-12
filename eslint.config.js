@@ -48,23 +48,46 @@ export default tseslint.config(
    * measurement, and it produced the only out-of-scope false positive when
    * this was measured.
    *
-   * Measured over the tree on 2026-08-12: 32 findings, 21 true positives.
-   * The 11 known false positives each need ONE justified disable, e.g.
+   * Measured over the tree on 2026-08-12: 32 findings, of which roughly a third
+   * were genuine fabrications (now fixed) and the rest are honest type labels,
+   * provenance strings and UI placeholder states.
    *
-   *   // eslint-disable-next-line sentinel/no-fabricated-fallback -- UCDP
-   *   // supplies these three fields together or not at all; the .some()
-   *   // guard above proves at least one was reported, so the zeros are
-   *   // measured, not assumed.
+   * THE DISABLE MUST BE ONE LINE. An adversarial check of the original
+   * documentation found the multi-line form it recommended produces THREE
+   * errors rather than zero:
+   *
+   *   - `eslint-disable-next-line` targets the line immediately after the
+   *     comment. If that line is another comment, the rule still fires on the
+   *     code below it.
+   *   - ESLint then reports the directive itself as unused.
+   *   - The justification on the directive line was shorter than the 20
+   *     characters `require-fabrication-justification` demands, so that rule
+   *     fired too.
+   *
+   * Correct form — one line, whole reason after `--`, at least 20 characters:
+   *
+   *   // eslint-disable-next-line sentinel/no-fabricated-fallback -- guard above proves at least one field was reported, so these zeros are measured
    *
    * require-fabrication-justification rejects a bare disable with no `--`
    * reason, so silencing this rule always leaves a written argument behind.
+   *
+   * SEVERITY. "warn", not "error", and deliberately. The rule's heuristic
+   * cannot separate a fabricated measurement from an honest label without
+   * reading intent — `title: x ?? "Seismic event"` and `status: x || "online"`
+   * are the same shape and only one is a lie. Landing it at "error" would push
+   * a maintainer toward silencing it, and a guard everyone disables catches
+   * nothing. As a warning it is a review prompt: every hit needs a human
+   * decision, and the ones that are real are fixed rather than annotated.
    */
   {
     name: "sentinel/fabrication-guards",
     files: ["src/routes/**/*.{ts,tsx}", "src/utils/**/*.{ts,tsx}"],
     plugins: { sentinel },
     rules: {
-      "sentinel/no-fabricated-fallback": "error",
+      "sentinel/no-fabricated-fallback": "warn",
+      // This one IS an error: it only fires on a disable comment that someone
+      // deliberately wrote, and a silenced fabrication guard with no stated
+      // reason is exactly what this whole mechanism exists to prevent.
       "sentinel/require-fabrication-justification": "error",
     },
   },

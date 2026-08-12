@@ -386,8 +386,8 @@ function SettingsPage() {
                 Stored credentials
               </CardTitle>
               <CardDescription className="text-xs">
-                Secrets are masked. Revealing one is a separate server call against that entry
-                alone — the page never loads the full key set.
+                Secrets are masked. Revealing one is a separate server call against that entry alone
+                — the page never loads the full key set.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -681,9 +681,10 @@ function SettingsPage() {
               <div className="space-y-2">
                 <span className="font-semibold">Storage policy — read this before a demo</span>
                 <p className="leading-relaxed text-muted-foreground">
-                  Secrets are written in cleartext to <span className="font-mono">{storagePath}</span>,
-                  restricted to owner-only where the platform supports it. That directory is
-                  excluded from the container build and is not a mounted volume, so{" "}
+                  Secrets are written in cleartext to{" "}
+                  <span className="font-mono">{storagePath}</span>, restricted to owner-only where
+                  the platform supports it. That directory is excluded from the container build and
+                  is not a mounted volume, so{" "}
                   <span className="font-semibold text-foreground">
                     a credential added here does not survive a revision restart or a scale-to-zero
                   </span>

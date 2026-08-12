@@ -433,9 +433,16 @@ export function redditMediaFrom(data: any): SocialMedia[] {
  * avatars, reply previews and emoji make up the rest — so both selectors here
  * are scoped to the specific `tgme_widget_message_*` classes.
  *
- * Telegram serves only a poster frame for video in the web preview, never the
- * video file, so a video is recorded with its thumbnail as the URL and typed
- * `video` rather than being reported as an image.
+ * Video: the real MP4 is present. An earlier version of this function asserted
+ * in its own docstring that "Telegram serves only a poster frame for video in
+ * the web preview, never the video file" and emitted the poster JPEG as the
+ * asset URL. That was false — measured 2026-08-12, every page tested carries
+ * `<video src="https://cdn4.telesco.pe/file/….mp4">` elements, one per
+ * `tgme_widget_message_video_thumb`, and fetching both URLs for durov/523 gave
+ * `image/jpeg` for the emitted one and `video/mp4` for the discarded one. The
+ * consequence was worse than a missing asset: the /social Analyse control sends
+ * `media[0].url` to Module 4, so a provenance verdict was being produced for a
+ * Telegram-generated still while the tile beside it was badged "video".
  */
 export function telegramMediaFrom(blockHtml: string): SocialMedia[] {
   if (!blockHtml) return [];
@@ -448,17 +455,32 @@ export function telegramMediaFrom(blockHtml: string): SocialMedia[] {
     out.push({ url: m[1], type: "image", thumbnailUrl: m[1], altText: null });
   }
 
-  const videoRe =
+  // Poster frames, in document order, so each can be paired with the video it
+  // belongs to.
+  const posters: string[] = [];
+  const posterRe =
     /class="tgme_widget_message_video_thumb"[^>]*style="[^"]*background-image:url\('([^']+)'\)/g;
+  while ((m = posterRe.exec(blockHtml)) !== null) posters.push(m[1]);
+
+  const videoRe = /<video[^>]*\bsrc="([^"]+)"/g;
+  let videoIndex = 0;
   while ((m = videoRe.exec(blockHtml)) !== null) {
     out.push({
-      // The poster frame, not the video. Typed `video` so a reviewer is not
-      // told a still image is the whole asset.
       url: m[1],
       type: "video",
-      thumbnailUrl: m[1],
+      thumbnailUrl: posters[videoIndex] ?? null,
       altText: null,
     });
+    videoIndex += 1;
+  }
+
+  // A poster with no matching <video> still means a video is present — a
+  // round-video or an embed whose file element the preview withholds. Recording
+  // the poster is better than dropping the fact that the post carries video,
+  // but `url` and `thumbnailUrl` are then the same still and the type stays
+  // `video` so nothing reads it as a photograph.
+  for (let i = videoIndex; i < posters.length; i += 1) {
+    out.push({ url: posters[i], type: "video", thumbnailUrl: posters[i], altText: null });
   }
 
   const seen = new Set<string>();
@@ -1522,17 +1544,36 @@ export function splitTelegramMessages(html: string): string[] {
   );
 }
 
-/** Decode the entity set Telegram's preview HTML actually emits. */
-function decodeTelegramHtml(raw: string): string {
-  return raw
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .trim();
+/**
+ * Decode the entity set Telegram's preview HTML actually emits.
+ *
+ * Measured live 2026-08-12: the previous five-entity list left `&#036;`,
+ * `&#33;` and `&nbsp;` intact in collected text, so durov/527 was stored as
+ * "a &#036;200,000 contest" rather than "$200,000" — raw markup presented as
+ * the post's words, and a term an analyst searching for "$200,000" would miss.
+ *
+ * `&amp;` is decoded LAST. Decoding it first turns a literal `&amp;lt;` in the
+ * source into `<`, which is a second decode the author never wrote.
+ */
+export function decodeTelegramHtml(raw: string): string {
+  const named: Record<string, string> = {
+    "&quot;": '"',
+    "&apos;": "'",
+    "&nbsp;": " ",
+    "&lt;": "<",
+    "&gt;": ">",
+  };
+  return (
+    raw
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&(quot|apos|nbsp|lt|gt);/g, (m) => named[m] ?? m)
+      .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+      // Last, so an escaped entity is not decoded twice.
+      .replace(/&amp;/g, "&")
+      .trim()
+  );
 }
 
 /**
@@ -1548,8 +1589,28 @@ export function telegramBlockToPost(block: string, handle: string): SocialPost |
   const postId = idMatch ? idMatch[1] : null;
   if (!postId) return null;
 
-  const textMatch = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/);
-  const text = textMatch ? decodeTelegramHtml(textMatch[1]) : "";
+  // Take the message's OWN text div, not the quoted message above it.
+  //
+  // A reply renders `<div class="tgme_widget_message_text js-message_reply_text">`
+  // containing a TRUNCATED copy of the message being replied to, and it appears
+  // BEFORE the real `js-message_text` div in the same slice. A non-global match
+  // on `tgme_widget_message_text[^"]*` returns that first div, so every replying
+  // post was collected carrying someone else's words under its own id,
+  // permalink and timestamp — the exact misattribution the per-message rewrite
+  // was adopted to eliminate, reintroduced through a different door. Measured
+  // on t.me/s/varlamov_news 2026-08-12: 3 of 12 posts affected.
+  //
+  // Matching js-message_text explicitly is what makes this safe; the reply
+  // variant is a different class and can no longer be selected.
+  const textRe = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
+  let text = "";
+  let tm: RegExpExecArray | null;
+  while ((tm = textRe.exec(block)) !== null) {
+    const classAttr = tm[0].slice(0, tm[0].indexOf(">"));
+    if (classAttr.includes("js-message_reply_text")) continue;
+    text = decodeTelegramHtml(tm[1]);
+    break;
+  }
 
   const timeMatch = block.match(/<time[^>]*datetime="([^"]+)"/);
   const media = telegramMediaFrom(block);
@@ -2071,7 +2132,14 @@ export const PLATFORM_NOTES: PlatformNote[] = [
     limitation:
       "Text only. Metadata, captions and comments are collected; video frames are not, because " +
       "systematically extracting and storing them falls outside YouTube's terms. Frames enter " +
-      "only through an analyst-initiated download of a single video, which is audit logged. " +
+      // Said "which is audit logged". Nothing in this system writes an audit
+      // record — there is no audit module and the download path persists
+      // nothing — while /youtube states the opposite on its own page. Claiming
+      // a control that does not exist is worse on a compliance surface than
+      // admitting its absence.
+      "only through an analyst-initiated download of a single video. No audit record is kept: " +
+      "this system has no audit trail, so 'who downloaded what, and when' cannot be answered " +
+      "from it. " +
       "Comment collection additionally needs a Data API key and spends a 10,000 unit/day quota, " +
       "so a quota exhaustion is reported as quota — never as a video having no comments.",
   },

@@ -162,7 +162,9 @@ export const COLLECTION_POLICIES: CollectionPolicy[] = [
     manualUploadAllowed: true,
     implementedBy:
       "youtube-collector.ts — InnerTube player for metadata and captions, commentThreads.list " +
-      "for comments. Single-video download is analyst-initiated and audit logged.",
+      // NOT "audit logged" — no audit trail exists anywhere in this system.
+      "for comments. Single-video download is analyst-initiated, and is not recorded: there is " +
+      "no audit trail in this build.",
   },
   {
     id: "news-rss",

@@ -655,7 +655,8 @@ export interface TileRequestDisclosure extends TileIndex {
   footprint: string;
 }
 
-const formatKm = (v: number): string => (v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(2)} km`);
+const formatKm = (v: number): string =>
+  v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(2)} km`;
 
 /**
  * The tile request a coordinate produces, ready to print in a consent control.

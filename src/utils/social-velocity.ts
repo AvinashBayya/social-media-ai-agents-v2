@@ -23,11 +23,58 @@ export interface SocialVelocitySummary {
 }
 
 const STOP_WORDS = new Set([
-  "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
-  "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
-  "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
-  "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
-  "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", "http", "https"
+  "the",
+  "be",
+  "to",
+  "of",
+  "and",
+  "a",
+  "in",
+  "that",
+  "have",
+  "i",
+  "it",
+  "for",
+  "not",
+  "on",
+  "with",
+  "he",
+  "as",
+  "you",
+  "do",
+  "at",
+  "this",
+  "but",
+  "his",
+  "by",
+  "from",
+  "they",
+  "we",
+  "say",
+  "her",
+  "she",
+  "or",
+  "an",
+  "will",
+  "my",
+  "one",
+  "all",
+  "would",
+  "there",
+  "their",
+  "what",
+  "so",
+  "up",
+  "out",
+  "if",
+  "about",
+  "who",
+  "get",
+  "which",
+  "go",
+  "me",
+  "http",
+  "https",
 ]);
 
 export function calculateSocialVelocity(
@@ -78,7 +125,8 @@ export function calculateSocialVelocity(
   for (const [term, recentCount] of recentCounts.entries()) {
     if (recentCount < minFrequency) continue;
     const prevCount = previousCounts.get(term) ?? 0;
-    const velocityRatio = prevCount === 0 ? recentCount * 2.0 : Number((recentCount / prevCount).toFixed(2));
+    const velocityRatio =
+      prevCount === 0 ? recentCount * 2.0 : Number((recentCount / prevCount).toFixed(2));
     const isSpike = velocityRatio >= 2.5 && recentCount >= 3;
 
     metrics.push({

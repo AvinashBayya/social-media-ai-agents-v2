@@ -198,7 +198,9 @@ describe("mastodonMediaFrom", () => {
   });
 
   test("an unknown attachment type is 'unknown', not guessed as an image", () => {
-    const out = mastodonMediaFrom({ media_attachments: [{ type: "audio", url: "https://f/a.mp3" }] });
+    const out = mastodonMediaFrom({
+      media_attachments: [{ type: "audio", url: "https://f/a.mp3" }],
+    });
     expect(out[0].type).toBe("unknown");
   });
 
@@ -225,13 +227,21 @@ const TG_PAGE = `
 <div class="tgme_widget_message" data-post="durov/523">
   <div class="tgme_widget_message_text js-message_text">Third message</div>
   <i class="tgme_widget_message_video_thumb" style="background-image:url('https://cdn4.telesco.pe/file/VIDEO523')"></i>
+  <video src="https://cdn4.telesco.pe/file/VIDEO523.mp4?token=abc"></video>
   <time datetime="2026-06-09T19:33:51+00:00"></time>
+</div>
+<div class="tgme_widget_message" data-post="durov/524">
+  <a class="tgme_widget_message_reply" href="https://t.me/durov/520">
+    <div class="tgme_widget_message_text js-message_reply_text">First message with text &amp; an ent…</div>
+  </a>
+  <div class="tgme_widget_message_text js-message_text">Reply body &#036;200,000 and&nbsp;more</div>
+  <time datetime="2026-06-10T08:00:00+00:00"></time>
 </div>
 `;
 
 describe("splitTelegramMessages", () => {
   test("one slice per message", () => {
-    expect(splitTelegramMessages(TG_PAGE)).toHaveLength(3);
+    expect(splitTelegramMessages(TG_PAGE)).toHaveLength(4);
     expect(splitTelegramMessages("")).toEqual([]);
     expect(splitTelegramMessages("<html>no messages</html>")).toEqual([]);
   });
@@ -247,7 +257,7 @@ describe("telegramBlockToPost", () => {
     // zipped by index, so durov/522 — which has no text — shifted durov/523's
     // text up one slot. Post 522 then rendered "Third message" under 522's id,
     // URL and timestamp: real text attributed to the wrong message.
-    expect(posts).toHaveLength(3);
+    expect(posts).toHaveLength(4);
     const p522 = posts.find((p) => p.url.endsWith("/522"))!;
     expect(p522.text).toBe("");
     expect(p522.media).toHaveLength(1);
@@ -265,18 +275,59 @@ describe("telegramBlockToPost", () => {
     expect(posts.find((p) => p.url.endsWith("/523"))!.createdAt).toBe("2026-06-09T19:33:51+00:00");
   });
 
+  test("a reply carries its OWN text, not the message it quotes", () => {
+    // THE SECOND MISATTRIBUTION. A reply renders
+    // `<div class="tgme_widget_message_text js-message_reply_text">` holding a
+    // truncated copy of the quoted message, and it appears BEFORE the real
+    // js-message_text div. A non-global match on `tgme_widget_message_text[^"]*`
+    // returned that first div, so every replying post was collected carrying
+    // someone else's words under its own id, permalink and timestamp — exactly
+    // what the per-message rewrite was adopted to eliminate. Measured live on
+    // t.me/s/varlamov_news: 3 of 12 posts affected.
+    const reply = posts.find((p) => p.url.endsWith("/524"))!;
+    expect(reply.text).toContain("Reply body");
+    expect(reply.text).not.toContain("First message with text");
+  });
+
+  test("entities in post text are decoded, including numeric and nbsp", () => {
+    // Live: durov/527 was stored as "a &#036;200,000 contest" — raw markup
+    // presented as the post's words, and unsearchable for "$200,000".
+    const reply = posts.find((p) => p.url.endsWith("/524"))!;
+    expect(reply.text).toContain("$200,000");
+    expect(reply.text).not.toContain("&#036;");
+    expect(reply.text).not.toContain("&nbsp;");
+  });
+
   test("a block with neither text nor media is dropped", () => {
-    expect(telegramBlockToPost('<div data-post="x/1"><time datetime="t"></time></div>', "x")).toBeNull();
+    expect(
+      telegramBlockToPost('<div data-post="x/1"><time datetime="t"></time></div>', "x"),
+    ).toBeNull();
     expect(telegramBlockToPost("<div>no id</div>", "x")).toBeNull();
   });
 });
 
 describe("telegramMediaFrom", () => {
-  test("photo and video thumbs are both found, and typed apart", () => {
+  test("photo and video are both found, and typed apart", () => {
     const all = splitTelegramMessages(TG_PAGE).flatMap(telegramMediaFrom);
     expect(all).toHaveLength(2);
     expect(all.find((m) => m.url.endsWith("PHOTO522"))!.type).toBe("image");
-    expect(all.find((m) => m.url.endsWith("VIDEO523"))!.type).toBe("video");
+    expect(all.find((m) => m.type === "video")!.type).toBe("video");
+  });
+
+  test("video emits the real .mp4, not the poster frame", () => {
+    // THE REGRESSION. This emitted the JPEG poster as the asset URL on the
+    // strength of a docstring claiming Telegram never serves the file. It does:
+    // fetching both URLs for durov/523 gave image/jpeg for the emitted one and
+    // video/mp4 for the discarded one. The /social Analyse control sends
+    // media[0].url to Module 4, so a provenance verdict was being produced for
+    // a Telegram-generated still while the tile beside it read "video".
+    const video = splitTelegramMessages(TG_PAGE)
+      .flatMap(telegramMediaFrom)
+      .find((m) => m.type === "video")!;
+    expect(video.url).toEndWith(".mp4?token=abc");
+    expect(video.thumbnailUrl).toBe("https://cdn4.telesco.pe/file/VIDEO523");
+    // url and thumbnailUrl are now genuinely different assets.
+    expect(video.url).not.toBe(video.thumbnailUrl);
   });
 
   test("the channel avatar is not collected as post media", () => {

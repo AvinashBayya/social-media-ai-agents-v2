@@ -48,7 +48,13 @@ describe("isPublicPostUrl", () => {
   });
 
   test("rejects anything that is not a traceable address", () => {
-    for (const bad of ["", "   ", "instagram.com/p/ABC", "javascript:alert(1)", "data:text/html,x"]) {
+    for (const bad of [
+      "",
+      "   ",
+      "instagram.com/p/ABC",
+      "javascript:alert(1)",
+      "data:text/html,x",
+    ]) {
       expect(isPublicPostUrl(bad)).toBe(false);
     }
   });
@@ -69,7 +75,9 @@ describe("buildAttestedCapture", () => {
   test("provenance is a fixed marker, so one field identifies an assertion", () => {
     // A consumer must be able to tell asserted from collected without knowing
     // which platforms happen to be manual this month.
-    for (const platform of Object.keys(CAPTURE_PLATFORM_LABELS) as (keyof typeof CAPTURE_PLATFORM_LABELS)[]) {
+    for (const platform of Object.keys(
+      CAPTURE_PLATFORM_LABELS,
+    ) as (keyof typeof CAPTURE_PLATFORM_LABELS)[]) {
       expect(buildAttestedCapture({ ...VALID, platform }).provenance).toBe(
         "analyst-attested-capture",
       );
@@ -125,6 +133,32 @@ describe("buildAttestedCapture", () => {
       })();
       expect((err as AttestationError).field).toBe("sha256");
     }
+  });
+
+  test("accepts a raw datetime-local value and converts it from LOCAL time", () => {
+    // The panel hands the input's value straight through. A bare
+    // `YYYY-MM-DDTHH:mm` has no offset, so Date.parse reads it as local and the
+    // stored instant is correct. The panel used to pre-convert with
+    // `new Date(v).toISOString()` on a default seeded from a UTC wall clock,
+    // which subtracted the offset twice — every IST capture stamped 5h30m early
+    // and then labelled "UTC".
+    const c = buildAttestedCapture({ ...VALID, capturedAt: "2026-08-12T10:30" });
+    expect(c.capturedAt).toBe(new Date("2026-08-12T10:30").toISOString());
+  });
+
+  test("an empty capture time raises the field error, not a RangeError", () => {
+    // `new Date("").toISOString()` throws RangeError. When the panel converted
+    // before validating, that escaped as a generic "Invalid time value" with no
+    // field attached, and this message was unreachable dead code.
+    const err = (() => {
+      try {
+        buildAttestedCapture({ ...VALID, capturedAt: "" });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(AttestationError);
+    expect((err as AttestationError).field).toBe("capturedAt");
   });
 
   test("a missing file size is null, never 0", () => {

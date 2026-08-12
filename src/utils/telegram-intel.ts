@@ -22,9 +22,37 @@ export interface TelegramIntelItem {
 
 const TOPIC_KEYWORDS: Record<Exclude<TelegramTopic, "all">, string[]> = {
   breaking: ["flash", "urgent", "breaking", "just in", "alert", "siren"],
-  conflict: ["strike", "missile", "shelling", "troop", "forces", "artillery", "drone", "blast", "explosion"],
-  geopolitics: ["treaty", "sanctions", "diplomat", "summit", "ambassador", "ministry", "minister", "president"],
-  osint: ["geolocation", "satellite", "coordinates", "flight", "adsb", "imagery", "aircraft", "vessel"],
+  conflict: [
+    "strike",
+    "missile",
+    "shelling",
+    "troop",
+    "forces",
+    "artillery",
+    "drone",
+    "blast",
+    "explosion",
+  ],
+  geopolitics: [
+    "treaty",
+    "sanctions",
+    "diplomat",
+    "summit",
+    "ambassador",
+    "ministry",
+    "minister",
+    "president",
+  ],
+  osint: [
+    "geolocation",
+    "satellite",
+    "coordinates",
+    "flight",
+    "adsb",
+    "imagery",
+    "aircraft",
+    "vessel",
+  ],
   cyber: ["ddos", "ransomware", "malware", "breach", "hack", "cve", "zero-day", "exploit", "cisa"],
 };
 
@@ -58,7 +86,10 @@ export function classifyTelegramPost(post: SocialPost): TelegramIntelItem {
   };
 }
 
-export function processTelegramIntelFeed(posts: SocialPost[], topicFilter: TelegramTopic = "all"): TelegramIntelItem[] {
+export function processTelegramIntelFeed(
+  posts: SocialPost[],
+  topicFilter: TelegramTopic = "all",
+): TelegramIntelItem[] {
   const items = posts.map(classifyTelegramPost);
   if (topicFilter === "all") return items;
   return items.filter((item) => item.topic === topicFilter);

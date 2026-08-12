@@ -1047,8 +1047,26 @@ export async function fetchYoutubeComments(
     };
   }
 
+  // A 2xx whose body could not be read is NOT a video with no comments.
+  // `res.json().catch(() => null)` above swallows a parse failure, and without
+  // this guard execution fell through to `json?.items ?? []` and returned
+  // `success: true` with an empty, provenance-stamped comment list — a
+  // measured-looking assertion produced from a response that was never read.
+  // A connection reset mid-body or an intercepting proxy answering 200 with
+  // HTML both land here.
+  if (!Array.isArray(json?.items)) {
+    return {
+      success: false,
+      error: "CommentsUnavailable",
+      cause:
+        `YouTube returned HTTP ${res.status} but the body carried no comment list ` +
+        `(${json === null ? "the response could not be parsed as JSON" : "no 'items' array"}). ` +
+        `No comments are shown because the response was unreadable, not because the video has none.`,
+    };
+  }
+
   const comments: YoutubeComment[] = [];
-  for (const item of json?.items ?? []) {
+  for (const item of json.items) {
     const top = item?.snippet?.topLevelComment;
     const s = top?.snippet;
     if (!top?.id || typeof s?.textDisplay !== "string") continue;

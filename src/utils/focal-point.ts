@@ -31,7 +31,10 @@ function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -41,7 +44,9 @@ export function detectFocalPoints(
   radiusKm = 200,
   timeWindowHours = 48,
 ): FocalPointCluster[] {
-  const validEvents = events.filter((e) => Number.isFinite(e.lat) && Number.isFinite(e.lon) && (e.lat !== 0 || e.lon !== 0));
+  const validEvents = events.filter(
+    (e) => Number.isFinite(e.lat) && Number.isFinite(e.lon) && (e.lat !== 0 || e.lon !== 0),
+  );
   if (validEvents.length < 2) return [];
 
   const clusters: FocalPointCluster[] = [];
@@ -71,9 +76,13 @@ export function detectFocalPoints(
     }
 
     if (group.length >= 2) {
-      const avgLat = Number((group.reduce((acc, curr) => acc + curr.lat, 0) / group.length).toFixed(4));
-      const avgLon = Number((group.reduce((acc, curr) => acc + curr.lon, 0) / group.length).toFixed(4));
-      const convergenceScore = Number((group.length * 1.5 + (radiusKm / 100)).toFixed(2));
+      const avgLat = Number(
+        (group.reduce((acc, curr) => acc + curr.lat, 0) / group.length).toFixed(4),
+      );
+      const avgLon = Number(
+        (group.reduce((acc, curr) => acc + curr.lon, 0) / group.length).toFixed(4),
+      );
+      const convergenceScore = Number((group.length * 1.5 + radiusKm / 100).toFixed(2));
 
       clusters.push({
         id: `focal-${i + 1}-${Math.round(avgLat)}_${Math.round(avgLon)}`,

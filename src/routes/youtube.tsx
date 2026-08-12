@@ -5,7 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Youtube,
   Search,
@@ -24,16 +30,19 @@ import {
   ExternalLink,
   ShieldCheck,
   CheckCircle2,
+  MessageSquare,
 } from "lucide-react";
 import {
   serverFetchYoutubeMetadata,
   serverFetchYoutubeSubtitles,
   serverDownloadYoutubeVideo,
+  serverFetchYoutubeComments,
   extractYoutubeId,
   isYoutubeUrl,
   type YoutubeMetadata,
   type YoutubeSubtitlesResponse,
   type YoutubeDownloadResponse,
+  type YoutubeCommentsResponse,
   type YoutubeError,
 } from "@/utils/youtube-collector";
 
@@ -75,6 +84,9 @@ function YoutubePage() {
   // Errors
   const [metaError, setMetaError] = useState<YoutubeError | null>(null);
   const [subsError, setSubsError] = useState<YoutubeError | null>(null);
+  const [comments, setComments] = useState<YoutubeCommentsResponse | null>(null);
+  const [commentsError, setCommentsError] = useState<YoutubeError | null>(null);
+  const [fetchingComments, setFetchingComments] = useState(false);
   const [downloadError, setDownloadError] = useState<YoutubeError | null>(null);
 
   // UI toggle states
@@ -94,6 +106,8 @@ function YoutubePage() {
     setSubsError(null);
     setDownloadResult(null);
     setDownloadError(null);
+    setComments(null);
+    setCommentsError(null);
 
     const targetUrl = urlInput.trim();
     setActiveUrl(targetUrl);
@@ -170,6 +184,30 @@ function YoutubePage() {
     }
   };
 
+  // 4. Comments via the official Data API v3. Requires a YouTube key; metadata
+  // and captions do not, so a missing key must not read as a broken page.
+  const handleFetchComments = async () => {
+    const id = metadata?.id ?? extractYoutubeId(activeUrl || urlInput);
+    if (!id) return;
+    setFetchingComments(true);
+    setCommentsError(null);
+    try {
+      const res = await serverFetchYoutubeComments({ data: { videoId: id, limit: 100 } });
+      if (res.success) {
+        setComments(res.data);
+      } else {
+        setCommentsError({ error: res.error, cause: res.cause });
+        // Cleared so a previous video's comments cannot sit under a new error.
+        setComments(null);
+      }
+    } catch (err: any) {
+      setCommentsError({ error: "CommentsError", cause: err?.message || String(err) });
+      setComments(null);
+    } finally {
+      setFetchingComments(false);
+    }
+  };
+
   // Seek iframe player to segment timestamp
   const seekToSegment = (seconds: number) => {
     if (iframeRef.current && metadata?.id) {
@@ -214,7 +252,8 @@ function YoutubePage() {
             </Button>
           </div>
           <p className="mt-2 text-[10px] text-[#64748B]">
-            Supports standard watch URLs and shortlinks (youtube.com/watch?v=..., youtu.be/...). Single-video analyst initiated actions only.
+            Supports standard watch URLs and shortlinks (youtube.com/watch?v=..., youtu.be/...).
+            Single-video analyst initiated actions only.
           </p>
         </Card>
 
@@ -224,11 +263,11 @@ function YoutubePage() {
             <AlertTriangle className="size-5 shrink-0 text-[#EF4444]" />
             <div>
               <h4 className="font-bold text-[#EF4444]">
-                {metaError.error === "VideoUnavailable" ? "Video Unavailable" : "Metadata Extraction Error"}
+                {metaError.error === "VideoUnavailable"
+                  ? "Video Unavailable"
+                  : "Metadata Extraction Error"}
               </h4>
-              <p className="mt-1 text-[11px] leading-relaxed text-[#FCA5A5]">
-                {metaError.cause}
-              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-[#FCA5A5]">{metaError.cause}</p>
             </div>
           </div>
         )}
@@ -261,7 +300,10 @@ function YoutubePage() {
                     >
                       <img
                         src={`https://i.ytimg.com/vi/${metadata.id}/maxresdefault.jpg`}
-                        onError={(e) => { (e.target as HTMLImageElement).src = `https://i.ytimg.com/vi/${metadata.id}/hqdefault.jpg`; }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src =
+                            `https://i.ytimg.com/vi/${metadata.id}/hqdefault.jpg`;
+                        }}
                         alt={metadata.title}
                         className="size-full object-cover opacity-80 group-hover:opacity-60 transition-opacity duration-200"
                       />
@@ -279,9 +321,7 @@ function YoutubePage() {
                     <Badge className="border-[#06B6D4]/30 bg-[#06B6D4]/10 text-[#06B6D4] text-[9px] uppercase">
                       Privacy-Enhanced Embed (youtube-nocookie.com)
                     </Badge>
-                    <span className="text-[10px] text-[#64748B]">
-                      Video ID: {metadata.id}
-                    </span>
+                    <span className="text-[10px] text-[#64748B]">Video ID: {metadata.id}</span>
                   </div>
                   <h2 className="text-sm font-bold leading-tight text-[#F3F4F6]">
                     {metadata.title}
@@ -354,7 +394,9 @@ function YoutubePage() {
                 {/* Description */}
                 {metadata.description && (
                   <div className="space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-[#94A3B8]">Description</span>
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8]">
+                      Description
+                    </span>
                     <div className="rounded border border-[#263548] bg-[#0B1220] p-3 text-[11px] leading-relaxed text-[#94A3B8]">
                       <p className={showFullDescription ? "" : "line-clamp-4"}>
                         {metadata.description}
@@ -405,26 +447,32 @@ function YoutubePage() {
                   trail, and the file transfers straight from YouTube to your browser.
                 </p>
 
-                {downloadError && (() => {
-                  // Sniffs YouTube's OWN playability verdict, which the collector
-                  // now passes through verbatim. It used to match on
-                  // "age-restricted"/"region-locked" — words the collector wrote
-                  // into every failure cause as a guess, so the amber
-                  // "Restricted" banner fired on faults that were nothing of the
-                  // sort, including our own parser and transport errors.
-                  const c = downloadError.cause ?? "";
-                  const isBlocked = /LOGIN_REQUIRED|AGE_VERIFICATION|UNPLAYABLE|CONTENT_CHECK_REQUIRED/i.test(c);
-                  return (
-                    <div className={`rounded border p-3 text-xs space-y-1 ${
-                      isBlocked
-                        ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
-                        : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
-                    }`}>
-                      <span className="font-bold">{isBlocked ? "Download Restricted by YouTube: " : "Download Failed: "}</span>
-                      {downloadError.cause}
-                    </div>
-                  );
-                })()}
+                {downloadError &&
+                  (() => {
+                    // Sniffs YouTube's OWN playability verdict, which the collector
+                    // now passes through verbatim. It used to match on
+                    // "age-restricted"/"region-locked" — words the collector wrote
+                    // into every failure cause as a guess, so the amber
+                    // "Restricted" banner fired on faults that were nothing of the
+                    // sort, including our own parser and transport errors.
+                    const c = downloadError.cause ?? "";
+                    const isBlocked =
+                      /LOGIN_REQUIRED|AGE_VERIFICATION|UNPLAYABLE|CONTENT_CHECK_REQUIRED/i.test(c);
+                    return (
+                      <div
+                        className={`rounded border p-3 text-xs space-y-1 ${
+                          isBlocked
+                            ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
+                            : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
+                        }`}
+                      >
+                        <span className="font-bold">
+                          {isBlocked ? "Download Restricted by YouTube: " : "Download Failed: "}
+                        </span>
+                        {downloadError.cause}
+                      </div>
+                    );
+                  })()}
 
                 {downloadResult ? (
                   <div className="space-y-3 rounded border border-[#10B981]/30 bg-[#10B981]/10 p-3">
@@ -432,9 +480,15 @@ function YoutubePage() {
                       <CheckCircle2 className="size-4" /> Direct Download URL Retrieved
                     </div>
                     <div className="text-[10px] text-[#94A3B8] space-y-1 font-mono break-all">
-                      <div><span className="text-[#64748B]">Format: </span>{downloadResult.format}</div>
+                      <div>
+                        <span className="text-[#64748B]">Format: </span>
+                        {downloadResult.format}
+                      </div>
                       {downloadResult.filesize && (
-                        <div><span className="text-[#64748B]">Size: </span>{(downloadResult.filesize / 1024 / 1024).toFixed(1)} MB</div>
+                        <div>
+                          <span className="text-[#64748B]">Size: </span>
+                          {(downloadResult.filesize / 1024 / 1024).toFixed(1)} MB
+                        </div>
                       )}
                     </div>
                     <div className="flex gap-2">
@@ -486,7 +540,9 @@ function YoutubePage() {
                     <Subtitles className="size-4 text-[#06B6D4]" /> Subtitles & Transcripts
                   </h3>
                   {subtitles && (
-                    <Badge className={`text-[9px] uppercase border ${subtitles.isAuto ? "bg-[#8B5CF6]/10 text-[#8B5CF6] border-[#8B5CF6]/30" : "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30"}`}>
+                    <Badge
+                      className={`text-[9px] uppercase border ${subtitles.isAuto ? "bg-[#8B5CF6]/10 text-[#8B5CF6] border-[#8B5CF6]/30" : "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30"}`}
+                    >
                       {subtitles.isAuto ? "Auto Captions" : "Manual Subtitles"}
                     </Badge>
                   )}
@@ -494,7 +550,13 @@ function YoutubePage() {
 
                 {/* Subtitle controls */}
                 <div className="flex items-center gap-2">
-                  <Select value={selectedLang} onValueChange={(val) => { setSelectedLang(val); handleFetchSubtitles(val); }}>
+                  <Select
+                    value={selectedLang}
+                    onValueChange={(val) => {
+                      setSelectedLang(val);
+                      handleFetchSubtitles(val);
+                    }}
+                  >
                     <SelectTrigger className="h-8 border-[#263548] bg-[#0B1220] font-mono text-xs text-[#F3F4F6]">
                       <SelectValue placeholder="Select Language" />
                     </SelectTrigger>
@@ -558,6 +620,103 @@ function YoutubePage() {
                 {!subtitles && !subsError && !fetchingSubs && (
                   <div className="py-8 text-center text-[#64748B]">
                     Select language and click Load to view timestamped subtitle transcript.
+                  </div>
+                )}
+              </Card>
+
+              {/* Comments — the collection-policy row for YouTube lists these as
+                  permitted through the official API, and the credential vault
+                  names this panel as the consumer of the YouTube key. Until it
+                  existed, both were claiming a consumer that did not. */}
+              <Card className={`${CARD} space-y-3 p-4`}>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#263548] pb-3">
+                  <h3 className="flex items-center gap-2 font-bold uppercase text-[#F3F4F6]">
+                    <MessageSquare className="size-4 text-[#06B6D4]" /> Comments
+                  </h3>
+                  <Button
+                    onClick={() => void handleFetchComments()}
+                    disabled={fetchingComments}
+                    className="h-7 rounded bg-[#06B6D4] px-3 text-[10px] font-bold uppercase text-[#0B1220] hover:bg-[#06B6D4]/90"
+                  >
+                    {fetchingComments ? (
+                      <Loader2 className="mr-1.5 size-3 animate-spin" />
+                    ) : (
+                      <MessageSquare className="mr-1.5 size-3" />
+                    )}
+                    Load
+                  </Button>
+                </div>
+
+                <p className="text-[10px] leading-relaxed text-[#64748B]">
+                  Official Data API v3, which needs a YouTube key on the Settings page — metadata
+                  and captions do not. Comments are personal data under the DPDP Act 2023: they are
+                  fetched for review on request and are not retained.
+                </p>
+
+                {commentsError && (
+                  <div
+                    className={`space-y-1 rounded border p-3 ${
+                      commentsError.error === "CommentsDisabled"
+                        ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
+                        : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
+                    }`}
+                  >
+                    <span className="font-bold">
+                      {commentsError.error === "CommentsDisabled"
+                        ? "Comments disabled by the uploader: "
+                        : commentsError.error === "QuotaExceeded"
+                          ? "Daily quota exhausted: "
+                          : "Comments unavailable: "}
+                    </span>
+                    {commentsError.cause}
+                  </div>
+                )}
+
+                {comments && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2 text-[9px] text-[#64748B]">
+                      <Badge className="border-[#10B981]/30 bg-[#10B981]/10 text-[9px] text-[#10B981]">
+                        {comments.comments.length} loaded
+                      </Badge>
+                      <span>
+                        {comments.quotaUnitsSpent} quota unit(s) spent · source{" "}
+                        {comments.provenance.model}
+                      </span>
+                      {comments.nextPageToken && <span>· more pages available</span>}
+                    </div>
+                    {comments.comments.length === 0 ? (
+                      <div className="py-6 text-center text-[10px] text-[#64748B]">
+                        The API returned an empty comment list. Comments are enabled on this video
+                        and none matched — this is a result, not a failure.
+                      </div>
+                    ) : (
+                      <div className="max-h-[360px] space-y-2 overflow-y-auto">
+                        {comments.comments.map((c) => (
+                          <div
+                            key={c.id}
+                            className="rounded border border-[#263548] bg-[#0B1220] p-2.5"
+                          >
+                            <div className="flex flex-wrap items-center gap-2 text-[9px] text-[#64748B]">
+                              <span className="font-bold text-[#06B6D4]">{c.author}</span>
+                              <span>{c.publishedAt.slice(0, 10)}</span>
+                              {/* null, not 0 — the API omitting a count is not a
+                                  count of zero. */}
+                              {c.likeCount !== null && <span>· {c.likeCount} likes</span>}
+                              {c.replyCount !== null && <span>· {c.replyCount} replies</span>}
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-[#F3F4F6]">
+                              {c.text}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!comments && !commentsError && !fetchingComments && (
+                  <div className="py-8 text-center text-[#64748B]">
+                    Click Load to fetch comments through the official API.
                   </div>
                 )}
               </Card>

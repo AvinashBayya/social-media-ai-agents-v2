@@ -1756,17 +1756,30 @@ export const Route = createFileRoute("/news")({
   component: Page,
 });
 
-function formatRelativeTime(dateStr: string): string {
+/**
+ * Age of an item, already carrying its own suffix.
+ *
+ * The caller used to append " ago", which produced "Just now ago". Owning the
+ * whole phrase here means there is one place to get it right.
+ *
+ * Returns null for an unparseable or absent date. It previously returned the
+ * literal "1h" from its catch block, inventing a publication age at the point
+ * of display.
+ */
+function formatRelativeTime(dateStr: string): string | null {
   try {
     const pub = new Date(dateStr);
-    const diffMs = Date.now() - pub.getTime();
+    const ms = pub.getTime();
+    if (!Number.isFinite(ms)) return null;
+    const diffMs = Date.now() - ms;
     const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m`;
+    if (diffMins < 0) return null;
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
     const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h`;
+    if (diffHours < 24) return `${diffHours}h ago`;
     const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d`;
+    return `${diffDays}d ago`;
   } catch {
     // null, never "1h". Returning a plausible age from a PARSE FAILURE invents
     // a publication time at the point of display - the same defect that had
@@ -1913,7 +1926,7 @@ function Page() {
                       <MapPin className="size-3" />
                       {lead.countryCode || "Global"}
                       <span>·</span>
-                      <span>{formatRelativeTime(lead.pubDate)} ago</span>
+                      <span>{formatRelativeTime(lead.pubDate) ?? "no date reported"}</span>
                       {lead.language && (
                         <Badge
                           variant="outline"
@@ -2024,7 +2037,7 @@ function Page() {
                               <span className="min-w-0 flex-1 truncate">{o.primaryTitle}</span>
                             )}
                             <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {formatRelativeTime(o.pubDate)}
+                              {formatRelativeTime(o.pubDate) ?? "no date"}
                             </span>
                           </div>
                         ))}

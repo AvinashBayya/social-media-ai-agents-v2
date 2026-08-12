@@ -20,8 +20,24 @@ describe("GPS Interference & Jamming Module", () => {
       source: "Test Source",
       stats: { totalHexes: 2, highCount: 1, mediumCount: 1 },
       hexes: [
-        { h3: "8828308281fffff", lat: 32.0, lon: 35.5, level: "high", pct: 45.5, affectedAircraft: 10, totalAircraft: 22 },
-        { h3: "8828308283fffff", lat: 50.0, lon: 30.0, level: "medium", pct: 15.0, affectedAircraft: 3, totalAircraft: 20 },
+        {
+          h3: "8828308281fffff",
+          lat: 32.0,
+          lon: 35.5,
+          level: "high",
+          pct: 45.5,
+          affectedAircraft: 10,
+          totalAircraft: 22,
+        },
+        {
+          h3: "8828308283fffff",
+          lat: 50.0,
+          lon: 30.0,
+          level: "medium",
+          pct: 15.0,
+          affectedAircraft: 3,
+          totalAircraft: 20,
+        },
       ],
     };
 

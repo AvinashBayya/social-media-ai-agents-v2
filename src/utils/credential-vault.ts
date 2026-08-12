@@ -710,7 +710,10 @@ export async function verifyProviderCredential(
         const res = await fetch("https://bsky.social/xrpc/com.atproto.server.createSession", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ identifier: identifier.trim().replace(/^@/, ""), password: secret }),
+          body: JSON.stringify({
+            identifier: identifier.trim().replace(/^@/, ""),
+            password: secret,
+          }),
           signal: signal(),
         });
         const json: any = await res.json().catch(() => null);

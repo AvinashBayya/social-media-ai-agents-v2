@@ -444,15 +444,17 @@ function GISPage() {
                   graticule, no roads or buildings.
                   <br />
                   <span className="text-[#64748B]">On:</span> the browser sends one request per
-                  visible tile to <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span>{" "}
-                  ({CARTO_DARK.operator}) on every pan and zoom, and the request path IS the view:
+                  visible tile to{" "}
+                  <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span> (
+                  {CARTO_DARK.operator}) on every pan and zoom, and the request path IS the view:
                   the current centre is{" "}
                   <span className="font-mono text-[#F59E0B]">{viewDisclosure.path}</span>, a{" "}
                   {viewDisclosure.footprint} square, recorded there with your IP address and the
                   time. This page is not only public feed data — the Imagery layer plots EXIF GPS
                   fixes from images analysed in this browser, so zooming to one of those pins
-                  discloses that image&apos;s location to {CARTO_DARK.operator} even though the image
-                  file itself never leaves this machine. Not stored anywhere; it resets on reload.
+                  discloses that image&apos;s location to {CARTO_DARK.operator} even though the
+                  image file itself never leaves this machine. Not stored anywhere; it resets on
+                  reload.
                 </span>
               </label>
               {basemapError && (

@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "bun test",
-    "check:exports": "bun scripts/check-exports.ts"
+    "check:exports": "bun scripts/check-exports.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:controls": "node scripts/dead-controls.mjs"
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
@@ -91,6 +93,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "nitro": "3.0.260603-beta",
+    "playwright-core": "^1.62.1",
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",

@@ -259,4 +259,3 @@ export function toGpsJamFinding(input: GpsJamFindingInput) {
     details: `${input.affectedAircraft}/${input.totalAircraft} aircraft reported GPS jamming in hex ${input.h3}`,
   };
 }
-

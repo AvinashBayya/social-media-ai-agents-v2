@@ -158,10 +158,9 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
               Requesting basemap tiles from {CARTO_DARK.host} — this image&apos;s location is being
               disclosed.
             </span>{" "}
-            At the current zoom the fix sits in{" "}
-            <span className="font-mono">{disclosure.path}</span>, a {disclosure.footprint} square.
-            Every pan and zoom sends more paths. The image file itself still never leaves this
-            browser.{" "}
+            At the current zoom the fix sits in <span className="font-mono">{disclosure.path}</span>
+            , a {disclosure.footprint} square. Every pan and zoom sends more paths. The image file
+            itself still never leaves this browser.{" "}
             <button onClick={() => setTiles(false)} className="underline hover:text-white">
               Turn tiles off
             </button>
@@ -184,7 +183,8 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
             inside this app and the coastlines come from{" "}
             <span className="font-mono text-[#CBD5E1]">/data/world.geo.json</span> on this origin.
             Ticking this box makes the browser request raster tiles from{" "}
-            <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span> ({CARTO_DARK.operator}
+            <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span> (
+            {CARTO_DARK.operator}
             ). A tile path is the coordinate: this image&apos;s fix would be requested as{" "}
             <span className="font-mono text-[#F59E0B]">{disclosure.path}</span>, which pins the
             camera to a {disclosure.footprint} square in {CARTO_DARK.operator}&apos;s access log,

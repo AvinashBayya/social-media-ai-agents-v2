@@ -743,8 +743,7 @@ function SocialPage() {
                               target="_blank"
                               rel="noopener noreferrer"
                               title={
-                                m.altText ??
-                                `${m.type} — no alt text supplied by the uploader`
+                                m.altText ?? `${m.type} — no alt text supplied by the uploader`
                               }
                               className="group relative block"
                             >
