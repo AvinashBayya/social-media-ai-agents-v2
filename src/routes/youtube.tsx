@@ -295,8 +295,24 @@ function YoutubePage() {
                   <h3 className="font-bold uppercase text-[#F3F4F6] flex items-center gap-2">
                     <FileText className="size-4 text-[#06B6D4]" /> Video Metadata
                   </h3>
-                  <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px]">
-                    {metadata.provenance.model === "yt-oembed-fallback" ? "oEmbed (partial)" : "Verified ytdl-core"}
+                  {/* Names the source that actually answered. This asserted
+                      "Verified ytdl-core" for anything that was not oEmbed,
+                      which would now mislabel every InnerTube record — and it
+                      called a record "verified" on the strength of which code
+                      path produced it. */}
+                  <Badge
+                    className={
+                      metadata.provenance.model === "yt-oembed-fallback"
+                        ? "bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30 text-[9px]"
+                        : "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px]"
+                    }
+                    title={`Metadata source: ${metadata.provenance.model}`}
+                  >
+                    {metadata.provenance.model === "yt-oembed-fallback"
+                      ? "oEmbed — title and channel only"
+                      : metadata.provenance.model.startsWith("innertube")
+                        ? `InnerTube ${metadata.provenance.model.replace("innertube-", "").toUpperCase()}`
+                        : metadata.provenance.model}
                   </Badge>
                 </div>
 
@@ -377,18 +393,32 @@ function YoutubePage() {
                   </Badge>
                 </div>
                 <p className="text-[10px] text-[#64748B]">
-                  Download original MP4 artifact (720p) into local storage for keyframe extraction, OCR, and Whisper audio analysis. Each download is audit logged.
+                  {/* Said "(720p)". The runtime has no ffmpeg, so only YouTube's
+                      muxed format is downloadable as a single file — that is
+                      itag 18 at 360p. Higher resolutions exist only as separate
+                      video and audio streams. */}
+                  Download the muxed MP4 artifact (360p — the highest single-file format YouTube
+                  serves; higher resolutions are adaptive and need ffmpeg to join) into local
+                  storage for keyframe extraction, OCR, and Whisper audio analysis. Each download is
+                  audit logged.
                 </p>
 
                 {downloadError && (() => {
-                  const isBlocked = downloadError.cause?.includes("age-restricted") || downloadError.cause?.includes("region-locked");
+                  // Sniffs YouTube's OWN playability verdict, which the collector
+                  // now passes through verbatim. It used to match on
+                  // "age-restricted"/"region-locked" — words the collector wrote
+                  // into every failure cause as a guess, so the amber
+                  // "Restricted" banner fired on faults that were nothing of the
+                  // sort, including our own parser and transport errors.
+                  const c = downloadError.cause ?? "";
+                  const isBlocked = /LOGIN_REQUIRED|AGE_VERIFICATION|UNPLAYABLE|CONTENT_CHECK_REQUIRED/i.test(c);
                   return (
                     <div className={`rounded border p-3 text-xs space-y-1 ${
                       isBlocked
                         ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
                         : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
                     }`}>
-                      <span className="font-bold">{isBlocked ? "Download Restricted: " : "Download Failed: "}</span>
+                      <span className="font-bold">{isBlocked ? "Download Restricted by YouTube: " : "Download Failed: "}</span>
                       {downloadError.cause}
                     </div>
                   );

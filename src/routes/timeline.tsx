@@ -112,4 +112,7 @@ function TimelinePage() {
     </AppShell>
   );
 }
-export default TimelinePage;
+
+// No `export default TimelinePage` here. A route file that exports anything
+// besides `Route` cannot be code-split — the router logs that warning on every
+// page load. Nothing imported this: the route tree pulls in `Route` alone.

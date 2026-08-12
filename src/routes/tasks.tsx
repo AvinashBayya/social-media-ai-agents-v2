@@ -668,4 +668,7 @@ function TasksPage() {
     </AppShell>
   );
 }
-export default TasksPage;
+
+// No `export default TasksPage` here — see the note in timeline.tsx. These two
+// were the only route files of 32 carrying one, so it was a slip rather than a
+// convention.

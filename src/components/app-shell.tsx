@@ -261,13 +261,22 @@ function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        {/*
+          The bell had NO onClick and a permanently-lit, pulsing red dot — an
+          unread-notification indicator on every route of the app, for an alert
+          system that does not exist. It now navigates to the Alert Centre,
+          which explains why nothing is alerting, and the dot is gone: there is
+          nothing unread to indicate.
+        */}
         <Button
+          asChild
           variant="ghost"
           size="icon"
-          className="relative size-8 text-[#94A3B8] hover:text-[#F3F4F6] border border-[#263548] bg-[#111827] rounded"
+          className="relative size-8 rounded border border-[#263548] bg-[#111827] text-[#94A3B8] hover:text-[#F3F4F6]"
         >
-          <Bell className="size-3.5" />
-          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#EF4444] animate-pulse" />
+          <Link to="/alerts" aria-label="Alert Centre">
+            <Bell className="size-3.5" />
+          </Link>
         </Button>
 
         {/* Operator chip. Reflects the DEMO session (see utils/demo-session.ts)

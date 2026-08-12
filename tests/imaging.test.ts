@@ -10,6 +10,7 @@ import {
   interpretC2pa,
   interpretExif,
   interpretOcr,
+  readExifCaptureTime,
   pHash,
   rgbaToGrayscale,
   C2PA_ABSENCE_NOTE,
@@ -658,5 +659,77 @@ describe("documented gaps", () => {
       expect(gap.requires.length).toBeGreaterThan(30);
       expect(gap.limitation.length).toBeGreaterThan(40);
     }
+  });
+});
+
+describe("readExifCaptureTime — a camera clock is not a UTC instant", () => {
+  /*
+   * EXIF DateTimeOriginal is timezone-naive: "2026:07:04 11:22:33" is a reading
+   * off the camera's own clock with no offset recorded.
+   *
+   * The previous implementation ran it through `new Date(...).toISOString()`,
+   * which applies the ANALYST MACHINE's offset and then appends a Z asserting
+   * UTC. A fixture written 2026:07:04 11:22:33 displayed as
+   * "captured 2026-07-04T05:52:33.000Z" — silently shifted by the host's IST
+   * offset, and showing a different capture time to analysts in different
+   * timezones, with the precision of a measurement.
+   */
+  test("a naive value keeps its wall clock and claims NO instant", () => {
+    const c = readExifCaptureTime("2026:07:04 11:22:33");
+    expect(c).not.toBeNull();
+    expect(c!.local).toBe("2026-07-04 11:22:33");
+    expect(c!.offset).toBeNull();
+    // The whole point: without an offset there is no instant to state.
+    expect(c!.absolute).toBeNull();
+    expect(c!.local).not.toContain("Z");
+  });
+
+  test("the reported bug does not recur — no host-offset shift", () => {
+    const c = readExifCaptureTime("2026:07:04 11:22:33");
+    // 05:52:33 was the observed wrong value on an IST machine.
+    expect(c!.local).toContain("11:22:33");
+    expect(JSON.stringify(c)).not.toContain("05:52:33");
+  });
+
+  test("a recorded offset produces a real absolute instant", () => {
+    const c = readExifCaptureTime("2026:07:04 11:22:33", "+05:30");
+    expect(c!.offset).toBe("+05:30");
+    expect(c!.absolute).toBe("2026-07-04T05:52:33.000Z");
+  });
+
+  test("an offset embedded in the string is honoured", () => {
+    const c = readExifCaptureTime("2026:07:04 11:22:33+05:30");
+    expect(c!.local).toBe("2026-07-04 11:22:33");
+    expect(c!.offset).toBe("+05:30");
+    expect(c!.absolute).toBe("2026-07-04T05:52:33.000Z");
+  });
+
+  test("a Date from exifr is read back as wall clock, not re-converted", () => {
+    // exifr may build a Date by assuming local time. Reading the local
+    // components back out restores the digits the file actually contained.
+    const c = readExifCaptureTime(new Date(2026, 6, 4, 11, 22, 33));
+    expect(c!.local).toBe("2026-07-04 11:22:33");
+    expect(c!.absolute).toBeNull();
+  });
+
+  test("an unparseable offset is treated as absent, never guessed", () => {
+    const c = readExifCaptureTime("2026:07:04 11:22:33", "not-an-offset");
+    expect(c!.offset).toBeNull();
+    expect(c!.absolute).toBeNull();
+  });
+
+  test("absent input is null", () => {
+    expect(readExifCaptureTime(null)).toBeNull();
+    expect(readExifCaptureTime(undefined)).toBeNull();
+    expect(readExifCaptureTime("")).toBeNull();
+  });
+
+  test("interpretExif reports the offset situation rather than hiding it", () => {
+    const report = interpretExif({ DateTimeOriginal: "2026:07:04 11:22:33" } as any);
+    expect(report.captureTime).toBe("2026-07-04 11:22:33");
+    expect(report.capture?.absolute).toBeNull();
+    const finding = report.findings.find((f) => f.id === "capture_time");
+    expect(finding).toBeDefined();
+    expect(finding!.note).toContain("carries no timezone");
   });
 });

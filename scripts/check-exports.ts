@@ -145,6 +145,18 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "serverDownloadYoutubeVideo",
     "isYoutubeUrl",
     "extractYoutubeId",
+    // Added 2026-08-12 with the InnerTube rewrite. The parsers are the pure,
+    // testable half — parseTimedTextXml in particular is what stands between a
+    // 93KB caption track and a false "no subtitles available".
+    "fmtUploadDate",
+    "YT_INNERTUBE_CLIENTS",
+    "muxedFormats",
+    "captionTracksOf",
+    "captionTracksToLangs",
+    "decodeXmlEntities",
+    "parseVttSegments",
+    "parseTimedTextXml",
+    "parseSubtitleBody",
   ],
 };
 

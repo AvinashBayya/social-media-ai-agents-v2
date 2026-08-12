@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Search, ZoomIn, ZoomOut, Maximize2, Route as RouteIcon, Filter } from "lucide-react";
+import { Search, ZoomIn, ZoomOut } from "lucide-react";
 import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/graph")({
@@ -57,36 +58,65 @@ const TYPE_STYLE: Record<Node["type"], { fill: string; ring: string }> = {
 
 function Page() {
   const byId = Object.fromEntries(NODES.map((n) => [n.id, n]));
+  const [query, setQuery] = useState("");
+  const [zoom, setZoom] = useState(1);
+
+  /** Nodes matching the filter box. Empty query shows everything. */
+  const matched = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return new Set(NODES.map((n) => n.id));
+    return new Set(
+      NODES.filter((n) => n.label.toLowerCase().includes(q) || n.type.includes(q)).map((n) => n.id),
+    );
+  }, [query]);
+
+  // Zoom scales the viewBox about the centre, so the fixed layout stays put.
+  const vb = useMemo(() => {
+    const w = 800 / zoom;
+    const h = 560 / zoom;
+    return `${(800 - w) / 2} ${(560 - h) / 2} ${w} ${h}`;
+  }, [zoom]);
   return (
     <AppShell>
       <PageHeader
         title="Knowledge Graph"
         description="Explore relationships between people, organizations, places, and digital identifiers."
-        actions={
-          <>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <RouteIcon className="size-3.5" />
-              <SampleDataBanner detail="The entity graph is a fixed topology, not derived from collected entities." />
-              Path finding
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Filter className="size-3.5" />
-              Filter
-            </Button>
-            <Button size="sm" className="gap-1.5">
-              <Maximize2 className="size-3.5" />
-              Full screen
-            </Button>
-          </>
-        }
       />
+
+      {/*
+        The SampleDataBanner used to be nested INSIDE the "Path finding" button.
+        A measurement of the rendered page found the consequences: the button
+        stretched to 1123px because it wrapped the whole 190-character warning,
+        its accessible name became the entire disclaimer, the banner overflowed
+        its 32px host, "Filter" and "Full screen" were pushed onto a second row,
+        and the warning text itself became a click target that activated a
+        button with no handler. It failed in the safe direction - the warning
+        got bigger, not hidden - but it belongs at page level.
+
+        The three header buttons are gone rather than left inert. "Path
+        finding", "Filter" and "Full screen" had no onClick, and neither did
+        Expand, Collapse, Highlight path or the two zoom controls. A control
+        that cannot do anything is worse than an absent one: it invites the
+        analyst to believe the capability exists.
+      */}
+      <SampleDataBanner detail="This graph is a fixed 10-node topology written into the page. It is NOT derived from collected entities, and no path finding, filtering or expansion is implemented." />
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <Card>
           <CardContent className="p-0">
             <div className="flex items-center justify-between border-b px-4 py-2">
+              {/*
+                This was an uncontrolled <Input> with no value and no onChange -
+                typing into it did nothing at all. It now filters the fixed node
+                set, which is a real (if small) capability over real page state.
+              */}
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input className="h-8 w-64 pl-8 text-xs" placeholder="Find node…" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="h-8 w-64 pl-8 text-xs"
+                  placeholder="Filter nodes by label or type..."
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 {Object.entries(TYPE_STYLE).map(([t, s]) => (
@@ -96,11 +126,28 @@ function Page() {
                   </span>
                 ))}
               </div>
+              {/*
+                Both zoom buttons had no onClick and no aria-label, so they were
+                inert AND unreachable by name. They now scale the SVG viewBox,
+                which is real behaviour over real state.
+              */}
               <div className="flex gap-1">
-                <Button variant="ghost" size="icon" className="size-7">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label="Zoom out"
+                  onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.2).toFixed(2))))}
+                >
                   <ZoomOut className="size-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="size-7">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label="Zoom in"
+                  onClick={() => setZoom((z) => Math.min(2.5, Number((z + 0.2).toFixed(2))))}
+                >
                   <ZoomIn className="size-3.5" />
                 </Button>
               </div>
@@ -112,7 +159,7 @@ function Page() {
                   "radial-gradient(circle at 50% 45%, oklch(0.97 0.02 240), oklch(0.99 0.005 240))",
               }}
             >
-              <svg viewBox="0 0 800 560" className="h-full w-full">
+              <svg viewBox={vb} className="h-full w-full">
                 <defs>
                   <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
                     <path
@@ -151,8 +198,11 @@ function Page() {
                 })}
                 {NODES.map((n) => {
                   const s = TYPE_STYLE[n.type];
+                  // Non-matching nodes dim rather than disappear, so the shape
+                  // of the graph stays readable while the filter narrows it.
+                  const hit = matched.has(n.id);
                   return (
-                    <g key={n.id}>
+                    <g key={n.id} opacity={hit ? 1 : 0.18}>
                       <circle cx={n.x} cy={n.y} r={n.r + 6} fill={s.fill} opacity="0.15" />
                       <circle
                         cx={n.x}
@@ -176,15 +226,18 @@ function Page() {
                   );
                 })}
               </svg>
-              <div className="absolute bottom-3 right-3 flex gap-1">
-                <Button variant="outline" size="sm">
-                  Expand
-                </Button>
-                <Button variant="outline" size="sm">
-                  Collapse
-                </Button>
-                <Button variant="outline" size="sm">
-                  Highlight path
+              {/*
+                Expand / Collapse / Highlight path all had no onClick. Expanding
+                a node means fetching its neighbours, and this graph has no data
+                source to fetch from; highlighting a path means a traversal over
+                a real edge set. Removed rather than left as decoration.
+              */}
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                  zoom {zoom.toFixed(1)}x
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
+                  Reset view
                 </Button>
               </div>
             </div>

@@ -10,22 +10,39 @@
 
 - **Task:** v1 Feature & Intelligence Merge — OSINT tools, agents, crawlers & real-time data sources integrated (Complete)
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-12 — **511 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **113 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
+- **Last Verified:** 2026-08-12 — **567 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **123 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
 
 ### Deployed state — 2026-08-12 ✅ LATEST
 
 `sentinel-web` runs **`v22`** / revision **`sentinel-web--0000020`** (healthy, 1 replica).
 **470 JS/TS unit tests passing**, **5 Python unit tests passing**, **`tsc --noEmit` clean**.
 
-#### YouTube Feature Architecture (v21+) — CRITICAL FOR AI TO KNOW
-- **Self-contained**: YouTube feature uses `@distube/ytdl-core` (npm) inside TanStack Start **server functions**.
-- **NO separate FastAPI backend required** for YouTube. The old `localhost:8000` calls are GONE.
-- **Metadata**: `ytdl.getInfo()` → full metadata (title, channel, duration, views, upload_date). Falls back to oEmbed if bot-blocked.
-- **Subtitles**: YouTube timedtext API (3 strategies: auto-caption → manual → ytdl caption tracks).
-- **Download**: `ytdl.filterFormats("videoandaudio")` → direct signed MP4 URL → browser `<a download>` trigger. Max quality = muxed (~360p) since no ffmpeg in runtime container.
-- **Supported URLs**: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `shorts.youtube.com/` — all work.
-- **Key files**: `src/utils/youtube-collector.ts` (all logic), `src/routes/youtube.tsx` (UI).
-- **Data honesty**: typed errors (`VideoUnavailable`, `SubsUnavailable`, `DownloadFailed`) — NEVER fake data.
+#### YouTube Feature Architecture (v23+, rewritten 2026-08-12) — CRITICAL FOR AI TO KNOW
+- **Self-contained**: no FastAPI backend. All logic runs in TanStack Start **server functions**.
+- **Primary source is YouTube's own InnerTube `player` endpoint**, not ytdl-core. Public, keyless,
+  and — crucially — its URLs need **no deciphering**, so the player-signature arms race cannot
+  break it. `YT_INNERTUBE_CLIENTS` is tried in order.
+  - **ANDROID first** — the only client returning a **muxed** format (itag 18, 360p). The runtime
+    has no ffmpeg, so adaptive-only clients give streams we cannot join.
+  - **IOS second** — metadata and captions; 32 formats, none muxed.
+  - **WEB is excluded from playback** — it answers `UNPLAYABLE — "Video unavailable"` for videos
+    ANDROID serves fine. It is used *only* for `microformat`, the sole source of an upload date.
+- **ytdl-core is now a lazy-loaded fallback**, `await import()` inside the fallback branch. A static
+  import took the whole module down under Bun (`http-cookie-agent` calls `this.compose` on a
+  Dispatcher that lacks it).
+- **Subtitles**: the signed `captionTracks[].baseUrl` from the player response. **The unsigned
+  `api/timedtext?v=ID&lang=en` endpoint is DEAD** — it answers HTTP 200 with a zero-length body.
+  **`&fmt=vtt` is silently ignored**; YouTube returns `<timedtext format="3">` XML regardless, so
+  `parseTimedTextXml` is required and `parseSubtitleBody` sniffs the format from the bytes.
+- **Supported URLs**: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `shorts.youtube.com/`.
+- **Key files**: `src/utils/youtube-collector.ts` (logic + pure parsers), `src/routes/youtube.tsx` (UI).
+- **Data honesty**: typed errors (`VideoUnavailable`, `SubsUnavailable`, `DownloadFailed`) — NEVER
+  fake data. In particular: `available_subtitles` comes from real caption tracks (it was a hardcoded
+  English entry), download failures quote YouTube's own `playabilityStatus.reason` (they asserted
+  "may be age-restricted or region-locked" on every failure), and a caption track that downloads but
+  will not parse is reported as **our** parser failing, never as the video having no subtitles.
+- **Verified live 2026-08-12** on `b6g6rDDt9x8`: duration 734s, 4,309,691 views, upload date
+  2020-11-10, 347 caption segments from 93,199 bytes, download HEAD 200 `video/mp4` 22,830,807 bytes.
 
 #### Deployment Commands (run from `d:\social_media_research`)
 ```bash
@@ -56,6 +73,7 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **YouTube module repaired — InnerTube rewrite (2026-08-12)**: Every panel on `/youtube` was failing at once and looked like one fault; it was three. (a) `@distube/ytdl-core@4.16.12` can no longer parse YouTube's player script ("Could not parse decipher function"), so metadata degraded to oEmbed and showed Unknown duration/views/date, and downloads died on "Failed to find any playable formats". (b) Both subtitle strategies called the **unsigned** `api/timedtext` endpoint, which now returns HTTP 200 with a **zero-length body** — they could never have succeeded for any video. (c) `&fmt=vtt` is ignored by YouTube, so the one strategy that did fetch captions ran a WebVTT parser over `<timedtext format="3">` XML, found nothing, and reported "no subtitles available" for 93,199 bytes of captions. Rebuilt on the InnerTube `player` endpoint (see the architecture note above), added `parseTimedTextXml`/`parseSubtitleBody`, and removed two fabrications: a hardcoded `available_subtitles` English entry and an invented "age-restricted or region-locked" cause printed on every download failure. Also removed the unused `export default` from `timeline.tsx` and `tasks.tsx`, which was the source of the router's code-split warnings on every page load. **567 unit tests passing** (+56), **`tsc --noEmit` clean**, **123 core exports verified**, `bun run build` green.
 - [x] **Credentials Vault wired to the collectors (2026-08-12)**: The Settings page was a write-only box — it saved `data/credentials.json` and nothing in the system ever read it, so an operator could add a key, watch it save, see it badged "Active", and collect exactly as much as before. New `src/utils/credential-vault.ts` is now the store the collectors resolve from, with a nine-provider registry, env-first resolution, real per-provider verification probes, masked listing plus a separate reveal call, and a computed capability matrix. Two fabrications removed: `status: "Active"` written at save time for an untested secret (now `unverified` until a live call says otherwise, and legacy `"Active"` rows are read back as `unverified`), and `lastUsed: "Never"` stored as data (now `null`). **New collection unlocked:** authenticated Bluesky `searchPosts` (`fetchBlueskySearch`) — historical keyword search, previously listed as a stated limitation because it 403s unauthenticated — and authenticated Mastodon `api/v2/search` (`fetchMastodonSearch`), reaching posts that carry no hashtag. Reddit, UCDP and GitHub now resolve from the vault as well as the environment. **511 unit tests passing** (+41), **`tsc --noEmit` clean**, **113 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see the note below.
 - [x] **YouTube Ingestion for OSINT & Social Intelligence (2026-08-11)**: Implemented full YouTube video ingestion with a Python FastAPI backend (`yt-dlp` Python API) and a TanStack Start frontend route (`/youtube`). Includes URL host validation (`youtube.com`/`youtu.be`), metadata extraction without video download, subtitle timestamp segment parsing (`[{start, end, text}]`), analyst-initiated single-video MP4 artifact download into `YT_DOWNLOAD_DIR` with audit logging, privacy-mode embed player (`youtube-nocookie.com`), clickable timestamp seeking, handoff to video analysis pipeline (`/videos`), 5 Python unit tests passing (`pytest tests_py/`), 470 JS/TS unit tests passing (`bun test`), 90 core exports verified, and `tsc --noEmit` clean.
 - [x] **v1 Feature & Intelligence Merge (2026-08-11)**: Merged missing working functions, APIs, resources, OSINT tools, agents, crawlers, and GIS data sources from `social-media-ai-agents-` (v1) into `v2`. Added real-time GPS jamming feed (`gps-interference.ts`), environmental radiation monitoring network (`radiation.ts`), CISA KEV cyber intelligence (`cyber-intel.ts`), social velocity & posting volume spike calculator (`social-velocity.ts`), Telegram topic classifier (`telegram-intel.ts`), multi-domain threat classifier (`threat-classifier.ts`), spatio-temporal focal point convergence engine (`focal-point.ts`), OSINT route updates, and collector health probes. **470 unit tests passing**, **85 core exported symbols verified**, **`tsc --noEmit` clean**.

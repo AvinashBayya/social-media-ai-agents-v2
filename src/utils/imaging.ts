@@ -359,7 +359,18 @@ export interface ExifReport {
   present: boolean;
   camera: { make: string | null; model: string | null; lens: string | null; serial: string | null };
   software: string | null;
+  /**
+   * Camera wall-clock capture time, e.g. "2026-07-04 11:22:33". NEVER Z-suffixed.
+   *
+   * EXIF DateTimeOriginal is timezone-naive. This used to be passed through
+   * new Date(...).toISOString(), which applied the ANALYST MACHINE offset and
+   * then appended a Z asserting UTC - a fixture written 2026:07:04 11:22:33
+   * displayed as 2026-07-04T05:52:33.000Z, silently shifted by the host IST
+   * offset, and showed a different time to analysts in different timezones.
+   */
   captureTime: string | null;
+  /** The same value with its offset, when the file recorded one. */
+  capture: ExifCaptureTime | null;
   modifyTime: string | null;
   gps: GpsFix | null;
   findings: ExifFinding[];
@@ -379,6 +390,91 @@ const iso = (v: unknown): string | null => {
   const d = v instanceof Date ? v : new Date(String(v));
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 };
+
+/**
+ * EXIF capture time, kept as the CAMERA WALL-CLOCK value it is.
+ *
+ * EXIF DateTimeOriginal is timezone-naive: "2026:07:04 11:22:33" means 11:22 on
+ * the camera clock, with no offset recorded unless the rarely-populated
+ * OffsetTimeOriginal tag is present.
+ *
+ * The previous code ran it through `new Date(...).toISOString()`, which applies
+ * the ANALYST MACHINE local offset and then appends a Z asserting UTC. With a
+ * fixture written as 2026:07:04 11:22:33 the UI displayed
+ * "captured 2026-07-04T05:52:33.000Z" — the host IST offset silently applied,
+ * and the same file shows a different capture time to analysts in different
+ * timezones. On imagery that may need to be correlated against an event time,
+ * a five-and-a-half hour silent shift is a serious error, and it was rendered
+ * with the precision of a measurement.
+ *
+ * So: the wall-clock string is normalised for display but NEVER converted, and
+ * never carries a Z. Where the file does record an offset, it is preserved and
+ * the value becomes genuinely absolute.
+ */
+export interface ExifCaptureTime {
+  /** Normalised wall clock, e.g. "2026-07-04 11:22:33". Never suffixed Z. */
+  local: string;
+  /** UTC offset the file recorded, e.g. "+05:30". Null when it recorded none. */
+  offset: string | null;
+  /**
+   * Absolute instant, ISO 8601 — ONLY when the file recorded an offset.
+   *
+   * Null otherwise, because without an offset there is no instant to state.
+   * Consumers that need a sortable value must handle this being null rather
+   * than assuming a timezone.
+   */
+  absolute: string | null;
+}
+
+export function readExifCaptureTime(value: unknown, offsetTag?: unknown): ExifCaptureTime | null {
+  if (value === undefined || value === null) return null;
+
+  // exifr may hand back a Date it already built by assuming local time. Undo
+  // that by reading the local components back out, which restores the digits
+  // the file actually contained.
+  let text: string;
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    text =
+      `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
+      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  } else {
+    text = String(value).trim();
+    if (!text) return null;
+    // EXIF writes "YYYY:MM:DD HH:MM:SS". Only the date separators are colons.
+    text = text.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3").replace("T", " ");
+    // Any offset already embedded in the string wins over the tag.
+    const embedded = /([+-]\d{2}:?\d{2}|Z)$/.exec(text);
+    if (embedded) {
+      const off = embedded[1] === "Z" ? "+00:00" : normaliseOffset(embedded[1]);
+      const bare = text.slice(0, embedded.index).trim();
+      // An unparseable offset is treated as no offset rather than guessed at,
+      // so `absolute` stays null and nothing downstream reads a wall clock as
+      // an instant.
+      return {
+        local: bare,
+        offset: off,
+        absolute: off ? absoluteFrom(bare, off) : null,
+      };
+    }
+  }
+
+  const offset = normaliseOffset(typeof offsetTag === "string" ? offsetTag.trim() : null);
+  return { local: text, offset, absolute: offset ? absoluteFrom(text, offset) : null };
+}
+
+function normaliseOffset(value: string | null): string | null {
+  if (!value) return null;
+  const m = /^([+-])(\d{2}):?(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  return `${m[1]}${m[2]}:${m[3]}`;
+}
+
+function absoluteFrom(local: string, offset: string): string | null {
+  const d = new Date(`${local.replace(" ", "T")}${offset}`);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
 
 /**
  * Turn parsed EXIF into analyst-facing findings.
@@ -401,6 +497,7 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
       camera: { make: null, model: null, lens: null, serial: null },
       software: null,
       captureTime: null,
+      capture: null,
       modifyTime: null,
       gps: null,
       findings: [
@@ -427,7 +524,12 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
     serial: str(raw.SerialNumber ?? raw.BodySerialNumber ?? raw.InternalSerialNumber),
   };
   const software = str(raw.Software ?? raw.ProcessingSoftware ?? raw.CreatorTool);
-  const captureTime = iso(raw.DateTimeOriginal ?? raw.CreateDate ?? raw.DateTimeDigitized);
+  const capture = readExifCaptureTime(
+    raw.DateTimeOriginal ?? raw.CreateDate ?? raw.DateTimeDigitized,
+    (raw as Record<string, unknown>).OffsetTimeOriginal ??
+      (raw as Record<string, unknown>).OffsetTime,
+  );
+  const captureTime = capture ? capture.local : null;
   const modifyTime = iso(raw.ModifyDate ?? raw.DateTime);
 
   const lat = typeof raw.latitude === "number" ? raw.latitude : null;
@@ -499,8 +601,14 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
   }
 
   if (captureTime && modifyTime) {
+    // Both sides are parsed WITHOUT assuming a zone: captureTime is a camera
+    // wall clock and modifyTime is a filesystem/EXIF value. Comparing them is
+    // only meaningful as a rough gap, which is all this finding claims.
     const gapMinutes =
-      Math.abs(new Date(modifyTime).getTime() - new Date(captureTime).getTime()) / 60_000;
+      Math.abs(
+        new Date(modifyTime.replace(" ", "T")).getTime() -
+          new Date(captureTime.replace(" ", "T")).getTime(),
+      ) / 60_000;
     if (gapMinutes > 1) {
       findings.push({
         id: "timestamp_gap",
@@ -516,6 +624,22 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
     }
   }
 
+  if (capture) {
+    findings.push({
+      id: "capture_time",
+      label: "Original capture time",
+      value: capture.offset
+        ? `${capture.local} ${capture.offset} (absolute: ${capture.absolute})`
+        : `${capture.local} — camera local time, UTC offset not recorded`,
+      note: capture.offset
+        ? "The file records a UTC offset, so this is an absolute instant."
+        : "EXIF DateTimeOriginal carries no timezone. This is the camera's own clock reading, " +
+          "which may be wrong or set to any zone, so it CANNOT be converted to UTC and must not " +
+          "be compared against an event time without establishing the camera's timezone first.",
+      severity: "info",
+    });
+  }
+
   if (!captureTime) {
     findings.push({
       id: "no_capture_time",
@@ -528,7 +652,18 @@ export function interpretExif(raw: RawExif | null | undefined): ExifReport {
     });
   }
 
-  return { present: true, camera, software, captureTime, modifyTime, gps, findings, raw, method };
+  return {
+    present: true,
+    camera,
+    software,
+    captureTime,
+    capture,
+    modifyTime,
+    gps,
+    findings,
+    raw,
+    method,
+  };
 }
 
 // ─── C2PA interpretation ───────────────────────────────────────────────────
