@@ -275,6 +275,26 @@ export const CREDENTIAL_PROVIDERS: CredentialProvider[] = [
     verifiable: true,
   },
   {
+    id: "reliefweb",
+    label: "ReliefWeb — humanitarian GIS layer",
+    category: "gis",
+    collectable: true,
+    identifierLabel: "App name",
+    identifierHint: "The appname you registered at reliefweb.int/developers",
+    identifierRequired: true,
+    secretLabel: "App name (same field)",
+    secretHint: "ReliefWeb uses the appname as both identifier and credential",
+    envSecret: "RELIEFWEB_APP_NAME",
+    unlocks:
+      "Humanitarian crisis and disaster event markers on the GIS map, sourced from the " +
+      "ReliefWeb API (reliefweb.int). Adds country- and event-level points for crises, " +
+      "conflicts and natural disasters reported by UN OCHA and partner agencies.",
+    consumedBy: "collectReliefWebEvents() in geo-sources.ts — the /gis humanitarian layer",
+    howTo:
+      "reliefweb.int/developers → register your app name. Free, no review required for non-commercial use.",
+    verifiable: true,
+  },
+  {
     id: "youtube",
     label: "YouTube — Data API v3 key",
     category: "social",

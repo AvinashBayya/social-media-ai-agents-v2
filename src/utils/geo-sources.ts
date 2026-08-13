@@ -22,6 +22,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { recordCredentialUse, resolveCredential } from "./credential-vault";
 import {
   fromGdeltArticle,
+  fromReliefWebReport,
   fromUcdpEvent,
   fromUsgsFeature,
   type GeoRecord,
@@ -251,19 +252,76 @@ export interface GeoCollection {
 }
 
 /**
+ * ReliefWeb humanitarian crisis and disaster events.
+ *
+ * Requires a free `appname` registered at reliefweb.int/developers. The appname
+ * is sent as a query parameter on each request. Without it the layer reports a
+ * configuration gap rather than returning an empty set.
+ *
+ * API: https://api.reliefweb.int/v1/disasters?appname=<appname>&limit=50
+ * The `disasters` endpoint gives recent events with country, disaster type and
+ * date. Coordinates are country-level centroids from COUNTRY_CENTROIDS.
+ */
+export async function collectReliefWebEvents(): Promise<LayerResult> {
+  const resolved = await resolveCredential("reliefweb");
+  // ReliefWeb uses the appname as both identifier and credential.
+  const appname = resolved?.identifier?.trim() || resolved?.secret?.trim();
+  if (!appname) {
+    return {
+      layer: "reliefweb",
+      records: [],
+      unplaceable: 0,
+      error:
+        "ReliefWeb requires a free appname (registered at reliefweb.int/developers). " +
+        "Set RELIEFWEB_APP_NAME or add a ReliefWeb credential on the Settings page to " +
+        "enable this layer. No events are shown — which is a missing credential, not a " +
+        "finding that no humanitarian crises exist.",
+    };
+  }
+
+  try {
+    const url =
+      `https://api.reliefweb.int/v1/disasters?appname=${encodeURIComponent(appname)}` +
+      `&limit=50&fields[include][]=title&fields[include][]=date` +
+      `&fields[include][]=country&fields[include][]=disaster_type` +
+      `&fields[include][]=url_alias&sort[]=date.created:desc`;
+    const data = await getJson(url);
+    await recordCredentialUse("reliefweb", resolved!.entryId);
+    const reports: unknown[] = data?.data ?? [];
+    const records: GeoRecord[] = [];
+    let unplaceable = 0;
+    for (const r of reports) {
+      const geo = fromReliefWebReport(r);
+      if (geo) records.push(geo);
+      else unplaceable += 1;
+    }
+    return { layer: "reliefweb", records, unplaceable, error: null };
+  } catch (err: unknown) {
+    const message = (err as Error)?.message ?? String(err);
+    return {
+      layer: "reliefweb",
+      records: [],
+      unplaceable: 0,
+      error: `ReliefWeb unavailable: ${message}`,
+    };
+  }
+}
+
+/**
  * Collect every server-side layer. Image GPS is added client-side from the
  * Module 4 corpus, which lives in the analyst's browser and never reaches us.
  */
 export async function collectGeoLayers(query: string): Promise<GeoCollection> {
-  const [seismic, conflict, news, gpsjam, radiation] = await Promise.all([
+  const [seismic, conflict, news, gpsjam, radiation, reliefweb] = await Promise.all([
     collectSeismic(),
     collectConflict(),
     collectNewsGeo(query),
     collectGpsJamming(),
     collectRadiation(),
+    collectReliefWebEvents(),
   ]);
   return {
-    layers: [conflict, seismic, news, gpsjam, radiation],
+    layers: [conflict, seismic, news, gpsjam, radiation, reliefweb],
     collectedAt: new Date().toISOString(),
   };
 }

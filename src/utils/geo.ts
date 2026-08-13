@@ -58,7 +58,8 @@ export type GeoLayerId =
   | "imagery"
   | "infrastructure"
   | "gpsjam"
-  | "radiation";
+  | "radiation"
+  | "reliefweb";
 
 export interface GeoLayer {
   id: GeoLayerId;
@@ -136,6 +137,15 @@ export const GEO_LAYERS: GeoLayer[] = [
       "contributors, so readings are comparable over time at one station but not strictly " +
       "between stations.",
     colour: "#22D3EE",
+  },
+  {
+    id: "reliefweb",
+    label: "Humanitarian events (ReliefWeb)",
+    provenance:
+      "ReliefWeb API (UN OCHA). Reports of humanitarian crises, disasters and conflict events " +
+      "sourced from partner agencies. Coordinates are country-level centroids from the API's " +
+      "country field — requires RELIEFWEB_APP_NAME (free registration at reliefweb.int/developers).",
+    colour: "#EC4899",
   },
 ];
 
@@ -414,6 +424,72 @@ export function fromGdeltArticle(
       domain: String(article?.domain ?? "unknown"),
     },
     credibility,
+  };
+}
+
+/**
+ * ReliefWeb API disaster / humanitarian crisis report.
+ *
+ * The ReliefWeb API returns a `country` array on each report. We take the
+ * primary country (index 0) and place the record at its centroid — country
+ * precision only, because the API does not supply event coordinates. This is
+ * the same approach used for GDELT; both are labelled honestly in `locates`
+ * so the analyst sees "country-level only" rather than a precise-looking pin.
+ *
+ * Fields used: `fields.title`, `fields.date.created`, `fields.country[0].iso3`,
+ * `fields.disaster_type[0].name`, `fields.url_alias`.
+ */
+export function fromReliefWebReport(report: unknown): GeoRecord | null {
+  const fields = (report as Record<string, unknown>)?.fields as Record<string, unknown> | undefined;
+  if (!fields) return null;
+
+  // Primary country — ISO3 code maps to a centroid
+  const countries = Array.isArray(fields.country) ? fields.country : [];
+  const primaryIso3 =
+    countries.length > 0
+      ? String((countries[0] as Record<string, unknown>)?.iso3 ?? "").toUpperCase()
+      : "";
+  // Attempt a direct COUNTRY_CENTROIDS lookup; the table is keyed by ISO2/name,
+  // so also try the `name` field.
+  const countryName =
+    countries.length > 0
+      ? String((countries[0] as Record<string, unknown>)?.name ?? "")
+      : "";
+  const centroid = COUNTRY_CENTROIDS[primaryIso3] ?? COUNTRY_CENTROIDS[countryName];
+  if (!centroid) return null;
+
+  const rawDate = String((fields.date as Record<string, unknown>)?.created ?? "");
+  const time = iso(rawDate);
+  if (!time) return null;
+
+  const disasterTypes = Array.isArray(fields.disaster_type) ? fields.disaster_type : [];
+  const disasterLabel =
+    disasterTypes.length > 0
+      ? String((disasterTypes[0] as Record<string, unknown>)?.name ?? "Crisis")
+      : "Crisis";
+
+  const title = String(fields.title ?? "Untitled report");
+  const url = String(fields.url_alias ?? "https://reliefweb.int");
+  const id = String((report as Record<string, unknown>)?.id ?? `rw-${primaryIso3}-${rawDate}`);
+
+  return {
+    id: `reliefweb-${id}`,
+    layer: "reliefweb",
+    lat: centroid[0],
+    lon: centroid[1],
+    precision: "country",
+    locates: `the affected COUNTRY centroid (${countryName || primaryIso3}) — not a pinpoint event location`,
+    title,
+    source: "ReliefWeb (UN OCHA)",
+    url,
+    timestamp: time,
+    magnitude: null,
+    magnitudeLabel: "no magnitude measured for humanitarian reports",
+    detail: {
+      disasterType: disasterLabel,
+      country: countryName || primaryIso3,
+    },
+    credibility: null,
   };
 }
 

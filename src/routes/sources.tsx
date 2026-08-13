@@ -54,6 +54,11 @@ import {
   assessmentSummary,
   type LanguageAssessment,
 } from "@/utils/credibility-llm";
+import {
+  serverLoadProfiles,
+  serverSaveProfiles,
+  LEGACY_PROFILE_LOCALSTORAGE_KEY,
+} from "@/utils/credibility-profiles";
 
 export const Route = createFileRoute("/sources")({
   head: () => ({ meta: [{ title: "Source Credibility — Sentinel AI" }] }),
@@ -106,21 +111,52 @@ function SourcesPage() {
 
   // Load persistent storage on mount
   useEffect(() => {
-    setProfiles([...builtinProfiles(), ...loadCustomProfiles()]);
-    setDomainOverrides(loadCustomDomainOverrides());
+    (async () => {
+      // One-time migration: if the analyst had custom profiles in localStorage
+      // from before the server-side store existed, migrate them now.
+      let migrationPayload: WeightProfile[] = [];
+      try {
+        const legacy = typeof window !== "undefined"
+          ? window.localStorage.getItem(LEGACY_PROFILE_LOCALSTORAGE_KEY)
+          : null;
+        if (legacy) {
+          const parsed = JSON.parse(legacy);
+          migrationPayload = Array.isArray(parsed) ? parsed.filter((p: WeightProfile) => p && !p.builtin) : [];
+        }
+      } catch {
+        migrationPayload = [];
+      }
 
-    const savedConfig = loadActiveFactorConfig();
-    if (savedConfig) {
-      setActiveProfileId(savedConfig.activeProfileId);
-      setKeywordsRaise(savedConfig.customKeywords.raise || []);
-      setKeywordsLower(savedConfig.customKeywords.lower || []);
-      setFactors((prev) =>
-        prev.map((f) => {
-          const s = savedConfig.settings[f.id];
-          return s ? { ...f, weight: s.weight, enabled: s.enabled } : f;
-        }),
-      );
-    }
+      try {
+        const result = await serverLoadProfiles({
+          data: migrationPayload.length > 0 ? { migrateFromLocalStorage: migrationPayload } : {},
+        }) as unknown as { profiles: WeightProfile[] };
+        const serverCustom = result?.profiles ?? [];
+        setProfiles([...builtinProfiles(), ...serverCustom]);
+        // Clear the legacy key after a successful migration
+        if (migrationPayload.length > 0 && typeof window !== "undefined") {
+          window.localStorage.removeItem(LEGACY_PROFILE_LOCALSTORAGE_KEY);
+        }
+      } catch {
+        // Server unreachable on first render (SSR). Fall back to localStorage.
+        setProfiles([...builtinProfiles(), ...loadCustomProfiles()]);
+      }
+
+      setDomainOverrides(loadCustomDomainOverrides());
+
+      const savedConfig = loadActiveFactorConfig();
+      if (savedConfig) {
+        setActiveProfileId(savedConfig.activeProfileId);
+        setKeywordsRaise(savedConfig.customKeywords.raise || []);
+        setKeywordsLower(savedConfig.customKeywords.lower || []);
+        setFactors((prev) =>
+          prev.map((f) => {
+            const s = savedConfig.settings[f.id];
+            return s ? { ...f, weight: s.weight, enabled: s.enabled } : f;
+          }),
+        );
+      }
+    })();
   }, []);
 
   // Save active factor configuration whenever it changes
@@ -272,14 +308,19 @@ function SourcesPage() {
     };
     const custom = [...profiles.filter((p) => !p.builtin && p.id !== next.id), next];
     setProfiles([...builtinProfiles(), ...custom]);
-    saveCustomProfiles(custom);
+    void serverSaveProfiles({ data: { profiles: custom } }).catch(() => {
+      // Server unavailable — fall back to localStorage so the profile isn't lost
+      saveCustomProfiles(custom);
+    });
     setActiveProfileId(next.id);
   };
 
   const deleteProfile = (id: string) => {
     const custom = profiles.filter((p) => !p.builtin && p.id !== id);
     setProfiles([...builtinProfiles(), ...custom]);
-    saveCustomProfiles(custom);
+    void serverSaveProfiles({ data: { profiles: custom } }).catch(() => {
+      saveCustomProfiles(custom);
+    });
     if (activeProfileId === id) selectProfile("default");
   };
 

@@ -36,6 +36,8 @@ data/credentials.json
 # Single-generation backup written by writeVault() before each overwrite. Holds
 # the same cleartext operator secrets, so it must be ignored on the same terms.
 data/credentials.prev.json
+# Analyst weight profiles \u2014 operator data, must not enter the repo.
+data/credibility-profiles.json
 worldmonitor-main/
 
 # Local dev helper, not part of the project

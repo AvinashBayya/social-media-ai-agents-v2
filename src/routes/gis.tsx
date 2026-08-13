@@ -118,6 +118,7 @@ function GISPage() {
     // and only one of them could ever render.
     gpsjam: true,
     radiation: true,
+    reliefweb: true,
   });
   const [timeWindow, setTimeWindow] = useState<[number, number] | null>(null);
 
