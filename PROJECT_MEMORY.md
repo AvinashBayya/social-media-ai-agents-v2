@@ -8,22 +8,20 @@
 
 ### Current Focus
 
-- **Task:** Browser-audit remediation — Phases 1, 2 and 4 complete; Phase 3 asset bundling and Phase 5 repeatability outstanding
+- **Task:** Browser-audit remediation complete.
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-12 — **625 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **151 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
+- **Last Verified:** 2026-08-13 — **653 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **151 core exports verified** (`bun scripts/check-exports.ts`), `bun run build` green.
 
-### Deployed state — 2026-08-12 ✅ LATEST
+### Deployed state — 2026-08-13 ✅ LATEST
 
-`sentinel-web` runs **`v25`** / revision **`sentinel-web--0000023`**
+`sentinel-web` runs **`v26`** / revision **`sentinel-web--0000024`**
 (`RunningAtMaxScale`, 1 replica), at
 `sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`.
 **653 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **151 core exports verified**.
-GitHub `origin/main` is at `1e944d4`.
+GitHub `origin/main` is at `e83ffcf`.
 
-> **This note was stale again.** It read `v22` / `sentinel-web--0000020` while the live app was
-> already on **`v24`** / `--0000022`. That is the third recurrence of the drift CLAUDE.md warns
-> about. **Always run the check below before trusting this section** — the deploy that produced
-> v25 was tagged from the live value, not from this file:
+> **Always run the check below before trusting this section** — the deploy that produced
+> v26 was tagged from the live value, not from this file:
 >
 > ```sh
 > az containerapp show -g rg-sentinel-demo -n sentinel-web >   --query "{image:properties.template.containers[0].image, rev:properties.latestReadyRevisionName}"
