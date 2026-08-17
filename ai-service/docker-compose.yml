@@ -1,0 +1,20 @@
+services:
+  ai-service:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+    # Optional GPU reservation. Uncomment on a host with an NVIDIA runtime and the
+    # NVIDIA Container Toolkit installed. The service detects the device at startup
+    # (torch.cuda.is_available()) and runs CPU-only if this block is absent or no
+    # GPU is present — it will not crash either way.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

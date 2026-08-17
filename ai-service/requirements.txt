@@ -1,0 +1,16 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+torch==2.5.1
+python-multipart==0.0.20
+numpy==2.2.1
+pillow==11.1.0
+piexif==1.1.3
+pytesseract==0.3.13
+scipy==1.14.1
+transformers==5.15.0
+# c2pa-python is intentionally NOT pinned here: it's a compiled wheel installed
+# best-effort in the Dockerfile so a missing platform build never fails this
+# file's install. For local dev, install it manually if you want a live C2PA
+# reader instead of the "reader_unavailable" fallback: pip install c2pa-python
