@@ -24,6 +24,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { resolveRedditCredentials } from "./social";
 import { resolveCredential } from "./credential-vault";
+// The collector's OWN url builder. Imported rather than re-derived so the probe
+// and the collector cannot drift apart — that drift is what this bug was.
+import { gpsJamUrlForDate } from "./gps-interference";
 
 export type ProbeStatus =
   /** Answered as expected. */
@@ -139,12 +142,6 @@ const SPECS: ProbeSpec[] = [
         ? "Rate limited — GDELT accepts one request every 5 seconds. The endpoint is up; it is " +
           "declining this request, which is not the same as no events."
         : null,
-  },
-  {
-    id: "gpsjam",
-    name: "GPSJam ADS-B Exchange Feed",
-    module: "M2",
-    endpoint: "https://gpsjam.org/data/latest.json",
   },
   {
     id: "safecast",
@@ -356,14 +353,105 @@ async function ucdpProbe(): Promise<CollectorProbe> {
   };
 }
 
+/**
+ * GPSJam, which cannot be probed with one fixed URL.
+ *
+ * THIS ENTRY WAS THE EXACT LIE THIS MODULE EXISTS TO PREVENT. It probed
+ * `https://gpsjam.org/data/latest.json` — a URL that has never existed and
+ * answers 404 — so `/crawlers` rendered "NO RESPONSE · HTTP 404" for a
+ * collector that works. Confirmed live on the deployed app 2026-08-17, and
+ * `gps-interference.ts`'s own header had ALREADY recorded that `latest.json`
+ * 404s; only the probe was never updated to match. The real collector reads
+ * `/data/<YYYY-MM-DD>-h3_4.csv`.
+ *
+ * Why this is a function rather than another `SPECS` row: GPSJam publishes one
+ * file per UTC day, and **today's file legitimately 404s until the day is under
+ * way** (measured 2026-08-17: today 404, yesterday 200 at 192 KB). A fixed row
+ * pointing at today's URL would therefore invent a fresh false alarm every
+ * morning — trading one wrong verdict for a recurring one. So this mirrors
+ * `fetchGpsInterference`'s own today-then-yesterday fallback and reports WHICH
+ * day it actually read.
+ *
+ * It calls `gpsJamUrlForDate()` rather than rebuilding the path, so the probe
+ * and the collector cannot drift apart again. That drift is what produced this
+ * bug; a second copy of the URL would reintroduce the cause while fixing the
+ * symptom.
+ */
+async function gpsJamProbe(): Promise<CollectorProbe[]> {
+  const checkedAt = new Date().toISOString();
+  const base = {
+    id: "gpsjam",
+    name: "GPSJam ADS-B navigation interference",
+    module: "M2" as const,
+    checkedAt,
+  };
+
+  const now = Date.now();
+  const candidates = [
+    { label: "today", url: gpsJamUrlForDate(new Date(now)) },
+    { label: "yesterday", url: gpsJamUrlForDate(new Date(now - 86_400_000)) },
+  ];
+
+  const attempts: string[] = [];
+  for (const candidate of candidates) {
+    const started = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(candidate.url, {
+        headers: { accept: "text/csv,*/*" },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+    } catch (err) {
+      attempts.push(
+        `${candidate.label}: no response (${err instanceof Error ? err.message : String(err)})`,
+      );
+      continue;
+    }
+    const latencyMs = Date.now() - started;
+
+    if (res.ok) {
+      return [
+        {
+          ...base,
+          endpoint: candidate.url,
+          status: "reachable",
+          httpStatus: res.status,
+          latencyMs,
+          detail:
+            `HTTP ${res.status} — read ${candidate.label}'s file. GPSJam publishes one CSV per ` +
+            `UTC day and the current day's file does not appear until the day is under way, so ` +
+            `reading yesterday is normal, not a failure.`,
+        },
+      ];
+    }
+
+    // Today's file being absent is the documented normal case, not a fault.
+    attempts.push(`${candidate.label}: HTTP ${res.status}`);
+  }
+
+  return [
+    {
+      ...base,
+      endpoint: candidates[candidates.length - 1].url,
+      status: "unreachable",
+      httpStatus: null,
+      latencyMs: null,
+      detail:
+        `Neither the current nor the previous UTC day's file could be read (${attempts.join("; ")}). ` +
+        `Both missing is a real outage — one missing is not.`,
+    },
+  ];
+}
+
 export async function probeCollectors(): Promise<CollectorProbe[]> {
-  const [probed, reddit, blueskySearch, ucdp] = await Promise.all([
+  const [probed, reddit, blueskySearch, ucdp, gpsjam] = await Promise.all([
     Promise.all(SPECS.map(probeOne)),
     redditProbe(),
     blueskySearchProbe(),
     ucdpProbe(),
+    gpsJamProbe(),
   ]);
-  return [...probed, reddit, blueskySearch, ucdp, ...unprobeable()];
+  return [...probed, reddit, blueskySearch, ucdp, ...gpsjam, ...unprobeable()];
 }
 
 export const collectorHealth = createServerFn({ method: "GET" })
