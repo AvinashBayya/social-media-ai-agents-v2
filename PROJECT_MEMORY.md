@@ -27,11 +27,38 @@
 
 ### Deployed state — 2026-08-17 ✅ LATEST
 
-`sentinel-web` runs **`v27`** / revision **`sentinel-web--0000025`**
+`sentinel-web` runs **`v29`** / revision **`sentinel-web--0000027`**
 (`Healthy`, `RunningAtMaxScale`, 1 replica), at
 `sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`.
-**1169 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **210 core exports verified**.
-GitHub `origin/main` is at `091d497`.
+**1177 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **210 core exports verified**.
+GitHub `origin/main` is at `2f1c83d`.
+
+> **⚠️ `bun:sqlite` STRIKES A SECOND TIME — read before adding ANY cross-module import
+> under `src/utils/` (2026-08-17).** `osint/job-store-sqlite.ts` statically imports
+> `bun:sqlite`. The `typeof window`-guarded `require()` in `jobs.ts` stopped it reaching the
+> *browser* bundle (the earlier regression below), but it still leaves a **static edge** that
+> Rollup can follow. **The runtime image is `node:22-alpine` running
+> `node .output/server/index.mjs`** — Node cannot load a `bun:` specifier at all.
+>
+> What happened: `collector-health.ts` imported one function from `gps-interference.ts`. That
+> made `gps-interference.ts` a module shared by two chunks, so Rollup hoisted it into a common
+> SSR chunk which transitively reached `job-store-sqlite.ts`. Every `collectorHealth` call then
+> answered **HTTP 500 / `ERR_UNSUPPORTED_ESM_URL_SCHEME`** and `/crawlers` did not render at
+> all — shipped as v28.
+>
+> **`bun test` and `tsc --noEmit` were clean the entire time. This defect exists only in the
+> bundle.** And the first local reproduction *passed*, because `.output` was stale from before
+> the change — **`bun run build` before every local repro of a deploy bug**, or the run proves
+> nothing.
+>
+> Fix pattern: put the shared symbol in a **leaf module with zero imports**
+> (`src/utils/gpsjam-url.ts`). A module with no imports cannot drag anything into a shared
+> chunk. Do NOT solve it by duplicating the value — that is what caused the original bug.
+> Asserted by `tests/collector-health-gpsjam.test.ts`.
+>
+> The underlying landmine is unfixed: `job-store-sqlite.ts` remains statically reachable from
+> `jobs.ts`, so any future re-chunking can re-expose it on the Node runtime. A real fix is
+> either a dynamic `await import()` or dropping `bun:sqlite` for a Node-compatible driver.
 
 **Verified live after deploy, not just from `provisioningState`:** `/`, `/crawlers`, `/settings`
 and `/recon` all return 200 over HTTPS, and — the check that actually matters for this release —
