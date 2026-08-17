@@ -34,6 +34,21 @@
 
 import { createServerFn } from "@tanstack/react-start";
 import { recordCredentialUse, resolveCredential, normaliseHost } from "./credential-vault";
+import { z } from "zod";
+
+import {
+  actorPattern,
+  allowedHosts,
+  bareHost,
+  boundedArray,
+  boundedText,
+  hashtagPattern,
+  hostAllowlist,
+  isBlockedHost,
+  positiveLimit,
+  telegramChannelPattern,
+  validate,
+} from "./validation";
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -1725,6 +1740,80 @@ export const MASTODON_INSTANCES = ["mastodon.social", "mstdn.social"] as const;
 /** First-choice instance; the rest are fallbacks an analyst can select. */
 export const MASTODON_DEFAULT_INSTANCE = MASTODON_INSTANCES[0];
 
+/**
+ * Public fediverse hosts the server is willing to reach.
+ *
+ * DELIBERATELY WIDER THAN `MASTODON_INSTANCES`, and the distinction carries
+ * weight. `MASTODON_INSTANCES` is what the UI OFFERS — instances verified to
+ * serve anonymous hashtag timelines, so presenting one to an analyst is not a
+ * promise the app cannot keep. This list is what the SSRF guard PERMITS, and it
+ * must also cover instances that legitimately refuse us: `infosec.exchange`
+ * answers 422 to anonymous readers, and reporting that refusal as a refusal —
+ * rather than as an empty timeline — is a distinction this collector is built
+ * around. Blocking it at the guard would make that code path unreachable and
+ * turn a real analytical outcome into a policy message.
+ *
+ * The guard exists to stop `169.254.169.254`, `127.0.0.1:3000` and
+ * `sentinel-web.internal`. It is not here to shrink the fediverse.
+ */
+export const MASTODON_ALLOWED_HOSTS = [
+  ...MASTODON_INSTANCES,
+  "infosec.exchange",
+  "fosstodon.org",
+  "mas.to",
+  "mastodon.online",
+  "mastodon.world",
+] as const;
+
+/**
+ * Resolve a caller-supplied instance to a host we are willing to fetch from.
+ *
+ * ── SSRF, CLOSED 2026-08-17 ───────────────────────────────────────────────
+ *
+ * The previous sanitiser was `.replace(/^https?:\/\//,"").replace(/\/.*$/,"")`,
+ * which strips a scheme and a path and NOTHING ELSE. A port survived, `@`
+ * userinfo survived, and the value was never checked against any list. Since
+ * `socialMastodon` is an unauthenticated server function,
+ * `instance: "169.254.169.254:80"` produced a server-side GET against the Azure
+ * instance metadata endpoint, with the response body — or the upstream status,
+ * via the error text — returned to the caller. That is a read-SSRF primitive
+ * against the container's own ports and the Container Apps internal VNet.
+ *
+ * This lives here rather than only in the server function's schema because
+ * `fetchMastodonTag` is EXPORTED: other server-side code can call it directly
+ * and would bypass a validator attached to the RPC wrapper.
+ *
+ * `MASTODON_EXTRA_INSTANCES` widens the list without a code change — federation
+ * means the useful set is deployment-specific — but entries from it are still
+ * refused if they name a private, loopback or link-local address.
+ */
+export function resolveMastodonHost(instance: string | undefined | null): string {
+  // A blank or absent instance means "unspecified", not "invalid" — an omitted
+  // dropdown value should collect from the default, not raise. The previous
+  // behaviour rejected a blank string; substituting the default is the more
+  // useful reading and is what the tests pin.
+  const host = bareHost(instance ?? "") || MASTODON_DEFAULT_INSTANCE;
+
+  if (isBlockedHost(host)) {
+    throw new SocialUnavailableError(
+      `"${host}" is a private, loopback or link-local address. A Mastodon instance is a ` +
+        `public host, so this request was refused rather than sent.`,
+      "mastodon",
+    );
+  }
+
+  if (!allowedHosts(MASTODON_ALLOWED_HOSTS, "MASTODON_EXTRA_INSTANCES").has(host)) {
+    throw new SocialUnavailableError(
+      `"${host}" is not a permitted Mastodon instance. Set MASTODON_EXTRA_INSTANCES to add ` +
+        `it. No request was sent — this is a policy refusal, not a failed fetch, and says ` +
+        `nothing about whether the tag has posts there.`,
+      "mastodon",
+    );
+  }
+
+  return host;
+}
+
 /** Mastodon status fields we read. Everything is optional upstream. */
 export interface MastodonStatus {
   id?: unknown;
@@ -1786,12 +1875,8 @@ export async function fetchMastodonTag(
   const clean = tag.trim().replace(/^#/, "");
   if (!clean) throw new SocialUnavailableError("No hashtag supplied for Mastodon.", "mastodon");
 
-  const host = instance
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "");
-  if (!host) throw new SocialUnavailableError("No Mastodon instance supplied.", "mastodon");
+  // Allowlisted rather than merely tidied — see resolveMastodonHost.
+  const host = resolveMastodonHost(instance);
 
   const key = `mastodon:${host}:${clean}:${limit}`;
   const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
@@ -1930,10 +2015,12 @@ export async function fetchMastodonSearch(
 
   // The token is only valid on the instance that issued it, so the credential's
   // own host wins over any instance the caller passed.
-  const host =
-    normaliseHost(cred.identifier ?? "") ||
-    normaliseHost(instance ?? "") ||
-    MASTODON_DEFAULT_INSTANCE;
+  //
+  // Both are allowlisted, and the credential's own host is NOT exempt: it is
+  // operator-supplied data read back from the vault, and this request carries
+  // `authorization: Bearer <secret>`. An unvetted host here does not merely
+  // fetch from somewhere unexpected, it HANDS THE TOKEN OVER.
+  const host = resolveMastodonHost(cred.identifier || instance || undefined);
 
   const key = `mastodon-search:${host}:${q}:${limit}`;
   const hit = cacheGet<SocialPost[]>(genericCache, key, FEED_TTL_MS);
@@ -2154,40 +2241,88 @@ export const PLATFORM_NOTES: PlatformNote[] = [
   },
 ];
 
+// ─── Input contracts ───────────────────────────────────────────────────────
+//
+// These replace identity validators — `(d: { actor: string }) => d` — which are
+// TypeScript annotations erased at build time. Until this section existed, every
+// handler below received whatever JSON the caller posted.
+//
+// The caps are not arbitrary: `SEARCH_MAX` is well past any real analyst query
+// but short of a payload sized to burn upstream quota, and `ACTORS_MAX` matches
+// the 25-actor ceiling `getProfiles` batches against, so an oversized request is
+// refused rather than silently fanned out.
+
+const SEARCH_MAX = 512;
+const ACTORS_MAX = 100;
+
+export const SocialActorInput = z.object({ actor: actorPattern });
+export const SocialActorsInput = z.object({
+  actors: boundedArray(actorPattern, ACTORS_MAX, "actors"),
+});
+export const SocialAuthorFeedInput = z.object({
+  actor: actorPattern,
+  limit: positiveLimit(100).optional(),
+});
+export const SocialRedditInput = z.object({
+  query: boundedText(SEARCH_MAX, "query"),
+  limit: positiveLimit(100).optional(),
+});
+export const SocialTelegramInput = z.object({
+  channel: telegramChannelPattern,
+  limit: positiveLimit(100).optional(),
+});
+export const SocialMastodonInput = z.object({
+  tag: hashtagPattern,
+  // Allowlisted at the schema AND inside fetchMastodonTag — see
+  // resolveMastodonHost for why one layer is not enough.
+  instance: hostAllowlist(MASTODON_ALLOWED_HOSTS, "MASTODON_EXTRA_INSTANCES").optional(),
+  limit: positiveLimit(40).optional(),
+});
+export const SocialBlueskySearchInput = z.object({
+  query: boundedText(SEARCH_MAX, "query"),
+  limit: positiveLimit(100).optional(),
+  sort: z.enum(["top", "latest"]).optional(),
+});
+export const SocialMastodonSearchInput = z.object({
+  query: boundedText(SEARCH_MAX, "query"),
+  instance: hostAllowlist(MASTODON_ALLOWED_HOSTS, "MASTODON_EXTRA_INSTANCES").optional(),
+  limit: positiveLimit(40).optional(),
+});
+
 // ─── Server-function wrappers ──────────────────────────────────────────────
 
 export const socialProfile = createServerFn({ method: "POST" })
-  .validator((d: { actor: string }) => d)
+  .validator(validate(SocialActorInput, "SocialActorInput"))
   .handler(async ({ data }) => fetchProfile(data.actor));
 
 export const socialProfiles = createServerFn({ method: "POST" })
-  .validator((d: { actors: string[] }) => d)
+  .validator(validate(SocialActorsInput, "SocialActorsInput"))
   .handler(async ({ data }) => fetchProfiles(data.actors));
 
 export const socialAuthorFeed = createServerFn({ method: "POST" })
-  .validator((d: { actor: string; limit?: number }) => d)
+  .validator(validate(SocialAuthorFeedInput, "SocialAuthorFeedInput"))
   .handler(async ({ data }) => fetchAuthorFeed(data.actor, data.limit));
 
 export const socialReddit = createServerFn({ method: "POST" })
-  .validator((d: { query: string; limit?: number }) => d)
+  .validator(validate(SocialRedditInput, "SocialRedditInput"))
   .handler(async ({ data }) => fetchRedditSearch(data.query, data.limit));
 
 export const socialTelegram = createServerFn({ method: "POST" })
-  .validator((d: { channel: string; limit?: number }) => d)
+  .validator(validate(SocialTelegramInput, "SocialTelegramInput"))
   .handler(async ({ data }) => fetchTelegramChannel(data.channel, data.limit));
 
 export const socialMastodon = createServerFn({ method: "POST" })
-  .validator((d: { tag: string; instance?: string; limit?: number }) => d)
+  .validator(validate(SocialMastodonInput, "SocialMastodonInput"))
   .handler(async ({ data }) => fetchMastodonTag(data.tag, data.instance, data.limit));
 
 /** Historical Bluesky keyword search. Requires a configured app password. */
 export const socialBlueskySearch = createServerFn({ method: "POST" })
-  .validator((d: { query: string; limit?: number; sort?: BlueskySearchSort }) => d)
+  .validator(validate(SocialBlueskySearchInput, "SocialBlueskySearchInput"))
   .handler(async ({ data }) => fetchBlueskySearch(data.query, data.limit, data.sort));
 
 /** Full-text Mastodon status search. Requires a configured instance token. */
 export const socialMastodonSearch = createServerFn({ method: "POST" })
-  .validator((d: { query: string; instance?: string; limit?: number }) => d)
+  .validator(validate(SocialMastodonSearchInput, "SocialMastodonSearchInput"))
   .handler(async ({ data }) => fetchMastodonSearch(data.query, data.instance, data.limit));
 
 /**

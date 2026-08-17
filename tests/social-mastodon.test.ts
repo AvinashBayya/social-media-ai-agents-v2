@@ -96,7 +96,10 @@ describe("mastodonLinks", () => {
 describe("fetchMastodonTag — refusal is never an empty timeline", () => {
   test("422 says the instance declined, and names an alternative", async () => {
     stubFetch(() => new Response("nope", { status: 422 }));
-    const err = await fetchMastodonTag("osint", "infosec.exchange").catch((e) => e);
+    // Must be an instance the host allowlist permits, or the SSRF guard refuses
+    // it before any request and this exercises the guard, not the 422 path.
+    // MASTODON_DEFAULT_INSTANCE is permitted by construction.
+    const err = await fetchMastodonTag("osint", MASTODON_DEFAULT_INSTANCE).catch((e) => e);
     expect(err).toBeInstanceOf(SocialUnavailableError);
     expect(err.message).toMatch(/does not serve this timeline to unauthenticated readers/i);
     expect(err.message).toMatch(/not the same as the hashtag being unused/i);
@@ -122,15 +125,94 @@ describe("fetchMastodonTag — refusal is never an empty timeline", () => {
     await expect(fetchMastodonTag("osint")).rejects.toThrow(/unexpected payload/i);
   });
 
-  test("an empty tag or instance is rejected before any request", async () => {
+  test("an empty tag is rejected before any request", async () => {
     let called = false;
     stubFetch(() => {
       called = true;
       return jsonRes([]);
     });
     await expect(fetchMastodonTag("  ")).rejects.toThrow(/no hashtag/i);
-    await expect(fetchMastodonTag("osint", "  ")).rejects.toThrow(/no mastodon instance/i);
     expect(called).toBe(false);
+  });
+
+  test("an omitted instance collects from the default", async () => {
+    /*
+     * Deliberately NOT asserting what an explicitly blank instance does.
+     * `resolveMastodonHost` changed that behaviour twice on 2026-08-17 — blank
+     * rejected, then defaulted, then rejected again — while the SSRF allowlist
+     * was being tuned. Pinning it here would make this file fail on a decision
+     * that is still being made in social.ts, and the useful invariants (an
+     * omitted instance works; a private or unlisted host is refused before any
+     * request) hold under every version of it.
+     */
+    let requested = "";
+    stubFetch((url: string) => {
+      requested = url;
+      return jsonRes([]);
+    });
+    await expect(fetchMastodonTag("osint")).resolves.toEqual([]);
+    expect(requested).toContain(MASTODON_DEFAULT_INSTANCE);
+  });
+
+  /**
+   * The allowlist is an SSRF guard, not a preference.
+   *
+   * `instance` reaches a server-side fetch, so before the host check an
+   * `instance` of "169.254.169.254:80" produced a GET against the Azure instance
+   * metadata endpoint with the response surfaced to the caller. These pin that
+   * the refusal happens BEFORE the request, which is the whole point — a guard
+   * that refuses after the fetch has already leaked the response.
+   */
+  describe("host allowlist — refused before any request is sent", () => {
+    test("a host outside the allowlist is refused", async () => {
+      let called = false;
+      stubFetch(() => {
+        called = true;
+        return jsonRes([]);
+      });
+      const err = await fetchMastodonTag("osint", "not-a-real-instance.example").catch((e) => e);
+      expect(err).toBeInstanceOf(SocialUnavailableError);
+      expect(err.message).toMatch(/not a permitted Mastodon instance/i);
+      expect(err.message).toMatch(/policy refusal, not a failed fetch/i);
+      // The refusal must say nothing about whether the tag has posts there —
+      // "we will not ask" and "there is nothing there" are different claims.
+      expect(err.message).toMatch(/says nothing about whether the tag has posts/i);
+      expect(called).toBe(false);
+    });
+
+    test("a link-local address is refused as private, not merely unlisted", async () => {
+      let called = false;
+      stubFetch(() => {
+        called = true;
+        return jsonRes([]);
+      });
+      const err = await fetchMastodonTag("osint", "169.254.169.254:80").catch((e) => e);
+      expect(err).toBeInstanceOf(SocialUnavailableError);
+      expect(err.message).toMatch(/private, loopback or link-local/i);
+      expect(called).toBe(false);
+    });
+
+    test("loopback is refused", async () => {
+      let called = false;
+      stubFetch(() => {
+        called = true;
+        return jsonRes([]);
+      });
+      await expect(fetchMastodonTag("osint", "127.0.0.1")).rejects.toThrow(
+        /private, loopback or link-local/i,
+      );
+      expect(called).toBe(false);
+    });
+
+    test("every instance the module advertises is itself permitted", async () => {
+      // A guard that refused the module's own advertised instances would break
+      // collection outright, and would look like those instances being down.
+      for (const host of MASTODON_INSTANCES) {
+        stubFetch(() => jsonRes([]));
+        await expect(fetchMastodonTag("osint", host)).resolves.toEqual([]);
+      }
+      expect(MASTODON_INSTANCES).toContain(MASTODON_DEFAULT_INSTANCE);
+    });
   });
 
   test("an empty timeline resolves to [] — the one case that legitimately does", async () => {

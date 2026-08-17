@@ -40,6 +40,23 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
+import { z } from "zod";
+
+import { NotAuthorisedError } from "./operational-error";
+import {
+  configuredOperatorToken,
+  operatorTokenFrom,
+  requireOperator,
+} from "./operator-auth";
+import {
+  boundedArray,
+  boundedText,
+  identifierLike,
+  isBlockedHost,
+  jsonSizeLimit,
+  validate,
+} from "./validation";
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -770,6 +787,28 @@ export async function verifyProviderCredential(
 
       case "mastodon": {
         const host = normaliseHost(identifier) || "mastodon.social";
+
+        // SSRF WITH CREDENTIAL FORWARDING — closed 2026-08-17.
+        //
+        // `identifier` is operator-supplied and reaches here from the vault, so
+        // an attacker who could write the vault (which, before this change, any
+        // unauthenticated caller could) could set it to a host they controlled
+        // and then call `verifyCredential` to have THIS SERVER deliver the
+        // stored Bearer token to them. `normaliseHost` strips a scheme and a
+        // path and nothing else, so a port survived intact.
+        //
+        // The write path is now gated and schema-validated, but this check is
+        // the one that matters: it sits next to the `fetch` that carries the
+        // secret, so it holds even if a future caller reaches this function by
+        // some other route.
+        if (isBlockedHost(host)) {
+          return rejected(
+            providerId,
+            `Refusing to send a credential to "${host}" — it is a private, loopback or ` +
+              `link-local address. A Mastodon instance is a public host.`,
+          );
+        }
+
         const res = await fetch(`https://${host}/api/v1/accounts/verify_credentials`, {
           headers: { authorization: `Bearer ${secret}`, accept: "application/json" },
           signal: signal(),
@@ -1010,6 +1049,70 @@ export async function githubHeaders(): Promise<Record<string, string>> {
   return { ...base, authorization: `Bearer ${cred.secret}` };
 }
 
+// ─── Input contracts ───────────────────────────────────────────────────────
+//
+// Every server function below previously carried an identity validator —
+// `(d: {provider: string; id: string}) => d` — which is a TypeScript annotation
+// and nothing more. At runtime the handlers received whatever JSON the caller
+// posted. These schemas are the first point at which that stopped being true.
+
+/** A provider id must exist in the registry; an unknown one is not a new provider. */
+export const ProviderIdInput = z
+  .string()
+  .trim()
+  .min(1, "provider is required")
+  .max(64, "provider must be 64 characters or fewer")
+  .refine((v) => CREDENTIAL_PROVIDERS.some((p) => p.id === v), "unknown credential provider");
+
+export const CredentialRefInput = z.object({
+  provider: ProviderIdInput,
+  id: identifierLike(128, "credential id"),
+});
+export type CredentialRef = z.infer<typeof CredentialRefInput>;
+
+export const AddCredentialInput = z.object({
+  provider: ProviderIdInput,
+  label: boundedText(120, "label").optional().or(z.literal("")),
+  // `username` doubles as the INSTANCE HOST for Mastodon, which is why it is
+  // length-bounded and character-restricted rather than free text: an
+  // unrestricted value here is the input half of the SSRF chain that ends in
+  // `verifyProviderCredential` sending a Bearer token to a chosen host.
+  username: z
+    .string()
+    .trim()
+    .max(256, "identifier must be 256 characters or fewer")
+    .regex(/^[\w.\-:@/]*$/u, "identifier contains characters that are not permitted"),
+  secret: boundedText(4096, "secret"),
+});
+export type AddCredentialData = z.infer<typeof AddCredentialInput>;
+
+/** One stored row, as accepted from a whole-file write. */
+export const CredentialEntryInput = z.object({
+  id: identifierLike(128, "id").optional(),
+  provider: z.string().trim().max(64).optional(),
+  label: z.string().trim().max(120).optional(),
+  username: z.string().trim().max(256).optional(),
+  secret: z.string().max(4096).optional(),
+  status: z.string().trim().max(32).optional(),
+  lastUsed: z.string().max(64).nullable().optional(),
+  verifiedAt: z.string().max(64).nullable().optional(),
+  verifyDetail: z.string().max(1024).nullable().optional(),
+  createdAt: z.string().max(64).nullable().optional(),
+});
+
+/**
+ * A whole-vault write.
+ *
+ * `z.record` keyed on the provider id closes two holes at once: an arbitrary
+ * top-level key can no longer be planted in the file, and `__proto__` /
+ * `constructor` cannot reach the object literal that `normaliseVault` builds.
+ * The size cap makes an unbounded write a rejection rather than a
+ * filesystem-fill primitive.
+ */
+export const VaultFileInput = z
+  .record(ProviderIdInput, boundedArray(CredentialEntryInput, 50, "entries"))
+  .superRefine(jsonSizeLimit(131_072));
+
 // ─── Server functions ──────────────────────────────────────────────────────
 
 /** Registry only — static, no secrets, safe to render before any vault read. */
@@ -1030,8 +1133,9 @@ export const listCredentials = createServerFn({ method: "GET" })
   });
 
 export const addCredential = createServerFn({ method: "POST" })
-  .validator((d: { provider: string; label: string; username: string; secret: string }) => d)
+  .validator(validate(AddCredentialInput, "AddCredentialInput"))
   .handler(async ({ data }) => {
+    requireOperator("addCredential", operatorTokenFrom(getRequestHeaders()));
     const def = providerById(data.provider);
     if (!def) {
       throw new CredentialVaultError(
@@ -1069,8 +1173,9 @@ export const addCredential = createServerFn({ method: "POST" })
   });
 
 export const deleteCredential = createServerFn({ method: "POST" })
-  .validator((d: { provider: string; id: string }) => d)
+  .validator(validate(CredentialRefInput, "DeleteCredentialInput"))
   .handler(async ({ data }) => {
+    requireOperator("deleteCredential", operatorTokenFrom(getRequestHeaders()));
     const vault = await readVault();
     const before = (vault[data.provider] ?? []).length;
     vault[data.provider] = (vault[data.provider] ?? []).filter((e) => e.id !== data.id);
@@ -1089,12 +1194,31 @@ export const deleteCredential = createServerFn({ method: "POST" })
  *
  * Deliberately separate from `listCredentials` so that rendering the page does
  * not ship every key to the browser — revealing is an explicit act against one
- * entry, and the call is the natural place to hang an audit log when this grows
- * real auth.
+ * entry.
+ *
+ * ── FAILS CLOSED, 2026-08-17 ──────────────────────────────────────────────
+ *
+ * This is the ONE path that hands a stored secret back over HTTP, and until
+ * now it did so unauthenticated: one crafted POST per entry emptied the vault.
+ * It now requires `SENTINEL_OPERATOR_TOKEN`, and — unlike the write paths —
+ * refuses outright when no token is configured rather than warning and
+ * continuing.
+ *
+ * The asymmetry is deliberate. Writing a credential is how the app gets
+ * configured, so blocking it on an unset env var would brick the Settings page.
+ * READING one back is never necessary: `secretTail` already shows the last four
+ * characters, which is how every real secret manager lets an operator tell two
+ * keys apart. A capability with no legitimate need and a total-compromise
+ * failure mode should not be available by default.
  */
 export const revealCredential = createServerFn({ method: "POST" })
-  .validator((d: { provider: string; id: string }) => d)
+  .validator(validate(CredentialRefInput, "RevealCredentialInput"))
   .handler(async ({ data }) => {
+    if (!configuredOperatorToken()) {
+      throw new NotAuthorisedError("revealCredential");
+    }
+    requireOperator("revealCredential", operatorTokenFrom(getRequestHeaders()));
+
     const vault = await readVault();
     const entry = (vault[data.provider] ?? []).find((e) => e.id === data.id);
     if (!entry) {
@@ -1113,8 +1237,14 @@ export const revealCredential = createServerFn({ method: "POST" })
  * a timestamp, rather than a claim made at save time.
  */
 export const verifyCredential = createServerFn({ method: "POST" })
-  .validator((d: { provider: string; id: string }) => d)
+  .validator(validate(CredentialRefInput, "VerifyCredentialInput"))
   .handler(async ({ data }) => {
+    // Gated because this is the trigger half of the token-forwarding chain:
+    // it makes the server send a stored secret to the host recorded in the
+    // entry's `identifier`. The host is separately allowlisted in
+    // `verifyProviderCredential`, but an attacker who can fire this at will
+    // still gets a free credential-validity oracle.
+    requireOperator("verifyCredential", operatorTokenFrom(getRequestHeaders()));
     const vault = await readVault();
     const entry = (vault[data.provider] ?? []).find((e) => e.id === data.id);
     if (!entry) {

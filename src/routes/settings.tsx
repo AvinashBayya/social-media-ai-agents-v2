@@ -41,14 +41,20 @@ import {
   readVault,
   writeVault,
   normaliseVault,
+  redactVault,
+  VaultFileInput,
   type CredentialStatus,
   type ProviderCategory,
   type RedactedCredentialEntry,
   type CapabilityRow,
 } from "@/utils/credential-vault";
+import { getRequestHeaders } from "@tanstack/react-start/server";
+import { operatorTokenFrom, requireOperator, vaultAuthStatus } from "@/utils/operator-auth";
+import { validate } from "@/utils/validation";
 import {
   Key,
   Shield,
+  ShieldCheck,
   Plus,
   Trash2,
   Eye,
@@ -70,20 +76,47 @@ import {
  * route and other trees may import them. Both now go through the vault module
  * so there is one store and one set of rules, rather than two writers racing
  * over the same file.
+ *
+ * ── SECURITY FIX, 2026-08-17 ──────────────────────────────────────────────
+ *
+ * `getCredentials` returned `readVault()` VERBATIM: every `secret` field, in
+ * cleartext, from an unauthenticated GET server function. The route gate is
+ * the disclosed client-side demo session (see __root.tsx), so a single crafted
+ * request dumped the whole vault — Bluesky app password, Reddit client secret,
+ * YouTube API key, UCDP token, GitHub token, Mastodon access token and both
+ * LLM keys. CSRF middleware does not help: it stops a cross-site browser
+ * request, not `curl`.
+ *
+ * It now redacts, exactly as its sibling `listCredentials` always did. The
+ * signature is unchanged and it remains exported, so no caller breaks — but no
+ * secret crosses this boundary any more. **No server function in this codebase
+ * returns a stored secret. Do not add one back.**
+ *
+ * `saveCredentials` validated with `(data: any) => data` and replaced the WHOLE
+ * vault file, so any caller could overwrite or wipe every stored credential —
+ * and, worse, could plant a `mastodon` entry whose `username` was a host they
+ * controlled, then call `verifyCredential` to have the server deliver the
+ * stored Bearer token to it. It is now schema-validated and operator-gated.
  */
-export const getCredentials = createServerFn({ method: "GET" }).handler(async () => readVault());
+export const getCredentials = createServerFn({ method: "GET" }).handler(async () =>
+  redactVault(await readVault()),
+);
 
 export const saveCredentials = createServerFn({ method: "POST" })
-  .validator((data: any) => data)
+  .validator(validate(VaultFileInput, "SaveCredentialsInput"))
   .handler(async ({ data }) => {
-    try {
-      await writeVault(normaliseVault(data));
-      return { success: true };
-    } catch (err: any) {
-      console.error(err);
-      return { success: false, error: err?.message ?? String(err) };
-    }
+    requireOperator("saveCredentials", operatorTokenFrom(getRequestHeaders()));
+    // Throws rather than returning `{success:false, error: err.message}` — that
+    // shape shipped raw fs errors (absolute container paths, errno) to the
+    // browser. The error middleware sanitises the throw and logs the detail.
+    await writeVault(normaliseVault(data));
+    return { success: true };
   });
+
+/** Whether credential mutations are authenticated. Rendered on this page. */
+export const credentialAuthStatus = createServerFn({ method: "GET" }).handler(async () =>
+  vaultAuthStatus(),
+);
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings — Sentinel AI" }] }),
@@ -136,6 +169,13 @@ function SettingsPage() {
   /** Revealed secrets, fetched one at a time and held only in component state. */
   const [revealed, setRevealed] = useState<Record<string, string>>({});
 
+  /** Measured server-side. Null until the first load completes. */
+  const [authStatus, setAuthStatus] = useState<{
+    mode: "protected" | "unprotected";
+    detail: string;
+    envVar: string;
+  } | null>(null);
+
   const [providerId, setProviderId] = useState(CREDENTIAL_PROVIDERS[0].id);
   const [label, setLabel] = useState("");
   const [username, setUsername] = useState("");
@@ -155,6 +195,17 @@ function SettingsPage() {
       setVault(data.vault ?? {});
       setCapabilities(data.capabilities ?? []);
       setStoragePath(data.storagePath ?? "./data/credentials.json");
+      // Whether credential writes are authenticated is a property of the
+      // deployment, not of this page, so it is measured on the server and
+      // reported — never asserted here. An operator must be able to see that
+      // the vault is open without reading the container's env.
+      setAuthStatus(
+        (await credentialAuthStatus()) as unknown as {
+          mode: "protected" | "unprotected";
+          detail: string;
+          envVar: string;
+        },
+      );
       // A revealed secret belongs to the row that was on screen; drop them all
       // on reload rather than risk showing a stale value against a new row.
       setRevealed({});
@@ -291,6 +342,43 @@ function SettingsPage() {
               {loadError} — this is a read failure, not an empty vault. Nothing below should be
               taken as the configured state until it resolves.
             </span>
+          </div>
+        </div>
+      )}
+
+      {/*
+        Whether credential mutations are authenticated is measured on the server
+        and stated here. An open vault that looks closed is the failure mode this
+        banner exists to prevent — the same reasoning as the status badges below,
+        which report a measurement rather than a claim made at save time.
+      */}
+      {authStatus && (
+        <div
+          className={`mb-4 flex items-start gap-2 rounded-md border p-3 text-xs ${
+            authStatus.mode === "protected"
+              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-500"
+              : "border-amber-500/30 bg-amber-500/5 text-amber-500"
+          }`}
+        >
+          {authStatus.mode === "protected" ? (
+            <ShieldCheck className="mt-0.5 size-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          )}
+          <div>
+            <span className="font-semibold">
+              {authStatus.mode === "protected"
+                ? "Credential writes are authenticated."
+                : "Credential writes are NOT authenticated."}
+            </span>{" "}
+            <span className="text-muted-foreground">{authStatus.detail}</span>
+            {authStatus.mode === "unprotected" && (
+              <span className="text-muted-foreground">
+                {" "}
+                Revealing a stored secret is disabled entirely until{" "}
+                <code className="rounded bg-muted px-1">{authStatus.envVar}</code> is set.
+              </span>
+            )}
           </div>
         </div>
       )}

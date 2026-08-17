@@ -85,6 +85,64 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **Security hardening, phases 0–1 (2026-08-17)**: The analytical layer was mature; the
+  security layer did not exist. No authentication, no rate limiting, and **52 server functions
+  carrying 52 identity validators** — `.validator((d: { text: string }) => d)` is a TypeScript
+  annotation, erased at build, so every handler received whatever JSON the caller posted.
+
+  **P0-1 — unauthenticated credential dump.** `getCredentials` (`routes/settings.tsx`) was a GET
+  server function with no validator that returned `readVault()` VERBATIM: every stored secret in
+  cleartext to anyone who could reach the origin — Bluesky app password, Reddit client secret,
+  YouTube API key, UCDP token, GitHub token, Mastodon access token, both LLM keys. Its sibling
+  `listCredentials` had always redacted; this one never did. The route gate is the disclosed
+  client-side demo session, and **CSRF middleware does not help — it stops a cross-site browser
+  request, not `curl`.** Now redacts. `saveCredentials` (validator: `(data: any) => data`,
+  replaced the WHOLE file) is schema-validated and gated. **No server function returns a stored
+  secret any more; do not add one back.**
+
+  **P0-2 — SSRF with credential forwarding.** `fetchMastodonTag` sanitised a caller-supplied
+  instance with `.replace(/^https?:\/\//,"").replace(/\/.*$/,"")` — scheme and path only, so a
+  port, `@` userinfo and query survived — and never checked the allowlist declared 60 lines
+  above it. `instance: "169.254.169.254:80"` produced a server-side GET against Azure instance
+  metadata with the body returned to the caller. Chained with P0-1 it was worse: write a
+  `mastodon` entry whose identifier is your host, call `verifyCredential`, and the server
+  delivers the stored **Bearer token** to you. Allowlisted in `resolveMastodonHost` **and** in
+  `verifyProviderCredential` next to the fetch that carries the secret — `fetchMastodonTag` is
+  exported, so a validator on the RPC wrapper alone is bypassable.
+  `MASTODON_ALLOWED_HOSTS` is deliberately WIDER than `MASTODON_INSTANCES`: the former is what
+  the guard permits, the latter what the UI offers. `infosec.exchange` 422s anonymous readers,
+  and reporting that refusal *as a refusal* is a distinction this collector is built around.
+
+  **Security headers**, applied in `server.ts` to every response including error pages: nosniff,
+  `X-Frame-Options: DENY`, referrer policy, permissions policy, COOP/CORP, HSTS on HTTPS only
+  (read from `x-forwarded-proto` — behind ACA ingress the container connection is plain HTTP, so
+  `url.protocol` would suppress HSTS on every production response). **CSP ships `report-only`**;
+  a policy tight enough to matter can white-screen the app and that shows up only in a browser.
+  `CSP_MODE=enforce` flips it after a clean console check.
+
+  **New pure modules**, all `bun test`-able with injected clocks and env: `validation.ts`
+  (`validate()` wraps a schema as a plain function — a BARE zod schema hits TanStack's Standard
+  Schema branch and throws `JSON.stringify(issues)` at the browser), `rate-limit.ts`,
+  `client-ip.ts`, `rate-limit-tiers.ts`, `operational-error.ts`, `operator-auth.ts`,
+  `security-headers.ts`.
+
+  **883 tests passing** (+164), `tsc --noEmit` clean, 204 exports verified, `bun run build` green.
+
+  **Two traps recorded for whoever continues this:**
+  1. **`errorMiddleware` in `start.ts` is DEAD CODE for all 52 server functions.**
+     `server-functions-handler.js` catches their throws itself and *returns* a 500 Response, so
+     by the time `await next()` resolves there is nothing to catch. Worse, TanStack serialises
+     the thrown error with seroval at full feature level — which copies **`stack`**, absolute
+     container paths included, to the browser. Sanitising must happen in a global
+     `functionMiddleware`, which is the only layer that sees the throw first.
+  2. **`getRequestIP({ xForwardedFor: true })` must not be used for rate limiting.** Verified at
+     `h3/dist/h3.mjs:651` it takes `split(",")[0]` — the LEFTMOST, entirely caller-supplied,
+     entry. Keyed on that, an attacker rotates the header per request and also evicts real
+     offenders from the bounded map. `client-ip.ts` counts hops from the RIGHT.
+
+  **Still outstanding:** rate-limit middleware is written but NOT yet wired into `start.ts`;
+  error sanitisation not yet wired; ~40 identity validators still to migrate.
+
 - [x] **Six reported defects + a fresh fabrication sweep (2026-08-17)**: A user driving the UI
   reported six broken features. **Two of the six premises were factually wrong**, and a sweep
   with the three CLAUDE.md greps found **seven further live fabrications nobody had reported**
