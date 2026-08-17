@@ -274,8 +274,10 @@ export const RECON_NOTES: Gap[] = [
     requires: "An inbound HTTP transform endpoint that the Maltego desktop client can call.",
     limitation:
       "This TanStack Start version exposes no `createServerFileRoute`, so no inbound endpoint " +
-      "can exist. A CSV export of the app's own graph is the tractable direction and is not " +
-      "built yet.",
+      "can exist. The tractable direction instead — a CSV export of the app's own graph, one row " +
+      "per relationship, entity types best-effort-mapped to Maltego's stock palette — is built: " +
+      '"Export to Maltego" on /graph. It is a one-shot hand-off, not a live transform, so this ' +
+      "capability gap is still real, just narrower than it was.",
   },
   {
     capability: "Automated Google dork execution",

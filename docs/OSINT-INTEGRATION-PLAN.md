@@ -1476,6 +1476,90 @@ to Maltego" produces a real download (`sentinel-maltego_google_com.csv`,
 **Full suite:** 877/877 passing (13 new), `tsc --noEmit` clean, 151 core
 exports unchanged, `fabrication-check` unchanged at 81, lint clean.
 
+## 21i. Jina Reader collector (P3), and a research pass that ruled out most of a link list (2026-08-17)
+
+The user supplied a list of tools to evaluate (Agent-Reach, Jina Reader,
+Jina API, Exa, yt-dlp, GitHub CLI/API, Twitter CLI, OpenCLI, a Facebook
+OpenCLI adapter, a LinkedIn scraper MCP, feedparser). Checked each against
+this project's own hard constraints before building anything:
+
+- **Agent-Reach, OpenCLI, the Facebook adapter, Twitter CLI** — real,
+  checked directly (not assumed): Agent-Reach's own docs split its platform
+  support into API-based (GitHub, YouTube, RSS, Exa, web) versus
+  cookie/logged-in-browser-session scraping for Twitter, Reddit, Facebook,
+  Instagram, XiaoHongShu — and its own README states "using Cookie login on
+  platforms carries account suspension risk... must use dedicated test
+  accounts, not main accounts," i.e. its authors already know this breaches
+  those platforms' terms. The Facebook OpenCLI adapter doc confirmed
+  directly: browser automation on a real logged-in session, no ToS
+  disclaimer at all. This is exactly the pattern this project already ruled
+  out for Instagram/Facebook and never re-added for Twitter/X (no free API
+  tier since 2023) — not built, for the same reason already on record.
+- **LinkedIn Scraper MCP** — the given repo URL 404s. Does not exist (or is
+  private/renamed); not something to guess at building against.
+- **GitHub CLI/API/Tokens** — already integrated (`GITHUB_TOKEN`,
+  `githubHeaders()` in `news.tsx`). Nothing new to add.
+- **feedparser** — the project already has working RSS handling in
+  TypeScript (`rss-source.ts` + `rss-parser`, with a real bug fix already
+  applied for Google News's redirect-URL problem). A Python feedparser
+  would duplicate this through an unnecessary `ai-service/` hop.
+- **yt-dlp** — YouTube metadata/captions already work keylessly via the
+  InnerTube endpoint (`credential-vault.ts`'s youtube entry); yt-dlp would
+  mean subprocessing a Python CLI, the same shape of problem already
+  avoided for theHarvester.
+- **Exa** — genuine recurring free tier ($20 signup + $10/month), but needs
+  a real API key not available in this session. Deferred, not built.
+
+**Jina Reader (`r.jina.ai`) was the one clearly worth building**: free,
+genuinely keyless (20 req/min unauthenticated), and fills a real gap —
+article bodies collected elsewhere in this app are whatever a feed snippet
+gives, often a few sentences. New
+`src/utils/collectors/external/jina-reader.ts`. Response shape verified
+against the LIVE endpoint before writing any parsing code (not from
+documentation alone) — `curl https://r.jina.ai/<url> -H "Accept:
+application/json"` against a real page, a real 404 target, and a malformed
+URL. That verification surfaced a real correctness trap: **Jina Reader's
+own HTTP status is not the target page's HTTP status** — a target
+returning a genuine 404 still comes back as an outer HTTP 200 from
+`r.jina.ai`, with the target's real status embedded at `data.httpStatus`
+and a `data.warning` string. Treating the outer 200 alone as "the page
+loaded fine" would have silently presented fallback/cached content as the
+live page; `normalize()` checks `data.httpStatus` explicitly and surfaces
+an honest warning instead. A genuinely malformed URL fails at the outer
+HTTP layer (422) — that path is a real `execute()` failure, not a warning.
+
+Produces an `article` entity plus a `domain` entity (from the URL's
+hostname) linked `HOSTED_ON`, one evidence item carrying the full extracted
+text. Registered in `external/index.ts` alongside theHarvester/SpiderFoot,
+but differs from both: it's never `unavailable` for a missing-config
+reason since there's no worker to configure. 18 new tests, fixture bodies
+copied verbatim from the real `curl` responses recorded while building
+this, not invented shapes.
+
+**Verified three ways, the third being the one that actually matters**:
+unit tests against real-shaped stubbed responses; a direct live network
+call (`bun -e`) against `https://en.wikipedia.org/wiki/OSINT` — real
+21,907-character extraction, correct title, correct entity/relationship
+structure; and a full live browser run on `/recon` (investigate a URL
+target → `jina-reader` offered as a candidate → run → `completed` status →
+real `article`/`domain` entities rendered). First attempt at the browser
+check used the wrong input (the global nav search bar, not `/recon`'s own
+target field) and silently investigated a stale `google.com` target
+instead — caught because the plan panel correctly did NOT offer
+`jina-reader` for a domain-type target, which is exactly right collector
+behavior; fixed the test script's locator, re-ran, confirmed correctly.
+
+**A stale claim caught along the way, unrelated to this feature**: the
+"what external recon does not do, and why" panel on `/recon`
+(`recon-sources.ts`'s `RECON_NOTES`) still said a Maltego CSV export "is
+not built yet" — which became false the moment §21h shipped. Fixed the
+sentence to reflect that it's built, while keeping the (still true)
+explanation of why a *live* Maltego transform endpoint remains impossible
+in this TanStack Start version.
+
+**Full suite:** 895/895 passing (18 new), `tsc --noEmit` clean, 151 core
+exports unchanged, `fabrication-check` unchanged at 81, lint clean.
+
 ------------------------------------------------------------------------
 
 # 22. Unified Investigation UI
@@ -2175,6 +2259,16 @@ were explicitly deferred rather than guessed at.
 regression (broken client bundle, every route crashed) it caught and fixed
 in the process.
 
+**Additional, beyond this list's original five items**: a user-supplied
+tool list was researched 2026-08-17 (see §21i) — most of it (cookie-based
+platform scraping, a nonexistent LinkedIn scraper repo, tools this project
+already has equivalents for) was ruled out or deferred with a reason on
+record; **Jina Reader (`src/utils/collectors/external/jina-reader.ts`)**
+was genuinely new and buildable, and is now a registered external
+collector for full-text extraction from `url` targets. Exa (semantic
+search) was evaluated and deferred — real free tier, but needs an API key
+this session doesn't have.
+
 ------------------------------------------------------------------------
 
 # 32. Definition of Done
@@ -2437,8 +2531,9 @@ for detail and all six live verification runs against real free APIs.
 -   [ ] Nmap (not attempted — active scanning needs explicit per-target authorization gating, and no owned target to verify against here)
 -   [x] Maltego export (2026-08-17 — `toMaltegoCsv()`, "Export to Maltego" on `/graph`, see §21h)
 -   [ ] Full Shodan API (not attempted — needs a real API key to build and verify against)
--   [ ] Additional public social sources (not attempted — needs real ToS/compliance research first)
+-   [ ] Additional public social sources (not attempted — needs real ToS/compliance research first; a user-supplied tool list researched 2026-08-17 was mostly cookie-based logged-in-browser scraping and ruled out on that basis — see §21i)
 -   [ ] Continuous monitoring (not attempted — no bounded task defined yet)
+-   [x] Jina Reader web-content collector (2026-08-17 — not one of this list's original five, added from the same §21i research pass; free, keyless, `url`-target full-text extraction)
 
 ------------------------------------------------------------------------
 
