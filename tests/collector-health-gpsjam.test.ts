@@ -90,6 +90,30 @@ describe("collector-health does not drift from the GPSJam collector", () => {
     expect(HEALTH_CODE).toContain("yesterday");
   });
 
+  test("the shared url module stays dependency-free", () => {
+    // THE INVARIANT THAT KEEPS THE FIX SAFE. Importing gpsJamUrlForDate from
+    // gps-interference.ts directly made that file a module shared by two
+    // chunks, so Rollup hoisted it into a common SSR chunk that transitively
+    // reached osint/job-store-sqlite.ts and its `bun:sqlite` import. The
+    // runtime image is node:22-alpine, which cannot load a `bun:` specifier, so
+    // every collectorHealth call answered HTTP 500 with
+    // ERR_UNSUPPORTED_ESM_URL_SCHEME — reproduced against the production build
+    // and seen live on v28.
+    //
+    // A leaf module with zero imports cannot drag anything into a shared chunk.
+    // Add an import to gpsjam-url.ts and that protection is gone.
+    const urlSrc = readFileSync(
+      join(import.meta.dir, "..", "src", "utils", "gpsjam-url.ts"),
+      "utf-8",
+    );
+    const urlCode = urlSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(urlCode).not.toMatch(/^\s*import\s/m);
+    expect(urlCode).not.toMatch(/\brequire\s*\(/);
+    // And collector-health must reach it directly, not via gps-interference.
+    expect(HEALTH_CODE).toContain('from "./gpsjam-url"');
+    expect(HEALTH_CODE).not.toContain('from "./gps-interference"');
+  });
+
   test("the comment stripper does not eat code containing a URL", () => {
     // Guards the guard: a naive `//` strip truncates at every `https://`, which
     // would make the assertions above vacuously pass on an empty string.

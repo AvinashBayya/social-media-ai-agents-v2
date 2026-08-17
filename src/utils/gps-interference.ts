@@ -105,11 +105,17 @@ export function interferencePct(row: GpsJamCsvRow): number | null {
   return (row.bad / total) * 100;
 }
 
-/** GPSJam publishes one file per UTC day, named by date. */
-export function gpsJamUrlForDate(date: Date): string {
-  const iso = date.toISOString().slice(0, 10);
-  return `https://gpsjam.org/data/${iso}-h3_4.csv`;
-}
+/**
+ * GPSJam publishes one file per UTC day, named by date.
+ *
+ * The implementation moved to the dependency-free leaf module `gpsjam-url.ts`
+ * so `collector-health.ts` can share it without importing this file — see that
+ * file's header for the `bun:sqlite` chunking hazard that forced the split.
+ * Re-exported here so every existing caller and test keeps working unchanged.
+ */
+import { gpsJamUrlForDate } from "./gpsjam-url";
+
+export { gpsJamUrlForDate };
 
 /**
  * Raised when the feed cannot be read. Thrown rather than swallowed, so the UI

@@ -24,9 +24,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { resolveRedditCredentials } from "./social";
 import { resolveCredential } from "./credential-vault";
-// The collector's OWN url builder. Imported rather than re-derived so the probe
-// and the collector cannot drift apart — that drift is what this bug was.
-import { gpsJamUrlForDate } from "./gps-interference";
+// The collector's OWN url builder, from a dependency-free leaf module. Shared
+// rather than re-derived so the probe and collector cannot drift apart; a leaf
+// module because importing gps-interference.ts directly dragged bun:sqlite into
+// this chunk and 500d the whole probe. See gpsjam-url.ts.
+
+import { gpsJamUrlForDate } from "./gpsjam-url";
 
 export type ProbeStatus =
   /** Answered as expected. */
