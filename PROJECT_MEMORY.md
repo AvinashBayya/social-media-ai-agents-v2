@@ -129,6 +129,31 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
   Full defect list and file:line references: [`ANTIGRAVITY_TASK.md`](file:///d:/social_media_research/ANTIGRAVITY_TASK.md).
 
+  **Three gaps in that work, found and closed the same day.** All three were invisible to every
+  gate, which is the blind spot the original fabrications exploited.
+
+  1. **The watchlist fabrication survived on existing browsers.** Correcting
+     `DEFAULT_WATCHLISTS` to `riskScore: null` was not enough: `getWatchlists()` writes the
+     defaults to storage on first ever load and reads from storage forever after, and it had
+     **no version key**. A fresh browser got `null`; every browser that had already opened the
+     app — a demo machine included — kept the seeded 78 and 42 and went on rendering "78/100"
+     on `/subjects` and `/watchlists`. Fixed with `sentinel_watchlists_version = "2"` and an
+     exported `migrateWatchlists`, which **migrates rather than wipes** and nulls **any**
+     non-null score, not just the two seeded ids — nothing has ever computed one, so every
+     non-null value in storage is by definition invented. **If a fabricated figure is removed
+     from a seed constant, check whether that seed was already persisted.**
+  2. **`entityKey` briefly existed twice** — `graph-build.ts` and `entities.tsx`. It carries a
+     load-bearing fix (the old class covered Devanagari–Sinhala only, so every Urdu name was
+     stripped to an empty key and merged into one node), and `/graph` and `/entities` must key
+     identically or one corpus yields two different merged sets. `entities.tsx` now imports it.
+  3. **`layoutGraph` had no node cap.** O(n² × 300) synchronously inside a `useMemo`; at 400+
+     entities the tab froze. `iterationsFor(n)` now holds the work product roughly constant
+     (300 iterations for small graphs, floor of 60), and `buildEntityGraph` caps at
+     `DEFAULT_MAX_NODES = 250`, highest-degree first. **The cap is reported on screen** —
+     `EntityGraph` carries `totalNodes` and `truncated`, and `/graph` renders "top 250 of 613".
+     A silently truncated graph reads as the whole picture, which is the same defect class in a
+     new costume.
+
 
 - [x] **Collection-policy model + media ingestion + manual capture (2026-08-12)**: Implemented the ingestion-legality matrix across Module 3. `PLATFORM_NOTES.available` was a **boolean**, rendered as a green "collected" / red "unavailable" badge, which could not express "YouTube text yes, frames no" (so YouTube had no row at all), could not express "Meta not automated but an analyst may capture", and gave a ToS prohibition and a missing free tier the same red badge. New `src/utils/collection-policy.ts` adds four modes (`automated` / `partial` / `manual-only` / `none`), five legal bases, and the ingestion route per source; `policyId` links each platform note to its row, additively — `available` is untouched because three test files assert on it. **Media ingestion closed** for Bluesky, Reddit, Telegram and Mastodon (`SocialPost.media`, five extractors), with an Analyse hand-off into Module 4 via a new validated `?url=` param on `/images`. **Manual capture path** added for Meta (`manual-evidence.ts` + `components/manual-capture-panel.tsx`), writing to the same `sentinel_evidence` store `/vault` reads. **YouTube comments** added via the official Data API v3, behind a new `youtube` vault provider with a live verification probe. **625 unit tests passing** (+58), **`tsc --noEmit` clean**, **151 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see below.
 - [x] **Browser-audit remediation, Phases 1, 2 and 4 (2026-08-12)**: Six agents drove all 31 routes in real Chrome, clicking every control on a fresh page load. The finding: the analytical core is sound and the presentation layer was not.

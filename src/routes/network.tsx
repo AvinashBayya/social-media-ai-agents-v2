@@ -180,7 +180,7 @@ function Page() {
    */
   const coordinationGraph = useMemo(() => {
     if (!clusters || clusters.length === 0) {
-      return { nodes: [], edges: [], articleCount: 0 };
+      return { nodes: [], edges: [], articleCount: 0, totalNodes: 0, truncated: false };
     }
     return buildEntityGraph(
       clusters.map((c) => ({

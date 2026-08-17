@@ -247,19 +247,23 @@ export function buildEntityGraph(
   }
 
   let keptNodes = [...nodes.values()].filter((n) => n.articleIds.length >= minArticles);
-  const keptIds = new Set(keptNodes.map((n) => n.id));
-  const keptEdges = [...edges.values()].filter(
+  let keptIds = new Set(keptNodes.map((n) => n.id));
+  let keptEdges = [...edges.values()].filter(
     (e) => e.weight >= minWeight && keptIds.has(e.a) && keptIds.has(e.b),
   );
 
   // Degree over the edges that survived filtering, so the number on screen
   // always matches the lines drawn. The old page said "Connections 12" above ten
   // edges.
-  const degrees = new Map<string, number>();
-  for (const e of keptEdges) {
-    degrees.set(e.a, (degrees.get(e.a) ?? 0) + 1);
-    degrees.set(e.b, (degrees.get(e.b) ?? 0) + 1);
-  }
+  const degreeOver = (list: GraphEdge[]) => {
+    const d = new Map<string, number>();
+    for (const e of list) {
+      d.set(e.a, (d.get(e.a) ?? 0) + 1);
+      d.set(e.b, (d.get(e.b) ?? 0) + 1);
+    }
+    return d;
+  };
+  const degrees = degreeOver(keptEdges);
   keptNodes = keptNodes.map((n) => ({ ...n, degree: degrees.get(n.id) ?? 0 }));
 
   keptNodes.sort(
@@ -269,7 +273,22 @@ export function buildEntityGraph(
       x.label.localeCompare(y.label),
   );
 
-  return { nodes: keptNodes, edges: keptEdges, articleCount };
+  const totalNodes = keptNodes.length;
+  const cap = Math.max(1, opts.maxNodes ?? DEFAULT_MAX_NODES);
+  const truncated = totalNodes > cap;
+  if (truncated) {
+    // Highest degree first — already sorted above — so the cap keeps the most
+    // connected entities rather than an arbitrary slice.
+    keptNodes = keptNodes.slice(0, cap);
+    keptIds = new Set(keptNodes.map((n) => n.id));
+    keptEdges = keptEdges.filter((e) => keptIds.has(e.a) && keptIds.has(e.b));
+    // Degree must be recomputed against the edges that remain, or a kept node
+    // would report connections to entities no longer in the graph.
+    const after = degreeOver(keptEdges);
+    keptNodes = keptNodes.map((n) => ({ ...n, degree: after.get(n.id) ?? 0 }));
+  }
+
+  return { nodes: keptNodes, edges: keptEdges, articleCount, totalNodes, truncated };
 }
 
 /** Degree per node id, computed from the edge list. */
@@ -332,8 +351,29 @@ export interface PositionedNode extends GraphNode {
 export interface LayoutOptions {
   width?: number;
   height?: number;
+  /** Explicit override. Omit to use the adaptive schedule below. */
   iterations?: number;
   padding?: number;
+}
+
+/** Iterations for a small graph, and the work budget that replaces it as n grows. */
+const BASE_ITERATIONS = 300;
+const MIN_ITERATIONS = 60;
+/**
+ * Roughly the number of pair-interactions we are willing to spend.
+ *
+ * The loop is O(n^2) per iteration and runs synchronously inside a `useMemo` on
+ * the render thread, so cost grows as n^2 * iterations. Holding that product
+ * near-constant keeps a 400-node graph from freezing the tab, at the cost of a
+ * looser layout — which is the right trade, because a frozen tab shows nothing
+ * at all. Small graphs are unaffected and keep the full 300 iterations.
+ */
+const ITERATION_BUDGET = 300 * 60 * 60;
+
+export function iterationsFor(n: number): number {
+  if (n <= 1) return 0;
+  const adaptive = Math.round(ITERATION_BUDGET / (n * n));
+  return Math.max(MIN_ITERATIONS, Math.min(BASE_ITERATIONS, adaptive));
 }
 
 /**
@@ -352,9 +392,11 @@ export function layoutGraph(graph: EntityGraph, opts: LayoutOptions = {}): Posit
   const width = opts.width ?? 800;
   const height = opts.height ?? 560;
   const padding = opts.padding ?? 48;
-  const iterations = opts.iterations ?? 300;
   const n = graph.nodes.length;
   if (n === 0) return [];
+  // Adaptive by default: the same 300 iterations for a small graph, fewer as n
+  // grows, so the O(n^2 * iterations) cost stays bounded on the render thread.
+  const iterations = opts.iterations ?? iterationsFor(n);
 
   const cx = width / 2;
   const cy = height / 2;

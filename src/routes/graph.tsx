@@ -283,6 +283,15 @@ function Page() {
             Extraction is one model call per article and is never run automatically — on a free
             tier, extracting a whole corpus on page load would exhaust it. {COOCCURRENCE_CAVEAT}
           </p>
+
+          {graph.truncated && (
+            <p className="mt-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[11px] leading-relaxed text-[#F59E0B]">
+              Showing the {graph.nodes.length} most-connected of{" "}
+              <strong>{graph.totalNodes}</strong> entities extracted. The rest are not drawn —
+              the layout is O(n²) and runs on this thread, so an uncapped graph would freeze the
+              tab. This is a display limit, not the extent of what was found.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -455,8 +464,15 @@ function Page() {
               {positioned.length > 0 && (
                 <div className="absolute bottom-3 right-3 flex items-center gap-2">
                   <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
-                    {graph.nodes.length} nodes · {graph.edges.length} edges · zoom{" "}
-                    {zoom.toFixed(1)}x
+                    {/*
+                      A truncated graph that does not say so reads as the whole
+                      picture — the analyst would conclude the corpus names this
+                      many entities when it names more.
+                    */}
+                    {graph.truncated
+                      ? `top ${graph.nodes.length} of ${graph.totalNodes} entities`
+                      : `${graph.nodes.length} nodes`}{" "}
+                    · {graph.edges.length} edges · zoom {zoom.toFixed(1)}x
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
                     Reset view

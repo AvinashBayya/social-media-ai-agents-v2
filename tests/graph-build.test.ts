@@ -3,6 +3,7 @@ import {
   buildEntityGraph,
   degreeCentrality,
   entityKey,
+  iterationsFor,
   layoutGraph,
   normaliseEntityType,
   shortestPath,
@@ -175,7 +176,13 @@ describe("buildEntityGraph", () => {
 
   test("an empty corpus produces an empty graph, not a placeholder", () => {
     const g = buildEntityGraph([]);
-    expect(g).toEqual({ nodes: [], edges: [], articleCount: 0 });
+    expect(g).toEqual({
+      nodes: [],
+      edges: [],
+      articleCount: 0,
+      totalNodes: 0,
+      truncated: false,
+    });
   });
 
   test("minWeight drops weak edges and recomputes degree", () => {
@@ -312,6 +319,80 @@ describe("layoutGraph", () => {
       for (let j = i + 1; j < out.length; j += 1) {
         expect(Math.hypot(out[i].x - out[j].x, out[i].y - out[j].y)).toBeGreaterThan(1);
       }
+    }
+  });
+});
+
+describe("node cap and adaptive layout cost", () => {
+  /** One article naming `n` entities, so every pair co-occurs. */
+  function densCorpus(n: number) {
+    return [
+      article(
+        "a1",
+        "Reuters",
+        Array.from({ length: n }, (_, i) => [`Entity ${i}`, "PERSON"] as [string, string]),
+      ),
+    ];
+  }
+
+  test("an uncapped-size corpus is truncated, and says so", () => {
+    // A silently truncated graph reads as the whole picture: the analyst would
+    // conclude the corpus names 250 entities when it names 400.
+    const g = buildEntityGraph(densCorpus(400));
+    expect(g.truncated).toBe(true);
+    expect(g.totalNodes).toBe(400);
+    expect(g.nodes).toHaveLength(250);
+  });
+
+  test("a small graph is not truncated and reports its real total", () => {
+    const g = buildEntityGraph(densCorpus(10));
+    expect(g.truncated).toBe(false);
+    expect(g.totalNodes).toBe(10);
+    expect(g.nodes).toHaveLength(10);
+  });
+
+  test("the cap keeps the most-connected entities", () => {
+    const g = buildEntityGraph(densCorpus(60), { maxNodes: 5 });
+    const degrees = g.nodes.map((n) => n.degree);
+    expect(degrees).toEqual([...degrees].sort((a, b) => b - a));
+  });
+
+  test("degree after truncation counts only edges that remain", () => {
+    // A kept node must not report connections to entities no longer in the
+    // graph — that is the "Connections 12 above ten edges" defect returning.
+    const g = buildEntityGraph(densCorpus(60), { maxNodes: 5 });
+    for (const n of g.nodes) {
+      const drawn = g.edges.filter((e) => e.a === n.id || e.b === n.id).length;
+      expect(n.degree).toBe(drawn);
+    }
+    const ids = new Set(g.nodes.map((n) => n.id));
+    for (const e of g.edges) {
+      expect(ids.has(e.a)).toBe(true);
+      expect(ids.has(e.b)).toBe(true);
+    }
+  });
+
+  test("iterations fall as the graph grows, so O(n^2 * iterations) stays bounded", () => {
+    // The loop runs synchronously inside a useMemo on the render thread.
+    expect(iterationsFor(20)).toBe(300);
+    expect(iterationsFor(400)).toBeLessThan(300);
+    expect(iterationsFor(400)).toBeGreaterThanOrEqual(60);
+    expect(iterationsFor(2000)).toBe(60);
+    // Never negative or zero for a real graph.
+    expect(iterationsFor(2)).toBeGreaterThan(0);
+    expect(iterationsFor(1)).toBe(0);
+  });
+
+  test("a capped graph still lays out deterministically and inside the viewport", () => {
+    const g = buildEntityGraph(densCorpus(400));
+    const a = layoutGraph(g, { width: 800, height: 560, padding: 48 });
+    const b = layoutGraph(g, { width: 800, height: 560, padding: 48 });
+    expect(a.map((n) => [n.x, n.y])).toEqual(b.map((n) => [n.x, n.y]));
+    for (const n of a) {
+      expect(n.x).toBeGreaterThanOrEqual(48);
+      expect(n.x).toBeLessThanOrEqual(752);
+      expect(n.y).toBeGreaterThanOrEqual(48);
+      expect(n.y).toBeLessThanOrEqual(512);
     }
   });
 });
