@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import pytesseract
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 
 from app.config import settings
 from app.detect import detect as run_detect
@@ -22,6 +22,7 @@ from app.schemas import (
     StatsResult,
     TranslateRequest,
 )
+from app.stats import stats as request_stats
 
 logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger("ai-service")
@@ -36,6 +37,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Sentinel AI Service", lifespan=lifespan)
 register_exception_handlers(app)
+
+
+@app.middleware("http")
+async def count_ai_calls(request: Request, call_next):
+    """Counts every request reaching an `/ai/*` endpoint, success or failure
+    — a call that 501s or 503s is still real demand on the endpoint, and
+    excluding failures would undercount exactly the paths most worth
+    knowing about. `/ai/stats` itself is excluded so checking the counter
+    does not change the thing it reports.
+
+    Recorded in `finally`, not after a plain `await call_next(...)`: Starlette
+    routes an `Exception`-registered handler (`unhandled_error_handler` in
+    `errors.py`, which is what actually catches e.g. a missing-Tesseract
+    failure) into `ServerErrorMiddleware`, which sits OUTSIDE this custom
+    middleware — so for that specific path `call_next()` raises rather than
+    returning, and code placed after a bare `await call_next(...)` never
+    runs. Confirmed live: a 500 from `/ai/ocr` silently failed to increment
+    the counter under the naive version of this middleware; a `NotImplementedYet`
+    501 from `/ai/faces` did not, because `AIServiceError` subclasses are
+    registered as ordinary handlers and stay inside `ExceptionMiddleware`,
+    which IS inside this layer. `finally` counts both cases the same way."""
+    counted = request.url.path.startswith("/ai/") and request.url.path != "/ai/stats"
+    try:
+        return await call_next(request)
+    finally:
+        if counted:
+            request_stats.record_call()
 
 
 @app.get("/health", response_model=HealthResult)
@@ -136,4 +164,4 @@ async def chat(body: ChatRequest):
 
 @app.get("/ai/stats", response_model=StatsResult)
 async def stats() -> StatsResult:
-    return StatsResult(calls=0, cache_hits=0)
+    return StatsResult(**request_stats.snapshot())

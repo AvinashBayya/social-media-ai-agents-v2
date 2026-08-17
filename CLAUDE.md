@@ -358,10 +358,42 @@ pHash, C2PA, timestamp-mismatch) and 4 of 5 `test_skeleton.py` cases passed. OCR
 tests fail here for exactly the reasons `ai-service/README`-equivalent docs say they would:
 no `tesseract` binary on PATH, and no `torch`/`transformers`/vendored model weights installed
 (deliberately not installed by default — `torch` alone is a multi-GB download and this
-environment has no GPU to exercise it on). **Not independently re-verified**: the OCR and
-detect code paths themselves, beyond the prior session's own testing record. Install
+environment has no GPU to exercise it on). Install
 `transformers`+`torch` and a system Tesseract, vendor the Grounding DINO weights per
 `ai-service/requirements.txt`'s comments, and re-run `pytest` before trusting those paths.
+
+**Re-verified 2026-08-17, at the live HTTP layer this time, not just `pytest`.** No Docker
+needed for this — `ai-service`'s own `.venv` runs `uvicorn app.main:app` directly. `/health`
+honestly reports every model's real state. `/ai/forensics` against three real fixtures:
+correct EXIF/GPS/software-tag extraction, correct null-EXIF handling with the "not evidence
+of manipulation" note intact, correct `timestamp_mismatch: true` on a real 2019-capture/
+2026-modified fixture. `/ai/phash/compare`: Hamming 2 (`near_duplicate: true`) on a resized/
+recompressed near-duplicate pair, Hamming 36 (`false`) on a genuinely different pair — real
+discrimination, not a fixed number. `/ai/ocr` and `/ai/detect` fail exactly as documented
+above (`TesseractNotFoundError` / 500, `ModelNotLoadedError` / 503) — clean, typed JSON error
+envelopes, no crash. `/ai/faces` (a stub) correctly 501s. **Still not verified**: the OCR/
+detect code paths' actual behavior *when* Tesseract/weights are present — this confirms they
+fail safely without those, not that they produce correct results with them.
+
+**`/ai/stats` was a hardcoded placeholder (`{"calls": 0, "cache_hits": 0}`, always) —
+fixed 2026-08-17.** Found while re-verifying live: real requests plainly happened and it
+still reported zero. `cache_hits` stays honestly 0 — there is no caching layer anywhere in
+`ai-service` yet, so a cache genuinely cannot have been hit, a different situation from
+`calls` reporting a false zero for something real. New `app/stats.py` (an in-process
+counter, mirroring `loaders.py`'s `registry` singleton pattern — lost on restart by design,
+not a durable log) plus HTTP middleware in `main.py` that counts every `/ai/*` request.
+**A real bug surfaced while testing the fix itself**: a naive `record_call()` placed after
+a bare `await call_next(request)` silently failed to count requests that hit the *generic*
+exception handler (e.g. `TesseractNotFoundError` from `/ai/ocr`) while correctly counting
+ones hitting a registered `AIServiceError` subclass (e.g. `/ai/faces`'s 501) — because
+Starlette routes an `Exception`-class handler into `ServerErrorMiddleware`, which sits
+*outside* custom `@app.middleware` layers, so `call_next()` raises rather than returning
+for exactly that path. Fixed with `try/finally`. Confirmed live via curl against a real
+running server across every response type (200/500/503), and covered by two new
+`test_skeleton.py` cases (one of which reproduces the exact bug in an environment with no
+system Tesseract, using `raise_server_exceptions=False` since `TestClient`'s default
+re-raises server exceptions into the test process rather than returning them, unlike a
+real server).
 
 **Known, real, unfixed limitation** (locked in as a characterization test,
 `test_detect_known_limitation_confident_false_positive_on_absent_object`): Grounding DINO
