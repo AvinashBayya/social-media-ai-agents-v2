@@ -1408,6 +1408,74 @@ they're actually created) for the new optional local store, matching
 exports unchanged, `fabrication-check` unchanged at 81, lint clean on every
 touched/new file with zero new findings.
 
+## 21h. Maltego export (P3), and a severe regression found and fixed along the way (2026-08-17)
+
+**Maltego export**, plan §31 P3. New `src/utils/maltego-export.ts`:
+`toMaltegoCsv(entities, relationships)`, a pure function producing an edge-
+list CSV — one row per relationship, source and target entity columns each
+side, plus a standalone row (target columns empty) for any entity with no
+relationship at all, so nothing is silently dropped for being unconnected.
+Matches how Maltego's own "Import Graph from Table" CSV wizard actually
+builds a graph (two entity columns per row, linked on import), not a
+Maltego-specific binary format.
+
+`MALTEGO_TYPE: Record<EntityType, string>` maps Sentinel's 13 entity types
+to Maltego's stock palette (`maltego.Domain`, `maltego.EmailAddress`, …) —
+**best-effort, built from general knowledge of that palette, not verified
+against a live Maltego installation**, the same honest caveat this project
+already carries for the theHarvester/SpiderFoot response parsers (no live
+instance to check exact strings against, stated explicitly rather than
+implied as verified). The mitigation is structural, not just a caveat: every
+row also carries the real Sentinel type in its own column, so if a guessed
+`mtType` is wrong, the analyst can still remap the column correctly during
+Maltego's own import wizard — nothing is lost to a wrong guess. 13 new
+tests, including CSV-escaping (commas/quotes/newlines), the empty-graph
+case, and confirming an unscored relationship renders "not scored," never a
+fabricated percentage. Wired into `/graph` as an "Export to Maltego" button
+next to Clear, exporting the FULL entity/relationship set (not the
+on-screen-capped `MAX_GRAPH_NODES` subset) via the same blob-download
+pattern already used on `/reports`.
+
+**A real, severe regression was caught while browser-testing this — not a
+new bug in this feature, a live one in §21g's persistent-job-storage work,
+undetected until now because that work was only ever verified with
+`bun test`/`tsc`/direct `bun -e` singleton checks, never an actual browser
+click-through.** `jobs.ts` statically imported `SqliteJobStore` from
+`job-store-sqlite.ts` at module top level. `jobs.ts` is also imported by
+client route components (`/recon`, for its `createServerFn` wrappers) —
+TanStack Start only strips code inside a `.handler()` body from the client
+bundle, not arbitrary top-level module code, so that static import pulled
+`bun:sqlite` into the *browser* bundle too. `bun:sqlite` has no browser
+shim; Vite's externalized stub for it throws the moment the ESM import
+binding is evaluated, not just on use. The result: every route crashed
+client-side with "This page didn't load" — confirmed via the dev server log
+(`Cannot access "bun:sqlite.Database" in client code`) the first time this
+session actually launched a browser against the app. **This means the code
+pushed to `origin/main` in the immediately preceding session was broken for
+real browser use the whole time, undetected because nothing in that
+session's verification actually opened a browser.**
+
+Fixed in `jobs.ts`: `SqliteJobStore` is no longer statically imported or
+re-exported (only its *type* is, which TypeScript erases entirely — zero
+runtime import). `createJobStore()` now guards on `typeof window ===
+"undefined"` first (this codebase's existing client/server split
+convention, `credential-vault.ts`/`graph-store.ts`) and loads
+`SqliteJobStore` via `require()` — a real Bun global, chosen deliberately
+over a guarded dynamic `import()` because a static analyzer can still
+discover and bundle a reachable `import()` call even inside a dead branch,
+where `require()` stays outside the client bundle's static import graph
+entirely. Verified fixed two ways: a direct `bun -e` check against the real
+`jobStore` singleton (both `JOB_STORE_PATH` set and unset), and — the check
+that actually matters — a full live browser run: login → `/recon` → run a
+real investigation → "View in Graph" → `/graph` renders correctly → "Export
+to Maltego" produces a real download (`sentinel-maltego_google_com.csv`,
+15 entities, 10 relationships, real `RESOLVES_TO` rows with real DNS data)
+→ zero console errors. The `require()` itself needed one justified
+`eslint-disable` (`no-require-imports`), documented inline with the reason.
+
+**Full suite:** 877/877 passing (13 new), `tsc --noEmit` clean, 151 core
+exports unchanged, `fabrication-check` unchanged at 81, lint clean.
+
 ------------------------------------------------------------------------
 
 # 22. Unified Investigation UI
@@ -2096,12 +2164,16 @@ were explicitly deferred rather than guessed at.
 ## P3 --- Optional
 
 ``` text
-[ ] Nmap
-[ ] Maltego export
-[ ] Full Shodan API
-[ ] More social providers
-[ ] Continuous monitoring
+[ ] Nmap                   (not attempted — active scanning needs explicit per-target authorization gating this passive-only project hasn't built, and no owned target to verify against here)
+[x] Maltego export          (2026-08-17 — toMaltegoCsv(), edge-list CSV, "Export to Maltego" on /graph, see §21h)
+[ ] Full Shodan API         (not attempted — needs a real Shodan API key to build against and verify)
+[ ] More social providers   (not attempted — needs real ToS/compliance research before any code, same diligence Instagram/Facebook already got)
+[ ] Continuous monitoring   (not attempted — no bounded task defined yet)
 ```
+
+1 of 5 done — see §21h for what actually landed, and the severe live
+regression (broken client bundle, every route crashed) it caught and fixed
+in the process.
 
 ------------------------------------------------------------------------
 
@@ -2362,11 +2434,11 @@ for detail and all six live verification runs against real free APIs.
 
 ## P3 Optional
 
--   [ ] Nmap
--   [ ] Maltego export
--   [ ] Full Shodan API
--   [ ] Additional public social sources
--   [ ] Continuous monitoring
+-   [ ] Nmap (not attempted — active scanning needs explicit per-target authorization gating, and no owned target to verify against here)
+-   [x] Maltego export (2026-08-17 — `toMaltegoCsv()`, "Export to Maltego" on `/graph`, see §21h)
+-   [ ] Full Shodan API (not attempted — needs a real API key to build and verify against)
+-   [ ] Additional public social sources (not attempted — needs real ToS/compliance research first)
+-   [ ] Continuous monitoring (not attempted — no bounded task defined yet)
 
 ------------------------------------------------------------------------
 

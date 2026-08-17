@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/workspace-ui";
-import { Search, ZoomIn, ZoomOut, X, Trash2, Network, Waypoints } from "lucide-react";
+import { Search, ZoomIn, ZoomOut, X, Trash2, Network, Waypoints, Download } from "lucide-react";
 import { clearGraphSnapshot, readGraphSnapshot, type GraphSnapshot } from "@/utils/graph-store";
 import { layoutRadial, shortestPath } from "@/utils/graph-layout";
+import { toMaltegoCsv } from "@/utils/maltego-export";
 import type { EntityType } from "@/utils/collectors/result";
 
 export const Route = createFileRoute("/graph")({
@@ -138,6 +139,26 @@ function Page() {
     setSelectedId(null);
   };
 
+  /**
+   * Exports the FULL entity/relationship set, not `shownNodes`/`shownEdges`
+   * — the on-screen cap exists for DOM performance, not because the rest of
+   * the data is less real. Handing off to Maltego is exactly the case where
+   * the analyst wants everything, not just what fit on screen.
+   */
+  const exportMaltego = () => {
+    if (!snapshot) return;
+    const csv = toMaltegoCsv(entities, relationships);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sentinel-maltego_${snapshot.target.replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   if (!ready) return null;
 
   if (!snapshot || entities.length === 0) {
@@ -181,15 +202,27 @@ function Page() {
           {" · saved "}
           {new Date(snapshot.savedAt).toLocaleString()}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={clear}
-          className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-destructive"
-        >
-          <Trash2 className="size-3" />
-          Clear
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={exportMaltego}
+            title="Export every entity and relationship as a CSV Maltego's Import Graph from Table can read"
+            className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          >
+            <Download className="size-3" />
+            Export to Maltego
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clear}
+            className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="size-3" />
+            Clear
+          </Button>
+        </div>
       </div>
       <div className="grid gap-4 px-0 lg:grid-cols-[1fr_320px]">
         <Card className="mx-6">
