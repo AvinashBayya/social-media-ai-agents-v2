@@ -8,11 +8,22 @@
 
 ### Current Focus
 
-- **Task:** Browser-audit remediation complete. `ai-service/` (teammate's Python vision/forensics backend) merged in from `MERGE_PACKAGE/`; not yet wired to the frontend. OSINT collector framework (`docs/OSINT-INTEGRATION-PLAN.md`): **P1, P2-UI and P2-Reports all fully complete**; **P2-Production 2 of 6 done**; **P3 2 of 5 done, plus one extra item** — `/recon`'s "OSINT Investigation" panel covers investigation start, live progress, collector status, results, evidence inspection, manual collector selection, and now a free keyless full-text web-content collector (Jina Reader); `/graph` renders a real BFS-ring layout from a "View in Graph" hand-off and can export the full entity/relationship set to Maltego (CSV); `/reports` can include real OSINT evidence and relationships as citable, budget-aware sources; the OSINT job store is optionally SQLite-backed (`JOB_STORE_PATH`, in-memory unchanged by default) and `.env.example` documents every real env var. Browser-verified eight times, catching two real "built but never wired up" bugs, one real large-target scale issue, one real token-budget bug, one severe live regression, and one stale UI claim (see below and the milestone entries). Worker Dockerfile/docker-compose/Azure deployment/health checks/error monitoring remain unbuilt, deliberately — no Docker locally, no deployed theHarvester/SpiderFoot worker to containerize, and Azure changes touch real subscription resources not to be written blind. Nmap/full Shodan API/more social providers/continuous monitoring (P3) also unbuilt, each needing either authorization scaffolding, a real API key, or compliance research not yet done — see the 2026-08-17 tool-list research milestone for exactly what was checked and ruled out.
+- **Task:** Security phase 2 done — the rate limiter and error sanitiser are wired into a new
+  `functionMiddleware` chain in `src/start.ts` and verified in a real browser; limiter ships in
+  `observe` mode and needs `RATE_LIMIT_MODE=enforce` after confirming the client-key source reads
+  `forwarded` in production. Reddit remains uncollectable for want of credentials — an operator
+  action, not a code gap (`reddit.com/prefs/apps` → script app → `/settings` or env). Previously:
+  browser-audit remediation complete. `ai-service/` (teammate's Python vision/forensics backend) merged in from `MERGE_PACKAGE/`; not yet wired to the frontend. OSINT collector framework (`docs/OSINT-INTEGRATION-PLAN.md`): **P1, P2-UI and P2-Reports all fully complete**; **P2-Production 2 of 6 done**; **P3 2 of 5 done, plus one extra item** — `/recon`'s "OSINT Investigation" panel covers investigation start, live progress, collector status, results, evidence inspection, manual collector selection, and now a free keyless full-text web-content collector (Jina Reader); `/graph` renders a real BFS-ring layout from a "View in Graph" hand-off and can export the full entity/relationship set to Maltego (CSV); `/reports` can include real OSINT evidence and relationships as citable, budget-aware sources; the OSINT job store is optionally SQLite-backed (`JOB_STORE_PATH`, in-memory unchanged by default) and `.env.example` documents every real env var. Browser-verified eight times, catching two real "built but never wired up" bugs, one real large-target scale issue, one real token-budget bug, one severe live regression, and one stale UI claim (see below and the milestone entries). Worker Dockerfile/docker-compose/Azure deployment/health checks/error monitoring remain unbuilt, deliberately — no Docker locally, no deployed theHarvester/SpiderFoot worker to containerize, and Azure changes touch real subscription resources not to be written blind. Nmap/full Shodan API/more social providers/continuous monitoring (P3) also unbuilt, each needing either authorization scaffolding, a real API key, or compliance research not yet done — see the 2026-08-17 tool-list research milestone for exactly what was checked and ruled out.
 - **⚠️ Known-fixed regression, worth knowing the shape of:** the persistent-job-storage work (2026-08-14, previous session) statically imported `bun:sqlite` in a module client route components also import, which pulled it into the *browser* bundle and crashed every route ("This page didn't load") — undetected at the time because that session verified it only with `bun test`/`tsc`/direct `bun -e` checks, never an actual browser click-through. **That broken code was pushed to `origin/main`.** Found and fixed 2026-08-17 while browser-testing an unrelated feature (Maltego export) — first real browser launch since. Fixed by loading `SqliteJobStore` via a `typeof window`-guarded `require()` instead of a static import. See the milestone entry below for the exact mechanism. The lesson driving this note: **`bun test`/`tsc` passing is not evidence a route still loads in a browser** — this project's own established discipline, reconfirmed the hard way.
 - **⚠️ Do not build against these, if suggested again:** Agent-Reach, OpenCLI, any "Facebook/Twitter/Reddit/Instagram/LinkedIn via browser adapter" tool — checked directly 2026-08-17, all use cookie-exported/logged-in-browser-session scraping, which is exactly the ToS violation this project already ruled out for Instagram/Facebook and never re-added for Twitter/X. `ArjunPrakash09/linkedin-scraper-mcp` specifically 404s — doesn't exist.
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-17 — **895 unit tests passing** (`bun test`), **`tsc --noEmit` clean**, **151 core exports verified** (`bun scripts/check-exports.ts`), and eight live browser runs of `/recon`/`/graph`/`/reports` against real free APIs, including a 3,461-entity real-world stress case, an end-to-end manual-selection run, an end-to-end Graph hand-off run, an end-to-end Reports OSINT-inclusion run, an end-to-end Maltego-export run (also catching and confirming the fix for the client-bundle regression above), and an end-to-end Jina Reader run (real Wikipedia article investigated on `/recon`, real 21,907-character extraction confirmed both via direct `bun -e` and in-browser). `fabrication-check` fails at baseline with 81 pre-existing matches unrelated to any work this session (see `docs/OSINT-INTEGRATION-PLAN.md` §31 P0 Baseline note) — every file added this session is individually clean against it.
+- **Last Verified:** 2026-08-17 (later pass — security phase 2) — **1169 unit tests passing**
+  (`bun test`), **`tsc --noEmit` clean**, **210 core exports verified**, `bun run build` green,
+  and a live browser run proving the newly-wired rate limiter denies and reports honestly in both
+  observe and enforce. `bun run smoke` is **red at baseline** (0/31 routes, a pre-existing CSP
+  report-only console warning on every route) — verified by reverting `start.ts` to HEAD and
+  re-running; see the phase-2 milestone. Earlier same-day pass: **895 unit tests passing**,
+  **151 core exports verified**, and eight live browser runs of `/recon`/`/graph`/`/reports` against real free APIs, including a 3,461-entity real-world stress case, an end-to-end manual-selection run, an end-to-end Graph hand-off run, an end-to-end Reports OSINT-inclusion run, an end-to-end Maltego-export run (also catching and confirming the fix for the client-bundle regression above), and an end-to-end Jina Reader run (real Wikipedia article investigated on `/recon`, real 21,907-character extraction confirmed both via direct `bun -e` and in-browser). `fabrication-check` fails at baseline with 81 pre-existing matches unrelated to any work this session (see `docs/OSINT-INTEGRATION-PLAN.md` §31 P0 Baseline note) — every file added this session is individually clean against it.
 
 ### Deployed state — 2026-08-13 ✅ LATEST
 
@@ -87,6 +98,62 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **Security hardening, phase 2 — the limiter and sanitiser are actually wired (2026-08-17)**:
+  Phase 0–1 left two complete, pure, fully unit-tested modules that **nothing called**.
+  `rate-limit.ts` was imported only by `rate-limit-tiers.ts` (type-only) and its own test — no
+  inbound request was throttled. `operational-error.ts`'s `sanitiseError`/`toClientError` had
+  zero callers. Both are now live in `src/start.ts` via a new **`functionMiddleware`** array
+  (`[sanitiserMiddleware, rateLimitMiddleware]`, order load-bearing: the sanitiser must wrap the
+  limiter or the limiter's own throw escapes unmapped).
+
+  **New module `src/utils/rate-limit-runtime.ts`** — the impure half of the pure/impure split the
+  codebase already uses. Owns the process-wide counter map and parsed config; exports
+  `rateLimitDecision()`, `describeDenial()`, `rateLimitStatus()`, `resetRateLimitRuntime()`.
+  State/config are injectable so `bun test` never touches the singletons. **Two dimensions are
+  checked per call**, not one: a per-tier limit alone lets a caller spend strict + expensive +
+  moderate + loose concurrently (165/min while exceeding no single tier); a global ceiling alone
+  lets 240 credential-vault attempts through.
+
+  **Why the function layer and not the request layer:** re-confirmed against
+  `node_modules/@tanstack/start-client-core` — `RequestServerOptions` declares `serverFnMeta?` but
+  1.168 never populates it; `FunctionMiddlewareServerFnOptions` does. Function middleware has no
+  `request`, so headers come from `getRequestHeaders()`, which this codebase already proves works
+  in that context (`credential-vault.ts`, `settings.tsx`). Note `createMiddleware()` with no
+  argument yields a **request** middleware — `{ type: "function" }` is required.
+
+  **⚠️ A trap recorded in this file is WRONG for 1.168, and was corrected by measurement.** Phase-1
+  trap #1 claimed seroval copies `stack` — "absolute container paths included" — to the browser.
+  It does not. Built the app with the sanitiser REMOVED, threw a real error from a server function,
+  and read the RPC payload in a browser: it is tagged `"c":"$TSR/Error"`, a custom serialiser that
+  emits **`message` and nothing else**. No stack, no path. The corollary matters more than the
+  correction: **none of the fields `toClientError` attaches (`code`, `correlationId`,
+  `retryAfterMs`) reach the client either — do not build UI that reads them off the error.** The
+  leak the sanitiser genuinely closes is through `message`, which crosses verbatim and is routinely
+  built by concatenating upstream text (an undici `ECONNREFUSED 10.0.3.14:8080`, an fs errno with a
+  path, up to 300 chars of a provider's response body).
+
+  **Ships in `observe` mode** (the default when `RATE_LIMIT_MODE` is unset): it logs what it would
+  have denied and denies nothing. Flip to `enforce` only after confirming the observe lines report
+  `Client key source: forwarded` — locally they say `unknown`, which is correct with no proxy, but
+  `unknown` in production means the ingress is not passing `x-forwarded-for` and enforcing would
+  collapse every caller into one bucket. `.env.example` documents all six tiers and every knob.
+
+  **Verified live, in a real browser, not just by `bun test`** — this project's own rule. Booted
+  the built server with `RATE_LIMIT_EXPENSIVE_LIMIT=1` and loaded `/crawlers` three times:
+  `collectorHealth` correctly resolved to the `expensive` tier by name; observe logged two
+  would-have-denied lines and the page rendered normally; enforce denied and the browser showed
+  the authored reason — *"Probe run failed: Rate limit backoff is active for another 16s. Retrying
+  sooner does not extend it."* — through the existing `err.message` call sites, unchanged.
+  **1169 tests passing** (+19, `tests/rate-limit-runtime.test.ts`), `tsc --noEmit` clean,
+  **210 exports verified**, `bun run build` green.
+
+  **`bun run smoke` is red at baseline and this change does not alter that** — 0/31 routes, every
+  one failing on a CSP console warning (`upgrade-insecure-requests` ignored in a report-only
+  policy) emitted by the pre-existing `security-headers.ts`. Confirmed by reverting `start.ts` to
+  HEAD and re-running: identical 0/31, identical React errors on `/gis`, `/news`, `/recon`,
+  `/reports`, `/sources`. **A permanently red gate is one nobody reads** — the same lesson the
+  YouTube export-audit entry below records. Worth fixing separately.
+
 - [x] **Security hardening, phases 0–1 (2026-08-17)**: The analytical layer was mature; the
   security layer did not exist. No authentication, no rate limiting, and **52 server functions
   carrying 52 identity validators** — `.validator((d: { text: string }) => d)` is a TypeScript
@@ -142,8 +209,9 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
      entry. Keyed on that, an attacker rotates the header per request and also evicts real
      offenders from the bounded map. `client-ip.ts` counts hops from the RIGHT.
 
-  **Still outstanding:** rate-limit middleware is written but NOT yet wired into `start.ts`;
-  error sanitisation not yet wired; ~40 identity validators still to migrate.
+  **Still outstanding:** ~40 identity validators still to migrate. (Rate-limit middleware and
+  error sanitisation were the other two items here; both are now wired — see the phase-2 entry
+  immediately below.)
 
 - [x] **Six reported defects + a fresh fabrication sweep (2026-08-17)**: A user driving the UI
   reported six broken features. **Two of the six premises were factually wrong**, and a sweep

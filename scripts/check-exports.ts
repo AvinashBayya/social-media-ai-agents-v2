@@ -265,6 +265,18 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "parseTimedTextXml",
     "parseSubtitleBody",
   ],
+  // Added 2026-08-17 when the limiter was wired into the server-function chain.
+  // These are the only path by which any inbound request is throttled, so a
+  // deletion here silently removes the control rather than breaking a feature —
+  // exactly the failure mode this audit exists to catch.
+  "src/utils/rate-limit-runtime.ts": [
+    "rateLimitDecision",
+    "describeDenial",
+    "rateLimitConfig",
+    "rateLimitState",
+    "rateLimitStatus",
+    "resetRateLimitRuntime",
+  ],
 };
 
 let missingCount = 0;
