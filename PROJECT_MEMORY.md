@@ -25,13 +25,33 @@
   re-running; see the phase-2 milestone. Earlier same-day pass: **895 unit tests passing**,
   **151 core exports verified**, and eight live browser runs of `/recon`/`/graph`/`/reports` against real free APIs, including a 3,461-entity real-world stress case, an end-to-end manual-selection run, an end-to-end Graph hand-off run, an end-to-end Reports OSINT-inclusion run, an end-to-end Maltego-export run (also catching and confirming the fix for the client-bundle regression above), and an end-to-end Jina Reader run (real Wikipedia article investigated on `/recon`, real 21,907-character extraction confirmed both via direct `bun -e` and in-browser). `fabrication-check` fails at baseline with 81 pre-existing matches unrelated to any work this session (see `docs/OSINT-INTEGRATION-PLAN.md` §31 P0 Baseline note) — every file added this session is individually clean against it.
 
-### Deployed state — 2026-08-13 ✅ LATEST
+### Deployed state — 2026-08-17 ✅ LATEST
 
-`sentinel-web` runs **`v26`** / revision **`sentinel-web--0000024`**
-(`RunningAtMaxScale`, 1 replica), at
+`sentinel-web` runs **`v27`** / revision **`sentinel-web--0000025`**
+(`Healthy`, `RunningAtMaxScale`, 1 replica), at
 `sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`.
-**653 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **151 core exports verified**.
-GitHub `origin/main` is at `e83ffcf`.
+**1169 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **210 core exports verified**.
+GitHub `origin/main` is at `091d497`.
+
+**Verified live after deploy, not just from `provisioningState`:** `/`, `/crawlers`, `/settings`
+and `/recon` all return 200 over HTTPS, and — the check that actually matters for this release —
+`/crawlers` driven in a real browser issued `GET /_serverFn/<hash>` and got **HTTP 200 with 15
+collectors probed**. That exercises the new `functionMiddleware` chain (sanitiser + rate limiter)
+on the real ingress; a 200 on the HTML alone would not have, since server functions are a separate
+path. Only console error is the pre-existing CSP report-only warning.
+
+> **`az containerapp logs show` CANNOT be read from this machine — both documented workarounds
+> tested and BOTH FAIL (2026-08-17).** Same cp1252 crash class as `az acr build`, different
+> command: it connects to the container, then dies on the Vite `➜` (`➜`) in the startup
+> banner — `UnicodeEncodeError` ending in `encodings\cp1252.py` inside `stream_containerapp_logs`.
+> CLAUDE.md offers `[Console]::OutputEncoding = [Text.Encoding]::UTF8` and `chcp 65001` as
+> unverified candidates. **They are now verified as ineffective** — tried both, plus
+> `PYTHONIOENCODING=utf-8`, in PowerShell; identical traceback every time. Do not spend time on
+> them again. Use Log Analytics, or verify behaviour through the app itself as above.
+
+#### Prior deployed state — 2026-08-13
+
+`v26` / `sentinel-web--0000024`, 653 tests, 151 exports, `origin/main` at `e83ffcf`.
 
 > **Always run the check below before trusting this section** — the deploy that produced
 > v26 was tagged from the live value, not from this file:
