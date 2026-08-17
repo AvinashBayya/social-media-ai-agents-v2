@@ -89,7 +89,10 @@ function SubjectsPage() {
         setNewsStories(newsRes?.stories || []);
         setSocialMentions(socialRes?.mentions || []);
         setCyberThreats(cyberRes || []);
-        setTelegramPosts(telegramRes || []);
+        // fetchTelegramOSINT now returns { posts, failures, attempted } so a
+        // partial collection can be reported as partial rather than as a quiet
+        // day. This page only matches against the posts.
+        setTelegramPosts(telegramRes?.posts ?? []);
         setLoadingFeeds(false);
       })
       .catch((err) => {

@@ -66,6 +66,10 @@ function isMissingUcdpToken(error: string | null): boolean {
 
 import { createServerFn } from "@tanstack/react-start";
 import { fetchOSINT } from "./news";
+// The canonical Telegram collector. This route had its own copy, which carried a
+// misattribution bug already fixed here and swallowed failures into an empty
+// array — see the note above `fetchTelegramOSINT`.
+import { fetchTelegramChannel } from "@/utils/social";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -303,53 +307,59 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     const channels = ["VahidOnline", "abualiexpress", "BNONews", "OSINTdefender", "vxunderground"];
     let allPosts: any[] = [];
 
-    const scrapeTelegramChannel = async (handle: string) => {
-      try {
-        const res = await fetch(`https://t.me/s/${handle}`, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-          signal: AbortSignal.timeout(2500),
-        });
-        if (!res.ok) return [];
-        const html = await res.text();
+    /*
+     * DUPLICATE COLLECTOR REMOVED, 2026-08-17.
+     *
+     * A second Telegram scraper lived here and was strictly worse than
+     * `fetchTelegramChannel` in social.ts, in three ways:
+     *
+     *  1. It reintroduced a MISATTRIBUTION BUG that had already been found and
+     *     fixed in the other copy. It scanned the page into parallel `texts` and
+     *     `times` arrays and zipped them by index — so any message without a
+     *     text block (every photo-only post) shifted all later text up one slot
+     *     and rendered post N's words under post N+1's timestamp. Confirmed live
+     *     on t.me/s/durov, where durov/522 is media-only. social.ts fixed this
+     *     with `splitTelegramMessages`, which slices on `data-post="` boundaries
+     *     so every field of a message stays together.
+     *  2. It used a 2,500 ms timeout against t.me, which is why the dev server
+     *     logged `TimeoutError` for BNONews and vxunderground. The canonical
+     *     collector allows 8,000 ms and caches the result.
+     *  3. **A failed fetch returned `[]`** — from both the `!res.ok` branch and
+     *     the catch. A channel that timed out was therefore indistinguishable
+     *     from a channel that had posted nothing. That is the exact error this
+     *     module's own comment below warns about, one layer up.
+     *
+     * Failures are now collected per channel and returned alongside the posts,
+     * so a partial collection is reported as partial instead of as a complete
+     * picture of a quiet day.
+     */
+    const settled = await Promise.allSettled(
+      channels.map(async (handle) => ({
+        handle,
+        posts: await fetchTelegramChannel(handle, 30),
+      })),
+    );
 
-        const posts: any[] = [];
-        const textRegex = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
-        const timeRegex = /<time class="time" datetime="([^"]*)"/g;
-
-        const texts: string[] = [];
-        let match;
-        while ((match = textRegex.exec(html)) !== null) {
-          const rawText = match[1].replace(/<[^>]*>/g, "").trim();
-          texts.push(rawText);
-        }
-
-        const times: string[] = [];
-        while ((match = timeRegex.exec(html)) !== null) {
-          times.push(match[1]);
-        }
-
-        for (let i = 0; i < Math.min(texts.length, times.length); i++) {
-          posts.push({
-            id: `${handle}-${i}`,
-            channel: handle,
-            text: texts[texts.length - 1 - i],
-            date: times[times.length - 1 - i] || null,
-          });
-        }
-        return posts;
-      } catch (err) {
-        console.error(`Scrape failed for telegram channel ${handle}:`, err);
-        return [];
+    const failures: { channel: string; reason: string }[] = [];
+    settled.forEach((outcome, i) => {
+      if (outcome.status === "fulfilled") {
+        allPosts = allPosts.concat(
+          outcome.value.posts.map((p, idx) => ({
+            id: p.id || `${outcome.value.handle}-${idx}`,
+            channel: outcome.value.handle,
+            text: p.text,
+            // Already null-safe upstream: an undated message stays undated
+            // rather than being stamped with the moment of collection.
+            date: p.createdAt || null,
+            url: p.url,
+          })),
+        );
+      } else {
+        const reason = outcome.reason?.message ?? String(outcome.reason);
+        console.error(`Telegram collection failed for ${channels[i]}:`, reason);
+        failures.push({ channel: channels[i], reason });
       }
-    };
-
-    const results = await Promise.all(channels.map((ch) => scrapeTelegramChannel(ch)));
-    for (const posts of results) {
-      allPosts = allPosts.concat(posts);
-    }
+    });
 
     // Undated posts sort last rather than being coerced to the epoch, which
     // would have ranked them as the oldest content in the feed.
@@ -364,7 +374,12 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     // at a border, a named ransomware group — each attributed to a REAL channel
     // that had not said any of it. Fabricated intelligence carrying a genuine
     // source name is the worst failure mode this system has.
-    return allPosts;
+    //
+    // `failures` travels with the posts so the panel can say which channels did
+    // not answer. Zero posts and five failed channels is a collection outage;
+    // zero posts and five successful channels is a quiet day. They must not
+    // render the same.
+    return { posts: allPosts, failures, attempted: channels.length };
   });
 
 /**
@@ -727,6 +742,16 @@ function Page() {
   const [cyberError, setCyberError] = useState<string | null>(null);
   // null = not collected yet; [] = collected and genuinely empty.
   const [telegramLoadFailed, setTelegramLoadFailed] = useState(false);
+  /**
+   * Channels that did not answer this run.
+   *
+   * Previously every per-channel failure was swallowed into an empty array, so
+   * three of five channels timing out looked identical to three of five having
+   * nothing to say. The panel now names them.
+   */
+  const [telegramFailures, setTelegramFailures] = useState<{ channel: string; reason: string }[]>(
+    [],
+  );
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -752,8 +777,9 @@ function Page() {
         if (isMounted) {
           if (profRes) setOsintProfile(profRes);
           if (cyberRes) setCyberThreats(cyberRes);
-          setTelegramPosts(tgRes ?? []);
+          setTelegramPosts(tgRes?.posts ?? []);
           setTelegramLoadFailed(tgRes === null);
+          setTelegramFailures(tgRes?.failures ?? []);
           if (geoRes) setGeopoliticalData(geoRes);
           if (rssRes) setRssFeeds(rssRes);
           setGpsJamData(gpsRes?.data ?? null);
@@ -1319,6 +1345,32 @@ function Page() {
                 />
               </div>
 
+              {/*
+                Partial collection is reported as partial. A channel that timed
+                out is not a channel that said nothing, and this banner renders
+                whether or not any posts came back — the danger case is a feed
+                that looks full while two of its five sources are missing.
+              */}
+              {!isLoading && telegramFailures.length > 0 && (
+                <div className="mb-3 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed">
+                  <span className="font-bold uppercase text-[#F59E0B]">
+                    {telegramFailures.length} of 5 channels did not answer
+                  </span>
+                  <span className="text-[#94A3B8]">
+                    {" "}
+                    — anything they posted is missing from this feed. This is a collection
+                    failure, not a quiet period.
+                  </span>
+                  <ul className="mt-1 space-y-0.5 text-[#64748B]">
+                    {telegramFailures.map((f) => (
+                      <li key={f.channel}>
+                        <span className="font-mono text-[#94A3B8]">@{f.channel}</span> — {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {isLoading ? (
                 <div className="flex justify-center py-20">
                   <RefreshCw className="size-8 animate-spin text-primary" />
@@ -1328,7 +1380,9 @@ function Page() {
                   error={
                     telegramLoadFailed
                       ? "The Telegram collector did not return. Channel previews are scraped from t.me and can fail per channel; a failure here is not a finding that the channels were quiet."
-                      : null
+                      : telegramFailures.length > 0
+                        ? `All ${telegramFailures.length} channel(s) attempted failed to respond. No posts were collected — this is a collection failure, not a finding that the channels were quiet.`
+                        : null
                   }
                   loading={isLoading}
                   emptyLabel="Channel previews returned no posts."
