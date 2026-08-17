@@ -262,53 +262,65 @@ export interface DorkHit {
  * Throws on transport failure or on a web-scoped dork. It does not return
  * placeholder rows — an empty result set means the query genuinely matched
  * nothing, and the caller must be able to tell those two states apart.
+ *
+ * Plain function so it is callable from a collector adapter (and from tests)
+ * without the Start runtime `runNewsDork` below requires — same pattern as
+ * `llm.ts`'s core functions vs. their `createServerFn` wrappers.
  */
+export async function fetchNewsDorkHits(
+  query: string,
+  limit?: number,
+): Promise<{ query: string; hits: DorkHit[] }> {
+  const raw = (query || "").trim();
+  if (!raw) throw new Error("Empty dork query.");
+
+  // Normalise through the shared search core so operator handling matches the
+  // rest of the app rather than diverging into a second dialect.
+  const parsed = parseQuery(raw);
+  const upstream = buildUpstreamQuery(parsed) || raw;
+
+  const url =
+    `https://news.google.com/rss/search?q=${encodeURIComponent(upstream)}` +
+    `&hl=en-US&gl=US&ceid=US:en`;
+
+  let feed: any;
+  try {
+    const Parser = (await import("rss-parser")).default;
+    const parser = new Parser();
+    feed = await parser.parseURL(url);
+  } catch (err: any) {
+    throw new Error(`Google News RSS request failed: ${err?.message ?? String(err)}`);
+  }
+
+  const cappedLimit = Math.min(Math.max(limit ?? 25, 1), 100);
+  const hits: DorkHit[] = [];
+
+  for (const item of (feed?.items ?? []).slice(0, cappedLimit)) {
+    let title = item.title || "";
+    let source = item.creator || item.author || "";
+
+    // Google News appends " - Publisher" to the headline; split it back out
+    // instead of showing the publisher glued onto the title.
+    const dash = title.lastIndexOf(" - ");
+    if (dash !== -1) {
+      if (!source) source = title.slice(dash + 3).trim();
+      title = title.slice(0, dash).trim();
+    }
+
+    hits.push({
+      title,
+      source: source || "Unknown publisher",
+      url: item.link || "",
+      pubDate: item.isoDate || item.pubDate || "",
+    });
+  }
+
+  return { query: upstream, hits };
+}
+
 export const runNewsDork = createServerFn({ method: "POST" })
   .validator((d: { query: string; limit?: number }) => d)
-  .handler(async ({ data }): Promise<{ query: string; hits: DorkHit[] }> => {
-    const raw = (data?.query || "").trim();
-    if (!raw) throw new Error("Empty dork query.");
-
-    // Normalise through the shared search core so operator handling matches the
-    // rest of the app rather than diverging into a second dialect.
-    const parsed = parseQuery(raw);
-    const upstream = buildUpstreamQuery(parsed) || raw;
-
-    const url =
-      `https://news.google.com/rss/search?q=${encodeURIComponent(upstream)}` +
-      `&hl=en-US&gl=US&ceid=US:en`;
-
-    let feed: any;
-    try {
-      const Parser = (await import("rss-parser")).default;
-      const parser = new Parser();
-      feed = await parser.parseURL(url);
-    } catch (err: any) {
-      throw new Error(`Google News RSS request failed: ${err?.message ?? String(err)}`);
-    }
-
-    const limit = Math.min(Math.max(data?.limit ?? 25, 1), 100);
-    const hits: DorkHit[] = [];
-
-    for (const item of (feed?.items ?? []).slice(0, limit)) {
-      let title = item.title || "";
-      let source = item.creator || item.author || "";
-
-      // Google News appends " - Publisher" to the headline; split it back out
-      // instead of showing the publisher glued onto the title.
-      const dash = title.lastIndexOf(" - ");
-      if (dash !== -1) {
-        if (!source) source = title.slice(dash + 3).trim();
-        title = title.slice(0, dash).trim();
-      }
-
-      hits.push({
-        title,
-        source: source || "Unknown publisher",
-        url: item.link || "",
-        pubDate: item.isoDate || item.pubDate || "",
-      });
-    }
-
-    return { query: upstream, hits };
-  });
+  .handler(
+    async ({ data }): Promise<{ query: string; hits: DorkHit[] }> =>
+      fetchNewsDorkHits(data?.query, data?.limit),
+  );

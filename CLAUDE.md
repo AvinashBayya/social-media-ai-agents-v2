@@ -334,6 +334,53 @@ Recorded in `NOT_IMPLEMENTED` in `imaging.ts` and asserted by a test.
 EXIF absence is reported as absence — every major platform strips it on upload, so a missing
 block is the normal case for redistributed media, not evidence of tampering.
 
+## `ai-service/` — Python vision/forensics backend — MERGED 2026-08-14, not yet wired up
+
+A separate FastAPI backend, developed independently and merged in from a teammate's branch
+via `MERGE_PACKAGE/` (now removed after merge — see git history if the original notes are
+needed). It duplicates none of the client-side Module 4 logic above; it exists because
+server-side gives it access to heavier models (Grounding DINO) that can't run in-browser.
+**Deploys separately from the frontend**, to its own host (a local/air-gapped Linux+GPU box
+for the real deployment), with its own `Dockerfile`/`docker-compose.yml` — excluded from the
+frontend's Docker build context via `.dockerignore` for the same reason `data/` is.
+
+Real endpoints: `POST /ai/forensics` (EXIF incl. GPS, pHash via 2D-DCT, C2PA best-effort —
+the same techniques as `imaging.ts`, independently implemented in Python), `POST /ai/ocr`
+(Tesseract, English/Hindi/Tamil), `POST /ai/phash/compare`, `POST /ai/detect` (Grounding DINO
+tiny, zero-shot/open-vocabulary — **Apache 2.0**, matching the licence trap warned about
+above; the vendored weights, ~650MB, are `.gitignore`d and loaded from `ai-service/models/`
+only, never fetched at runtime). Still 501 stubs: `/ai/faces`, `/ai/video`, `/ai/transcribe`,
+`/ai/translate`, `/ai/describe`, `/ai/chat`.
+
+**Verified at merge time, in this environment (no GPU, no system Tesseract, no vendored
+weights):** `pytest` on the pure-Python surface — all 8 `test_forensics.py` cases (EXIF/GPS,
+pHash, C2PA, timestamp-mismatch) and 4 of 5 `test_skeleton.py` cases passed. OCR and detect
+tests fail here for exactly the reasons `ai-service/README`-equivalent docs say they would:
+no `tesseract` binary on PATH, and no `torch`/`transformers`/vendored model weights installed
+(deliberately not installed by default — `torch` alone is a multi-GB download and this
+environment has no GPU to exercise it on). **Not independently re-verified**: the OCR and
+detect code paths themselves, beyond the prior session's own testing record. Install
+`transformers`+`torch` and a system Tesseract, vendor the Grounding DINO weights per
+`ai-service/requirements.txt`'s comments, and re-run `pytest` before trusting those paths.
+
+**Known, real, unfixed limitation** (locked in as a characterization test,
+`test_detect_known_limitation_confident_false_positive_on_absent_object`): Grounding DINO
+does not reliably report "nothing found" — prompting for an absent object still returns a
+confident (35–65%) detection at the best-matching region. **`/ai/detect` output must be
+framed as an unverified candidate match for analyst review, never a confirmed finding**,
+consistent with this project's EXIF-GPS/C2PA framing elsewhere — this is not yet decided
+for any UI that might surface it, because no frontend caller exists yet.
+
+**Not done:** no frontend code calls this service — `src/utils/imaging.ts`/`imaging-client.ts`
+still do everything client-side, independently. Wiring them together (or deciding not to) is
+unstarted work, not a regression.
+
+**Deliberately not merged from the same source:** a local session-based auth/RBAC system
+(Prisma+SQLite, login, guards) was in the same source package but was not brought in — this
+project already built and then deliberately reverted an auth system out of `main` (see the
+deployment-drift note above; `backup/pre-auth-rollback` branch/tag). Re-introducing auth is a
+product decision, not a merge task, and was left out on that basis.
+
 ## Reports + GIS (Module 5)
 
 §6.5 is the **only** place PS-18 names the open-source LLM requirement explicitly, so every

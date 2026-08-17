@@ -13,3 +13,10 @@ dist
 # is barred from leaving this machine (DPDP Act 2023) for the same reason
 # .gitignore blocks it.
 data/
+
+# ai-service/ is a separate Python backend (vision/forensics) that deploys on its
+# own, to a different host, via its own Dockerfile — never part of the frontend
+# image. Without this, `COPY . .` below would upload its vendored model weights
+# (~650MB when populated) to the ACR build service on every frontend deploy, the
+# same class of mistake data/credentials.json made before it was excluded above.
+ai-service/

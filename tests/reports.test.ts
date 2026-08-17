@@ -6,6 +6,8 @@ import {
   sourcesFromArticles,
   sourcesFromGeo,
   sourcesFromImages,
+  sourcesFromOsintEvidence,
+  sourcesFromOsintRelationships,
   sourcesFromSocial,
   toMarkdown,
   validateCitations,
@@ -19,6 +21,12 @@ import {
 } from "../src/utils/reports";
 import { defaultFactors, scoreCorpus, type Article } from "../src/utils/credibility";
 import { fromUsgsFeature } from "../src/utils/geo";
+import { UNSCORED } from "../src/utils/collectors/result";
+import type {
+  CollectorEntity,
+  CollectorEvidence,
+  CollectorRelationship,
+} from "../src/utils/collectors/result";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -465,5 +473,148 @@ describe("end-to-end sourcing guarantee", () => {
       expect(source!.outlet.length).toBeGreaterThan(0);
       expect(source!.title.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ─── OSINT collector evidence/relationships as citable sources ─────────────
+
+const osintEntity = (over: Partial<CollectorEntity> & { id: string }): CollectorEntity => ({
+  type: "domain",
+  value: over.id,
+  displayName: over.id,
+  source: "dns",
+  confidence: UNSCORED,
+  metadata: {},
+  ...over,
+});
+
+const osintEvidence = (over: Partial<CollectorEvidence> = {}): CollectorEvidence => ({
+  source: "Cloudflare DNS-over-HTTPS",
+  sourceUrl: null,
+  collector: "dns",
+  collectedAt: "2026-08-14T10:00:00.000Z",
+  rawValue: { hostname: "example.com", ip: "93.184.216.34" },
+  normalizedValue: { hostname: "example.com", ip: "93.184.216.34" },
+  confidence: null,
+  metadata: {},
+  ...over,
+});
+
+const osintRelationship = (over: Partial<CollectorRelationship> = {}): CollectorRelationship => ({
+  sourceEntity: "dns:domain:example.com",
+  relationshipType: "RESOLVES_TO",
+  targetEntity: "dns:ip:93.184.216.34",
+  confidence: UNSCORED,
+  source: "dns",
+  ...over,
+});
+
+describe("sourcesFromOsintEvidence", () => {
+  test("converts collector evidence into numbered, citable sources", () => {
+    const sources = sourcesFromOsintEvidence([osintEvidence()]);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]!.n).toBe(1);
+    expect(sources[0]!.module).toBe("Module 2 · content analysis");
+    expect(sources[0]!.publishedAt).toBe("2026-08-14T10:00:00.000Z");
+    expect(sources[0]!.outlet).toBe("Cloudflare DNS-over-HTTPS");
+  });
+
+  test("the title and excerpt are built from the real normalized value, not invented", () => {
+    const sources = sourcesFromOsintEvidence([
+      osintEvidence({ collector: "crtsh", normalizedValue: { subdomain: "mail.example.com" } }),
+    ]);
+    expect(sources[0]!.title).toContain("crtsh");
+    expect(sources[0]!.title).toContain("mail.example.com");
+    expect(sources[0]!.excerpt).toContain("mail.example.com");
+  });
+
+  test("unscored evidence reports 'not scored', never a fabricated number", () => {
+    const sources = sourcesFromOsintEvidence([osintEvidence({ confidence: null })]);
+    expect(sources[0]!.credibility).toBeNull();
+    expect(sources[0]!.credibilityRationale).toContain("Not scored");
+  });
+
+  test("a scored evidence item carries its real confidence value and reasons", () => {
+    const sources = sourcesFromOsintEvidence([
+      osintEvidence({ confidence: { value: 0.9, reasons: ["signed C2PA manifest"] } }),
+    ]);
+    expect(sources[0]!.credibility).toBe(0.9);
+    expect(sources[0]!.credibilityRationale).toBe("signed C2PA manifest");
+  });
+
+  test("external-tool evidence (theHarvester/SpiderFoot) converts identically — no separate path", () => {
+    const sources = sourcesFromOsintEvidence([
+      osintEvidence({ collector: "theharvester", source: "theHarvester passive search" }),
+      osintEvidence({ collector: "spiderfoot", source: "SpiderFoot scan" }),
+    ]);
+    expect(sources).toHaveLength(2);
+    expect(sources.map((s) => s.title)).toEqual([
+      expect.stringContaining("theharvester"),
+      expect.stringContaining("spiderfoot"),
+    ]);
+  });
+
+  test("startAt offsets numbering for merging into an existing source list", () => {
+    const sources = sourcesFromOsintEvidence([osintEvidence(), osintEvidence()], 5);
+    expect(sources.map((s) => s.n)).toEqual([5, 6]);
+  });
+
+  test("an empty evidence list produces an empty source list", () => {
+    expect(sourcesFromOsintEvidence([])).toEqual([]);
+  });
+});
+
+describe("sourcesFromOsintRelationships", () => {
+  const entities = [
+    osintEntity({ id: "dns:domain:example.com", type: "domain", displayName: "example.com" }),
+    osintEntity({ id: "dns:ip:93.184.216.34", type: "ip", displayName: "93.184.216.34" }),
+  ];
+
+  test("renders a real relationship as a readable, non-fabricated title", () => {
+    const sources = sourcesFromOsintRelationships([osintRelationship()], entities);
+    expect(sources[0]!.title).toBe("example.com resolves to 93.184.216.34");
+  });
+
+  test("falls back to the raw entity id when the entity is not in the supplied list, never inventing a name", () => {
+    const sources = sourcesFromOsintRelationships(
+      [osintRelationship({ sourceEntity: "dns:domain:unknown-entity" })],
+      entities,
+    );
+    expect(sources[0]!.title).toContain("dns:domain:unknown-entity");
+  });
+
+  test("carries the real confidence score from entity resolution, or an honest 'not scored'", () => {
+    const scored = sourcesFromOsintRelationships(
+      [osintRelationship({ confidence: { value: 0.82, reasons: ["same public email"] } })],
+      entities,
+    );
+    expect(scored[0]!.credibility).toBe(0.82);
+    expect(scored[0]!.credibilityRationale).toBe("same public email");
+
+    const unscored = sourcesFromOsintRelationships([osintRelationship()], entities);
+    expect(unscored[0]!.credibility).toBeNull();
+    expect(unscored[0]!.credibilityRationale).toContain("Not scored");
+  });
+
+  test("relationships carry no timestamp of their own — publishedAt is honestly empty, not invented", () => {
+    const sources = sourcesFromOsintRelationships([osintRelationship()], entities);
+    expect(sources[0]!.publishedAt).toBe("");
+  });
+
+  test("an empty relationship list produces an empty source list", () => {
+    expect(sourcesFromOsintRelationships([], entities)).toEqual([]);
+  });
+});
+
+describe("merging OSINT sources alongside existing ones preserves prior citation numbers", () => {
+  test("appending OSINT sources after existing ones keeps earlier numbers stable through renumber()", () => {
+    const existing = renumber(
+      sourcesFromArticles(ARTICLES, scoreCorpus(ARTICLES, defaultFactors())),
+    );
+    const merged = renumber([...existing, ...sourcesFromOsintEvidence([osintEvidence()])]);
+    // Every existing source keeps the exact same number after the merge.
+    existing.forEach((s, i) => expect(merged[i]!.n).toBe(s.n));
+    expect(merged).toHaveLength(existing.length + 1);
+    expect(merged[merged.length - 1]!.n).toBe(existing.length + 1);
   });
 });

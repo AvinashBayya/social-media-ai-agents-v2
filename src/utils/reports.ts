@@ -34,6 +34,11 @@ import { chatJson, LlmUnavailableError } from "./llm";
 import { bandFor, type CredibilityScore } from "./credibility";
 import type { Article } from "./analysis";
 import type { GeoRecord } from "./geo";
+import type {
+  CollectorEntity,
+  CollectorEvidence,
+  CollectorRelationship,
+} from "./collectors/result";
 
 // ─── Product types ─────────────────────────────────────────────────────────
 
@@ -229,6 +234,78 @@ export function sourcesFromGeo(records: GeoRecord[], startAt = 1): SourceRef[] {
     credibilityRationale: `Geolocated record. Coordinate locates ${r.locates}.`,
     excerpt: `${r.title}. ${r.magnitudeLabel}. Coordinate ${r.lat.toFixed(4)}, ${r.lon.toFixed(4)} (${r.precision}).`,
   }));
+}
+
+/** A truncated, real (never invented) rendering of a collector's structured output — the same fallback `recon.tsx`'s evidence list already uses for the same `unknown`-shaped field. */
+function summarizeOsintValue(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    return json && json !== "{}" && json !== "null" ? json : "(no normalized value)";
+  } catch {
+    return "(not serializable)";
+  }
+}
+
+/**
+ * OSINT collector evidence (`src/utils/collectors/result.ts`), from
+ * `runOsintInvestigation`/`pollOsintInvestigationJob` — every existing
+ * collector (DNS, RDAP, crt.sh, Shodan InternetDB, dorks, news, social) and
+ * both external tools (theHarvester, SpiderFoot) produce this same shape, so
+ * one function covers all of them; there is no separate "external results"
+ * path to wire in.
+ *
+ * Slots into the one `ContributingModule` value no other `sourcesFromX`
+ * function had claimed — "Module 2 · content analysis" — rather than adding
+ * a new module label the report UI/PDF footer would need to learn about.
+ */
+export function sourcesFromOsintEvidence(evidence: CollectorEvidence[], startAt = 1): SourceRef[] {
+  return evidence.map((e, i) => ({
+    n: startAt + i,
+    title: `${e.collector}: ${summarizeOsintValue(e.normalizedValue).slice(0, 100)}`,
+    outlet: e.source,
+    url: e.sourceUrl ?? "",
+    publishedAt: e.collectedAt,
+    module: "Module 2 · content analysis" as const,
+    credibility: e.confidence?.value ?? null,
+    credibilityRationale:
+      e.confidence && e.confidence.reasons.length > 0
+        ? e.confidence.reasons.join("; ")
+        : "Not scored — this collector does not compute a confidence value for its evidence.",
+    excerpt: summarizeOsintValue(e.normalizedValue).slice(0, EXCERPT_CHARS),
+  }));
+}
+
+/**
+ * OSINT relationships as citable facts in their own right ("X RESOLVES_TO
+ * Y"), distinct from evidence — a relationship has no `collectedAt`/`sourceUrl`
+ * of its own, only the collector that asserted it and, sometimes, a
+ * confidence score from entity resolution (§17).
+ */
+export function sourcesFromOsintRelationships(
+  relationships: CollectorRelationship[],
+  entities: CollectorEntity[],
+  startAt = 1,
+): SourceRef[] {
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const nameOf = (id: string) => byId.get(id)?.displayName ?? id;
+  return relationships.map((r, i) => {
+    const text = `${nameOf(r.sourceEntity)} ${r.relationshipType.toLowerCase().replace(/_/g, " ")} ${nameOf(r.targetEntity)}`;
+    return {
+      n: startAt + i,
+      title: text,
+      outlet: r.source,
+      url: "",
+      // Relationships carry no timestamp of their own in the P1 contract.
+      publishedAt: "",
+      module: "Module 2 · content analysis" as const,
+      credibility: r.confidence.value,
+      credibilityRationale:
+        r.confidence.reasons.length > 0
+          ? r.confidence.reasons.join("; ")
+          : "Not scored — asserted directly by the collector, not derived from cross-source matching.",
+      excerpt: text,
+    };
+  });
 }
 
 /** Renumber a merged source list so citation numbers are contiguous from 1. */
