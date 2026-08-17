@@ -130,13 +130,35 @@ export interface EntityGraph {
   edges: GraphEdge[];
   /** Articles that contributed at least one entity. */
   articleCount: number;
+  /**
+   * How many distinct entities were found before the `maxNodes` cap.
+   *
+   * Reported so the UI can say "showing 250 of 613". A silently truncated graph
+   * reads as the whole picture, which is the same class of error as any other
+   * silent cap in this codebase — the analyst would conclude the corpus names
+   * 250 entities when it names far more.
+   */
+  totalNodes: number;
+  /** True when `maxNodes` removed something. */
+  truncated: boolean;
 }
+
+/** Above this many nodes the layout is visibly slow, so it is the default cap. */
+export const DEFAULT_MAX_NODES = 250;
 
 export interface BuildOptions {
   /** Drop edges seen in fewer than this many articles. Default 1. */
   minWeight?: number;
   /** Drop nodes named in fewer than this many articles. Default 1. */
   minArticles?: number;
+  /**
+   * Keep at most this many nodes, highest degree first. Default 250.
+   *
+   * `layoutGraph` is O(n^2) per iteration, and `EntitiesSchema` permits 40
+   * entities per article, so a 100-article corpus can reach several hundred
+   * distinct nodes and freeze the tab. Truncation is always reported.
+   */
+  maxNodes?: number;
 }
 
 /**
