@@ -19,7 +19,7 @@ import { createServerFn } from "@tanstack/react-start";
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 /** RFC1918 / loopback / link-local / CGNAT — never worth sending to Shodan. */
-function isPrivateIPv4(ip: string): boolean {
+export function isPrivateIPv4(ip: string): boolean {
   const m = ip.match(IPV4);
   if (!m) return false;
   const [a, b] = [Number(m[1]), Number(m[2])];
@@ -73,7 +73,7 @@ export interface AttackSurfaceResult {
 }
 
 /** Resolve A records over Cloudflare DNS-over-HTTPS. */
-async function resolveA(hostname: string): Promise<string[]> {
+export async function resolveA(hostname: string): Promise<string[]> {
   const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`;
 
   let res: Response;
@@ -111,7 +111,7 @@ async function resolveA(hostname: string): Promise<string[]> {
 }
 
 /** Look one address up in Shodan InternetDB. */
-async function internetDb(ip: string): Promise<HostSurface> {
+export async function internetDb(ip: string): Promise<HostSurface> {
   let res: Response;
   try {
     res = await fetch(`https://internetdb.shodan.io/${ip}`, {
@@ -157,7 +157,7 @@ async function internetDb(ip: string): Promise<HostSurface> {
 }
 
 /** Addresses probed per target. Keeps one lookup bounded and predictable. */
-const MAX_ADDRESSES = 4;
+export const MAX_ADDRESSES = 4;
 
 export const lookupAttackSurface = createServerFn({ method: "POST" })
   .validator((d: { target: string }) => d)

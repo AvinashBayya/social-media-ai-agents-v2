@@ -1,49 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Search, ZoomIn, ZoomOut, Loader2, AlertTriangle, Info, Network } from "lucide-react";
-import { getActiveTarget } from "@/utils/active-target";
-import { fetchNews } from "./news";
-import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
-import { clusterStories, type Article } from "@/utils/analysis";
-import { defaultFactors, scoreCorpus, type CredibilityScore } from "@/utils/credibility";
-import {
-  buildEntityGraph,
-  layoutGraph,
-  nodeRadius,
-  shortestPath,
-  COOCCURRENCE_CAVEAT,
-  type EntityGraph,
-  type GraphArticleInput,
-  type PositionedNode,
-} from "@/utils/graph-build";
-import { PinButton } from "@/components/pin-button";
-import type { EntityType } from "@/types/core";
-
-/**
- * Knowledge Graph — Module 2.
- *
- * What this page used to be: ten nodes and ten edges written into the file, with
- * literal x/y coordinates. Vector-17, Aster Motors, channel_9821,
- * vector17@proton.me, "+91 98••••4211". No fetch, no server function, no
- * `useEffect` anywhere in the module. Beside it, a permanently-selected node card
- * asserting "Risk score 88 / 100" and "Connections 12" — a number that
- * contradicted the ten edges drawn next to it — and a hardcoded "Shortest path"
- * naming the same three fictional entities every time.
- *
- * It now runs the pipeline `/entities` already runs successfully: collect a live
- * corpus for the active target, extract entities per article with the configured
- * open-weight model, and build a co-occurrence graph from the result. Every node
- * and edge traces back to article ids the analyst can open.
- *
- * Extraction stays MANUAL. One model call per article on page load would empty a
- * free tier immediately — the same reason `/entities` makes it a per-article
- * button.
- */
+import { EmptyState } from "@/components/workspace-ui";
+import { Search, ZoomIn, ZoomOut, X, Trash2, Network, Waypoints, Download } from "lucide-react";
+import { clearGraphSnapshot, readGraphSnapshot, type GraphSnapshot } from "@/utils/graph-store";
+import { layoutRadial, shortestPath } from "@/utils/graph-layout";
+import { toMaltegoCsv } from "@/utils/maltego-export";
+import type { EntityType } from "@/utils/collectors/result";
 
 export const Route = createFileRoute("/graph")({
   head: () => ({ meta: [{ title: "Knowledge Graph — Sentinel AI" }] }),
@@ -51,278 +18,214 @@ export const Route = createFileRoute("/graph")({
 });
 
 /**
- * Colours for the canonical `core.ts` vocabulary.
+ * `/graph` used to render a fixed 10-node fictional topology ("Vector-17",
+ * "Aster Motors") with a `SampleDataBanner` disclosing it. It is now driven
+ * entirely by the last investigation saved from `/recon`'s "View in Graph"
+ * button (`graph-store.ts`) — there is no seed data left to disclose, so the
+ * banner is gone along with the fixture it labelled.
  *
- * The old legend also listed `domain`, `phone`, `email` and `social`. No
- * extractor in this system produces those types, so a legend entry for them
- * advertised a capability that does not exist.
+ * 13 evenly-spaced hues (360°/13 ≈ 27.7° apart) so every `EntityType` gets a
+ * genuinely distinct color rather than a handful of real types sharing a
+ * "misc" bucket.
  */
-const TYPE_STYLE: Record<EntityType, string> = {
-  PERSON: "oklch(0.6 0.19 255)",
-  ORG: "oklch(0.68 0.17 145)",
-  LOCATION: "oklch(0.78 0.16 85)",
-  EVENT: "oklch(0.62 0.23 27)",
-  EQUIPMENT: "oklch(0.55 0.15 300)",
-  OTHER: "oklch(0.5 0.02 250)",
+const TYPE_HUE: Record<EntityType, number> = {
+  image: 0,
+  phone: 27,
+  article: 55,
+  location: 83,
+  video: 111,
+  organization: 138,
+  ip: 166,
+  domain: 194,
+  person: 221,
+  url: 249,
+  social_account: 277,
+  email: 304,
+  username: 332,
 };
 
-const VIEW_W = 800;
-const VIEW_H = 560;
+function colorFor(type: EntityType): string {
+  return `oklch(0.62 0.17 ${TYPE_HUE[type]})`;
+}
+
+const WIDTH = 800;
+const HEIGHT = 560;
+/** Investigations can return thousands of entities (crt.sh alone can); rendering all of them as SVG nodes is a real DOM-size problem, not just a style one — same reasoning as `MAX_RENDERED_ITEMS` on `/recon`. */
+const MAX_GRAPH_NODES = 150;
 
 function Page() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [searchVal, setSearchVal] = useState(() => getActiveTarget());
-
-  const [corpus, setCorpus] = useState<Article[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-
-  const [extracted, setExtracted] = useState<Record<string, AnalysisEntity[]>>({});
-  const [extracting, setExtracting] = useState(false);
-  const [extractProgress, setExtractProgress] = useState({ done: 0, total: 0 });
-  const [extractError, setExtractError] = useState("");
-  const [model, setModel] = useState("");
-
+  const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
+  const [ready, setReady] = useState(false);
   const [query, setQuery] = useState("");
   const [zoom, setZoom] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [pathFrom, setPathFrom] = useState<string | null>(null);
 
+  // Client-only: the snapshot lives in localStorage, which does not exist during SSR.
   useEffect(() => {
-    const handler = (e: any) => {
-      if (e.detail) {
-        setTarget(e.detail);
-        setSearchVal(e.detail);
-      }
-    };
-    window.addEventListener("sentinel_target_changed", handler);
-    return () => window.removeEventListener("sentinel_target_changed", handler);
+    setSnapshot(readGraphSnapshot());
+    setReady(true);
   }, []);
 
-  // Collect a live corpus for the target. Extraction never runs automatically.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setLoadError("");
-      setExtracted({});
-      setExtractError("");
-      setSelectedId(null);
-      setPathFrom(null);
-      try {
-        const res: any = await fetchNews({ data: { query: target } });
-        if (cancelled) return;
-        const mapped: Article[] = (res?.stories ?? [])
-          .map((s: any, i: number) => ({
-            id: String(s.id ?? s.primaryLink ?? s.url ?? i),
-            title: s.primaryTitle || "",
-            source: s.primarySource || "",
-            url: s.primaryLink || s.url || "",
-            pubDate: s.pubDate || "",
-            body: s.body || "",
-          }))
-          .filter((a: Article) => a.title);
-        setCorpus(mapped);
-      } catch (err: any) {
-        if (!cancelled) setLoadError(err?.message ?? String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [target]);
+  const entities = useMemo(() => snapshot?.entities ?? [], [snapshot]);
+  const relationships = useMemo(() => snapshot?.relationships ?? [], [snapshot]);
 
-  // Module 1 scores, so a node can report the best-scored article naming it.
-  const scores = useMemo<Map<string, CredibilityScore>>(() => {
-    if (corpus.length === 0) return new Map();
-    const clusters = clusterStories(corpus);
-    return new Map(
-      scoreCorpus(corpus, defaultFactors(), { clusters }).map((s) => [s.article.id, s]),
-    );
-  }, [corpus]);
+  const rootId = useMemo(() => {
+    if (!snapshot) return null;
+    const target = snapshot.target.trim().toLowerCase();
+    return entities.find((e) => e.value.toLowerCase() === target)?.id ?? null;
+  }, [snapshot, entities]);
 
-  const graph: EntityGraph = useMemo(() => {
-    const articles: GraphArticleInput[] = corpus
-      .filter((a) => extracted[a.id]?.length)
-      .map((a) => ({
-        id: a.id,
-        source: a.source,
-        url: a.url,
-        credibility: scores.get(a.id)?.score ?? null,
-        entities: extracted[a.id].map((e) => ({
-          entity: e.entity,
-          type: e.type,
-          confidence: e.confidence,
-        })),
-      }));
-    return buildEntityGraph(articles);
-  }, [corpus, extracted, scores]);
-
-  const positioned: PositionedNode[] = useMemo(
-    () => layoutGraph(graph, { width: VIEW_W, height: VIEW_H }),
-    [graph],
+  const layout = useMemo(
+    () => layoutRadial(entities, relationships, rootId, { width: WIDTH, height: HEIGHT }),
+    [entities, relationships, rootId],
   );
-  const byId = useMemo(() => new Map(positioned.map((n) => [n.id, n])), [positioned]);
+
+  // Closest-to-root first, so a capped render keeps the entities nearest the
+  // investigated target rather than an arbitrary slice.
+  const shownNodes = useMemo(
+    () =>
+      [...layout.nodes]
+        .sort((a, b) => (a.ring ?? Infinity) - (b.ring ?? Infinity))
+        .slice(0, MAX_GRAPH_NODES),
+    [layout],
+  );
+  const shownIds = useMemo(() => new Set(shownNodes.map((n) => n.id)), [shownNodes]);
+  const nodeById = useMemo(() => new Map(shownNodes.map((n) => [n.id, n])), [shownNodes]);
+  const entityById = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
+  const shownEdges = useMemo(
+    () => relationships.filter((r) => shownIds.has(r.sourceEntity) && shownIds.has(r.targetEntity)),
+    [relationships, shownIds],
+  );
 
   const matched = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return new Set(positioned.map((n) => n.id));
+    if (!q) return shownIds;
     return new Set(
-      positioned
-        .filter((n) => n.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q))
-        .map((n) => n.id),
+      [...shownIds].filter((id) => {
+        const e = entityById.get(id);
+        if (!e) return false;
+        return (
+          e.displayName.toLowerCase().includes(q) ||
+          e.value.toLowerCase().includes(q) ||
+          e.type.includes(q)
+        );
+      }),
     );
-  }, [query, positioned]);
-
-  const selected = selectedId ? (byId.get(selectedId) ?? null) : null;
-
-  /** Path between the pinned start node and the current selection. */
-  const path = useMemo(() => {
-    if (!pathFrom || !selectedId || pathFrom === selectedId) return null;
-    return shortestPath(graph, pathFrom, selectedId);
-  }, [graph, pathFrom, selectedId]);
-  const pathEdges = useMemo(() => {
-    if (!path) return new Set<string>();
-    const s = new Set<string>();
-    for (let i = 0; i < path.length - 1; i += 1) {
-      const [a, b] = path[i] < path[i + 1] ? [path[i], path[i + 1]] : [path[i + 1], path[i]];
-      s.add(`${a}|${b}`);
-    }
-    return s;
-  }, [path]);
+  }, [shownIds, entityById, query]);
 
   const vb = useMemo(() => {
-    const w = VIEW_W / zoom;
-    const h = VIEW_H / zoom;
-    return `${(VIEW_W - w) / 2} ${(VIEW_H - h) / 2} ${w} ${h}`;
+    const w = WIDTH / zoom;
+    const h = HEIGHT / zoom;
+    return `${(WIDTH - w) / 2} ${(HEIGHT - h) / 2} ${w} ${h}`;
   }, [zoom]);
 
-  const runExtraction = async () => {
-    const pending = corpus.filter((a) => !extracted[a.id]);
-    if (pending.length === 0) return;
-    setExtracting(true);
-    setExtractError("");
-    setExtractProgress({ done: 0, total: pending.length });
-    for (let i = 0; i < pending.length; i += 1) {
-      const article = pending[i];
-      try {
-        const res: any = await aiExtractEntities({ data: { article } });
-        setExtracted((prev) => ({ ...prev, [article.id]: res.entities ?? [] }));
-        setModel(res.model);
-      } catch (err: any) {
-        // Stop on the first failure and say how far it got. Continuing would
-        // build a graph over a partial corpus without saying so.
-        setExtractError(
-          `${err?.message ?? String(err)} — stopped after ${i} of ${pending.length} article(s).`,
-        );
-        break;
-      }
-      setExtractProgress({ done: i + 1, total: pending.length });
-    }
-    setExtracting(false);
+  const selectedEntity = selectedId ? (entityById.get(selectedId) ?? null) : null;
+  const selectedDegree = useMemo(() => {
+    if (!selectedId) return 0;
+    return relationships.filter(
+      (r) => r.sourceEntity === selectedId || r.targetEntity === selectedId,
+    ).length;
+  }, [selectedId, relationships]);
+  const rootEntity = rootId ? (entityById.get(rootId) ?? null) : null;
+
+  const pathToRoot = useMemo(() => {
+    if (!selectedId || !rootId || selectedId === rootId) return null;
+    return shortestPath(entities, relationships, selectedId, rootId);
+  }, [selectedId, rootId, entities, relationships]);
+
+  const clear = () => {
+    clearGraphSnapshot();
+    setSnapshot(null);
+    setSelectedId(null);
   };
 
-  const analysed = Object.keys(extracted).length;
+  /**
+   * Exports the FULL entity/relationship set, not `shownNodes`/`shownEdges`
+   * — the on-screen cap exists for DOM performance, not because the rest of
+   * the data is less real. Handing off to Maltego is exactly the case where
+   * the analyst wants everything, not just what fit on screen.
+   */
+  const exportMaltego = () => {
+    if (!snapshot) return;
+    const csv = toMaltegoCsv(entities, relationships);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sentinel-maltego_${snapshot.target.replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (!ready) return null;
+
+  if (!snapshot || entities.length === 0) {
+    return (
+      <AppShell>
+        <PageHeader
+          title="Knowledge Graph"
+          description="Explore relationships between people, organizations, places, and digital identifiers."
+        />
+        <div className="px-6 pt-4">
+          <EmptyState
+            icon={<Network className="mx-auto mb-1.5 size-5 text-[#F59E0B]" />}
+            title="No Investigation Loaded"
+            message='Run an investigation on Recon and click "View in Graph" — this page renders only what that investigation actually returned, nothing seeded.'
+          />
+          <div className="mt-3 text-center">
+            <Link
+              to="/recon"
+              className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#3B82F6] hover:underline"
+            >
+              Go to Recon →
+            </Link>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
       <PageHeader
         title="Knowledge Graph"
-        description="Entities co-mentioned across live open-source reporting on the active subject. Every node and edge is derived from collected articles."
+        description="Explore relationships between people, organizations, places, and digital identifiers."
       />
-
-      <Card className="mb-4">
-        <CardContent className="p-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchVal}
-              onChange={(e) => setSearchVal(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && setTarget(searchVal.trim() || target)}
-              placeholder="Subject to collect reporting on..."
-              className="h-11 pl-9 pr-28 text-base"
-            />
-            <Button
-              size="sm"
-              onClick={() => setTarget(searchVal.trim() || target)}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2"
-            >
-              Collect
-            </Button>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-xs">
-            <span className="text-muted-foreground">
-              {loading
-                ? "Collecting corpus…"
-                : `${corpus.length} article(s) collected · ${analysed} analysed`}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="ml-auto h-8 gap-1.5"
-              disabled={extracting || loading || corpus.length === 0 || analysed === corpus.length}
-              onClick={runExtraction}
-            >
-              {extracting ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Network className="size-3.5" />
-              )}
-              {extracting
-                ? `Extracting ${extractProgress.done}/${extractProgress.total}…`
-                : `Extract entities from ${corpus.length - analysed} article(s)`}
-            </Button>
-            {model && <span className="font-mono text-[10px] text-muted-foreground">{model}</span>}
-          </div>
-
-          <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            <Info className="mt-px size-3 shrink-0" />
-            Extraction is one model call per article and is never run automatically — on a free
-            tier, extracting a whole corpus on page load would exhaust it. {COOCCURRENCE_CAVEAT}
-          </p>
-
-          {graph.truncated && (
-            <p className="mt-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[11px] leading-relaxed text-[#F59E0B]">
-              Showing the {graph.nodes.length} most-connected of{" "}
-              <strong>{graph.totalNodes}</strong> entities extracted. The rest are not drawn —
-              the layout is O(n²) and runs on this thread, so an uncapped graph would freeze the
-              tab. This is a display limit, not the extent of what was found.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {loadError && (
-        <Card className="mb-4 border-destructive/40">
-          <CardContent className="flex items-start gap-2 p-3">
-            <AlertTriangle className="size-4 shrink-0 text-destructive" />
-            <div className="font-mono text-[11px] text-destructive">
-              <span className="font-bold">Collection failed.</span> No corpus was retrieved for
-              this subject.
-              <div className="pt-0.5 opacity-80">{loadError}</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {extractError && (
-        <Card className="mb-4 border-destructive/40">
-          <CardContent className="flex items-start gap-2 p-3">
-            <AlertTriangle className="size-4 shrink-0 text-destructive" />
-            <div className="font-mono text-[11px] text-destructive">
-              <span className="font-bold">Extraction failed.</span> The graph below covers only
-              the articles that completed.
-              <div className="pt-0.5 opacity-80">{extractError}</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Card>
+      <div className="mx-6 mt-4 flex items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
+        <span>
+          Investigation of <span className="font-bold text-foreground">{snapshot.target}</span> ·{" "}
+          {entities.length} entities · {relationships.length} relationships
+          {entities.length > MAX_GRAPH_NODES &&
+            ` — showing the ${MAX_GRAPH_NODES} nearest ${rootEntity ? "to the target" : "loaded"}`}
+          {" · saved "}
+          {new Date(snapshot.savedAt).toLocaleString()}
+        </span>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={exportMaltego}
+            title="Export every entity and relationship as a CSV Maltego's Import Graph from Table can read"
+            className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          >
+            <Download className="size-3" />
+            Export to Maltego
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clear}
+            className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="size-3" />
+            Clear
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-4 px-0 lg:grid-cols-[1fr_320px]">
+        <Card className="mx-6">
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
               <div className="relative">
@@ -330,14 +233,14 @@ function Page() {
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="h-8 w-56 pl-8 text-xs"
-                  placeholder="Filter nodes by label or type..."
+                  className="h-8 w-64 pl-8 text-xs"
+                  placeholder="Filter nodes by name, value or type..."
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                {Object.entries(TYPE_STYLE).map(([t, fill]) => (
+              <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                {(Object.keys(TYPE_HUE) as EntityType[]).map((t) => (
                   <span key={t} className="flex items-center gap-1 text-muted-foreground">
-                    <span className="size-2.5 rounded-full" style={{ background: fill }} />
+                    <span className="size-2.5 rounded-full" style={{ background: colorFor(t) }} />
                     {t}
                   </span>
                 ))}
@@ -363,7 +266,6 @@ function Page() {
                 </Button>
               </div>
             </div>
-
             <div
               className="relative h-[560px] w-full overflow-hidden rounded-b-lg"
               style={{
@@ -371,265 +273,213 @@ function Page() {
                   "radial-gradient(circle at 50% 45%, oklch(0.97 0.02 240), oklch(0.99 0.005 240))",
               }}
             >
-              {positioned.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-                  <Network className="size-8 text-muted-foreground/40" />
-                  <p className="mt-3 text-sm font-medium">No graph yet.</p>
-                  <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
-                    {corpus.length === 0
-                      ? "No corpus collected for this subject. Search above to collect open-source reporting."
-                      : "Nothing has been extracted yet. Run extraction to build the graph from the collected articles — this page holds no sample topology of its own."}
-                  </p>
-                </div>
-              ) : (
-                <svg viewBox={vb} className="h-full w-full">
-                  <defs>
-                    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                      <path
-                        d="M24 0H0V24"
-                        fill="none"
-                        stroke="oklch(0.94 0.01 245)"
-                        strokeWidth="0.5"
-                      />
-                    </pattern>
-                  </defs>
-                  <rect width={VIEW_W} height={VIEW_H} fill="url(#grid)" />
-
-                  {graph.edges.map((e) => {
-                    const na = byId.get(e.a);
-                    const nb = byId.get(e.b);
-                    if (!na || !nb) return null;
-                    const onPath = pathEdges.has(`${e.a}|${e.b}`);
-                    const dim = !matched.has(e.a) && !matched.has(e.b);
-                    return (
+              <svg viewBox={vb} className="h-full w-full">
+                <defs>
+                  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                    <path
+                      d="M24 0H0V24"
+                      fill="none"
+                      stroke="oklch(0.94 0.01 245)"
+                      strokeWidth="0.5"
+                    />
+                  </pattern>
+                </defs>
+                <rect width={WIDTH} height={HEIGHT} fill="url(#grid)" />
+                {shownEdges.map((rel, i) => {
+                  const a = nodeById.get(rel.sourceEntity);
+                  const b = nodeById.get(rel.targetEntity);
+                  if (!a || !b) return null;
+                  return (
+                    <g key={i}>
                       <line
-                        key={`${e.a}|${e.b}`}
-                        x1={na.x}
-                        y1={na.y}
-                        x2={nb.x}
-                        y2={nb.y}
-                        stroke={onPath ? "oklch(0.62 0.23 27)" : "oklch(0.75 0.03 245)"}
-                        strokeWidth={onPath ? 3 : Math.min(4, 1 + e.weight * 0.6)}
-                        opacity={dim ? 0.12 : 0.85}
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke="oklch(0.75 0.03 245)"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x={(a.x + b.x) / 2}
+                        y={(a.y + b.y) / 2 - 4}
+                        textAnchor="middle"
+                        fontSize="8"
+                        fill="oklch(0.5 0.02 250)"
                       >
-                        <title>{`${na.label} — ${nb.label}: named together in ${e.weight} article(s)`}</title>
-                      </line>
-                    );
-                  })}
-
-                  {positioned.map((n) => {
-                    const hit = matched.has(n.id);
-                    const r = nodeRadius(n);
-                    const isSelected = n.id === selectedId;
-                    const isStart = n.id === pathFrom;
-                    return (
-                      <g
-                        key={n.id}
-                        opacity={hit ? 1 : 0.18}
-                        onClick={() => setSelectedId(n.id)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        <circle cx={n.x} cy={n.y} r={r + 6} fill={TYPE_STYLE[n.type]} opacity={0.15} />
+                        {rel.relationshipType}
+                      </text>
+                    </g>
+                  );
+                })}
+                {shownNodes.map((n) => {
+                  const entity = entityById.get(n.id);
+                  if (!entity) return null;
+                  const color = colorFor(entity.type);
+                  const hit = matched.has(n.id);
+                  const isSelected = selectedId === n.id;
+                  const isRoot = n.id === rootId;
+                  return (
+                    <g
+                      key={n.id}
+                      opacity={hit ? 1 : 0.18}
+                      onClick={() => setSelectedId(n.id)}
+                      className="cursor-pointer"
+                    >
+                      <circle cx={n.x} cy={n.y} r={n.r + 6} fill={color} opacity="0.15" />
+                      <circle
+                        cx={n.x}
+                        cy={n.y}
+                        r={n.r}
+                        fill="white"
+                        stroke={color}
+                        strokeWidth={isSelected ? 3.5 : 2}
+                        strokeDasharray={n.ring === null ? "3 2" : undefined}
+                      />
+                      {isRoot && (
                         <circle
                           cx={n.x}
                           cy={n.y}
-                          r={r}
-                          fill="white"
-                          stroke={
-                            isStart
-                              ? "oklch(0.62 0.23 27)"
-                              : isSelected
-                                ? "oklch(0.3 0.02 250)"
-                                : TYPE_STYLE[n.type]
-                          }
-                          strokeWidth={isSelected || isStart ? 4 : 2}
+                          r={n.r + 4}
+                          fill="none"
+                          stroke={color}
+                          strokeWidth="1"
+                          opacity="0.5"
                         />
-                        <text
-                          x={n.x}
-                          y={n.y + r + 12}
-                          textAnchor="middle"
-                          fontSize="10"
-                          fontWeight="600"
-                          fill="oklch(0.22 0.03 250)"
-                        >
-                          {n.label.length > 24 ? `${n.label.slice(0, 23)}…` : n.label}
-                        </text>
-                        <title>{`${n.label} · ${n.type} · degree ${n.degree} · ${n.articleIds.length} article(s)`}</title>
-                      </g>
-                    );
-                  })}
-                </svg>
-              )}
-
-              {positioned.length > 0 && (
-                <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                  <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
-                    {/*
-                      A truncated graph that does not say so reads as the whole
-                      picture — the analyst would conclude the corpus names this
-                      many entities when it names more.
-                    */}
-                    {graph.truncated
-                      ? `top ${graph.nodes.length} of ${graph.totalNodes} entities`
-                      : `${graph.nodes.length} nodes`}{" "}
-                    · {graph.edges.length} edges · zoom {zoom.toFixed(1)}x
-                  </span>
-                  <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
-                    Reset view
-                  </Button>
+                      )}
+                      <text
+                        x={n.x}
+                        y={n.y + n.r + 12}
+                        textAnchor="middle"
+                        fontSize="10"
+                        fontWeight="600"
+                        fill="oklch(0.22 0.03 250)"
+                      >
+                        {entity.displayName.length > 24
+                          ? `${entity.displayName.slice(0, 22)}…`
+                          : entity.displayName}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                  zoom {zoom.toFixed(1)}x
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
+                  Reset view
+                </Button>
+              </div>
+              {entities.length > MAX_GRAPH_NODES && (
+                <div className="absolute left-3 top-3 rounded border bg-background/80 px-2 py-1 font-mono text-[9px] text-muted-foreground">
+                  {shownNodes.length} of {entities.length} entities shown (nearest to target)
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
+        <div className="mr-6 space-y-4">
           <Card>
             <CardContent className="p-4">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Selected node
-              </div>
-              {!selected ? (
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  Click a node. This panel previously showed a fixed entity with a
-                  &ldquo;Risk score 88 / 100&rdquo; and &ldquo;Connections 12&rdquo; regardless of
-                  what was on screen. Nothing in this system computes a risk score, so none is
-                  shown.
-                </p>
-              ) : (
+              {selectedEntity ? (
                 <>
+                  <div className="flex items-start justify-between">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Selected node
+                    </div>
+                    <button
+                      onClick={() => setSelectedId(null)}
+                      aria-label="Clear selection"
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
                   <div className="mt-1 flex items-center gap-2">
                     <span
                       className="size-3 rounded-full"
-                      style={{ background: TYPE_STYLE[selected.type] }}
+                      style={{ background: colorFor(selectedEntity.type) }}
                     />
-                    <h3 className="text-base font-semibold">{selected.label}</h3>
+                    <h3 className="break-all text-base font-semibold">
+                      {selectedEntity.displayName}
+                    </h3>
                   </div>
                   <Badge variant="outline" className="mt-1">
-                    {selected.type}
+                    {selectedEntity.type}
+                    {selectedEntity.id === rootId ? " · Investigated target" : ""}
                   </Badge>
-
                   <dl className="mt-3 space-y-1 text-xs">
-                    <Row k="Connections" v={String(selected.degree)} />
-                    <Row k="Articles naming it" v={String(selected.articleIds.length)} />
-                    <Row k="Distinct publishers" v={String(selected.sources.length)} />
+                    <Row k="Value" v={selectedEntity.value} />
+                    <Row k="Source collector" v={selectedEntity.source} />
                     <Row
-                      k="Best extractor confidence"
-                      v={`${(selected.bestConfidence * 100).toFixed(0)}%`}
-                    />
-                    <Row
-                      k="Best Module 1 credibility"
+                      k="Confidence"
                       v={
-                        selected.bestCredibility === null
-                          ? "not scored"
-                          : `${(selected.bestCredibility * 100).toFixed(0)}%`
+                        selectedEntity.confidence.value !== null
+                          ? `${Math.round(selectedEntity.confidence.value * 100)}%`
+                          : "not scored"
+                      }
+                    />
+                    <Row k="Connections" v={String(selectedDegree)} />
+                    <Row
+                      k="Distance from target"
+                      v={
+                        nodeById.get(selectedEntity.id)?.ring === null
+                          ? "no path found"
+                          : (nodeById.get(selectedEntity.id)?.ring?.toString() ?? "—")
                       }
                     />
                   </dl>
-
-                  <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    Confidence and credibility are the highest observed, never a mean — averaging
-                    two model-reported confidences produces a third number no model asserted.
+                </>
+              ) : (
+                <>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Selected node
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Click a node to see its collected details.
                   </p>
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    <Button
-                      size="sm"
-                      variant={pathFrom === selected.id ? "default" : "outline"}
-                      className="h-7 text-[11px]"
-                      onClick={() =>
-                        setPathFrom((p) => (p === selected.id ? null : selected.id))
-                      }
-                    >
-                      {pathFrom === selected.id ? "Path start set" : "Set as path start"}
-                    </Button>
-                    <PinButton
-                      label="Pin"
-                      payload={{
-                        kind: "note",
-                        title: `Entity: ${selected.label} (${selected.type})`,
-                        source: `Module 2 knowledge graph · ${selected.sources.length} publisher(s)`,
-                        publishedAt: "",
-                        excerpt:
-                          `${selected.label} (${selected.type}) was named in ` +
-                          `${selected.articleIds.length} collected article(s) from ` +
-                          `${selected.sources.length} distinct publisher(s), co-mentioned with ` +
-                          `${selected.degree} other entity/entities. ${COOCCURRENCE_CAVEAT}`,
-                        credibility: selected.bestCredibility,
-                        credibilityRationale:
-                          selected.bestCredibility === null
-                            ? "No article naming this entity carried a Module 1 score."
-                            : "Highest Module 1 score among the articles naming this entity.",
-                      }}
-                    />
-                  </div>
-
-                  <div className="mt-3 border-t pt-2">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Source articles
-                    </div>
-                    <ul className="mt-1 space-y-1">
-                      {selected.articleIds.map((id) => {
-                        const a = corpus.find((x) => x.id === id);
-                        if (!a) return null;
-                        return (
-                          <li key={id} className="text-[11px] leading-snug">
-                            <a
-                              href={a.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline"
-                            >
-                              {a.title.slice(0, 70)}
-                              {a.title.length > 70 ? "…" : ""}
-                            </a>
-                            <span className="text-muted-foreground">
-                              {" "}
-                              — {a.source || "publisher not reported"}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
                 </>
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold">Shortest path</h3>
-              {!pathFrom || !selectedId ? (
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Select a node, press &ldquo;Set as path start&rdquo;, then select a second node.
-                  This card used to print a fixed two-hop route between the same fictional
-                  entities on every load.
-                </p>
-              ) : pathFrom === selectedId ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Start and end are the same node.
-                </p>
-              ) : path === null ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  <strong>No path found in the collected graph.</strong> These two entities were
-                  never named in the same article, and no chain of co-mentions connects them.
-                  That is a finding about the corpus, not a failure.
-                </p>
-              ) : (
-                <ol className="mt-2 space-y-1 text-xs">
-                  {path.map((id, i) => (
-                    <li key={id}>
-                      {i + 1}. {byId.get(id)?.label ?? id}
-                      {i < path.length - 1 && (
-                        <span className="text-muted-foreground"> → co-mentioned with</span>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </CardContent>
-          </Card>
+          {selectedEntity && rootEntity && selectedEntity.id !== rootId && (
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                  <Waypoints className="size-3.5" />
+                  Path to target
+                </h3>
+                {pathToRoot ? (
+                  <>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {selectedEntity.displayName} → {rootEntity.displayName}
+                    </p>
+                    <ol className="mt-2 space-y-1 text-xs">
+                      {pathToRoot.map((step, i) => {
+                        const e = entityById.get(step.entityId);
+                        return (
+                          <li key={step.entityId}>
+                            {i === 0 ? "" : `${i}. `}
+                            {step.viaRelationship && (
+                              <span className="text-muted-foreground">
+                                {step.viaRelationship.toLowerCase().replace(/_/g, " ")}{" "}
+                              </span>
+                            )}
+                            {e?.displayName ?? step.entityId}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    No connecting path found in the collected data.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </AppShell>
@@ -638,9 +488,11 @@ function Page() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between border-b py-1 last:border-b-0">
-      <dt className="text-muted-foreground">{k}</dt>
-      <dd className="font-medium">{v}</dd>
+    <div className="flex justify-between gap-3 border-b py-1 last:border-b-0">
+      <dt className="shrink-0 text-muted-foreground">{k}</dt>
+      <dd className="truncate text-right font-medium" title={v}>
+        {v}
+      </dd>
     </div>
   );
 }

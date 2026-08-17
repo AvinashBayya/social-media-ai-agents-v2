@@ -32,6 +32,8 @@ dist-ssr
 *.sw?
 .env
 .env.*
+# Template only, no real values — must survive the .env.* ignore above.
+!.env.example
 data/credentials.json
 # Single-generation backup written by writeVault() before each overwrite. Holds
 # the same cleartext operator secrets, so it must be ignored on the same terms.
@@ -51,4 +53,7 @@ azure-env.sh
 # Every record this ever held was fabricated by the deleted agent-scraper
 # scripts. Kept ignored so a stray copy can never be committed as evidence.
 data/social_cache.json*
+# Optional SQLite-backed OSINT job store (JOB_STORE_PATH) — local runtime
+# state, not source; -wal/-shm are SQLite's WAL-mode companion files.
+data/jobs.sqlite*
 /*.js

@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   Shield,
+  Network,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchNews } from "./news";
@@ -29,6 +30,8 @@ import {
   renumber,
   sourcesFromArticles,
   sourcesFromGeo,
+  sourcesFromOsintEvidence,
+  sourcesFromOsintRelationships,
   toMarkdown,
   PRODUCT_TYPES,
   type IntelligenceProduct,
@@ -37,6 +40,8 @@ import {
 } from "@/utils/reports";
 import { renderProductPdf } from "@/utils/report-pdf";
 import { fetchGeoLayers } from "@/utils/geo-sources";
+import { runOsintInvestigation } from "@/utils/osint/orchestrator";
+import type { Investigation } from "@/utils/osint/orchestrator";
 import { LlmQuotaCard } from "@/components/llm-quota";
 
 /**
@@ -101,6 +106,10 @@ function ReportsPage() {
   const [collecting, setCollecting] = useState(false);
   const [collectError, setCollectError] = useState("");
 
+  const [osintCollecting, setOsintCollecting] = useState(false);
+  const [osintError, setOsintError] = useState("");
+  const [osintIncluded, setOsintIncluded] = useState<Investigation | null>(null);
+
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [products, setProducts] = useState<IntelligenceProduct[]>([]);
@@ -115,6 +124,12 @@ function ReportsPage() {
     setCollectError("");
     setCandidates([]);
     setExcluded(new Set());
+    // A fresh collect() replaces the whole candidate list, so a previously
+    // included OSINT investigation (merged into that same list) no longer
+    // exists — reset the flag rather than leave it claiming inclusion of
+    // sources that were just cleared.
+    setOsintIncluded(null);
+    setOsintError("");
     try {
       const [newsRes, geoRes] = await Promise.all([
         fetchNews({ data: { query: subject, q: subject } }) as any,
@@ -162,6 +177,63 @@ function ReportsPage() {
   useEffect(() => {
     collect(target);
   }, [target, collect]);
+
+  /**
+   * Runs the same OSINT collector framework `/recon` uses (`runOsintInvestigation`
+   * — registers every collector, including theHarvester/SpiderFoot, and applies
+   * entity resolution) and appends its evidence and relationships to the
+   * existing candidate list, plan §31 P2 "Reports: include external collector
+   * results / evidence / relationships."
+   *
+   * Deliberately a separate, explicit action rather than folded into the
+   * automatic `collect()` above: most report subjects here are open-ended
+   * topics ("China Taiwan tensions"), not recon targets, and running every
+   * OSINT collector — including live crt.sh/Shodan/theHarvester/SpiderFoot
+   * calls — on every keystroke-triggered collection would be slow and
+   * usually fruitless. An analyst working an actual domain/IP/email subject
+   * opts in.
+   *
+   * Sources are APPENDED, not merged into a fresh `renumber()` of the whole
+   * list from scratch — `renumber()` only reassigns numbers by array
+   * position, so appending at the end leaves every already-decided
+   * inclusion/exclusion (keyed by citation number) valid.
+   *
+   * A domain with real infrastructure easily returns 30-100+ evidence and
+   * relationship items — well past DEFAULT_SOURCE_BUDGET on its own, the same
+   * "HTTP 413: tokens per minute" failure the budget trim below already
+   * exists to prevent for news/geo collection. So newly-added OSINT sources
+   * get the identical treatment: whatever budget room is left after the
+   * analyst's EXISTING inclusions is filled first, and the rest are
+   * pre-excluded (never silently dropped — re-includable like any other row,
+   * and the existing "N pre-excluded" banner already renders correctly for
+   * this since it just reads `candidates.length`). Sources already decided
+   * before this call are never touched.
+   */
+  const collectOsint = async () => {
+    setOsintCollecting(true);
+    setOsintError("");
+    try {
+      const investigation = (await runOsintInvestigation({
+        data: { target },
+      })) as unknown as Investigation;
+      const osintSources = [
+        ...sourcesFromOsintEvidence(investigation.evidence),
+        ...sourcesFromOsintRelationships(investigation.relationships, investigation.entities),
+      ];
+      const priorSelectedCount = candidates.length - excluded.size;
+      const remainingBudget = Math.max(0, DEFAULT_SOURCE_BUDGET - priorSelectedCount);
+      const merged = renumber([...candidates, ...osintSources]);
+      const newNumbers = merged.slice(candidates.length).map((s) => s.n);
+      const autoExcludedOsint = newNumbers.slice(remainingBudget);
+      setCandidates(merged);
+      setExcluded((prev) => new Set([...prev, ...autoExcludedOsint]));
+      setOsintIncluded(investigation);
+    } catch (err: any) {
+      setOsintError(err?.message ?? String(err));
+    } finally {
+      setOsintCollecting(false);
+    }
+  };
 
   /*
    * DEFAULT SOURCE BUDGET.
@@ -316,6 +388,52 @@ function ReportsPage() {
                 <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
                   <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
                   <span className="font-mono text-[10px] text-[#EF4444]">{collectError}</span>
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center gap-2 border-t border-[#263548] pt-3">
+                <Network className="size-3.5 shrink-0 text-[#8B5CF6]" />
+                <p className="flex-1 text-[10px] leading-relaxed text-[#94A3B8]">
+                  Also run DNS/RDAP/crt.sh/Shodan/dorks/news/social/theHarvester/SpiderFoot against
+                  "{target}" and cite their evidence and relationships. Most useful when the subject
+                  is a domain, IP, email or similar recon target — a general topic subject will
+                  likely return nothing, which is expected.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={collectOsint}
+                  disabled={osintCollecting || collecting || !target.trim()}
+                  className="h-7 shrink-0 gap-1.5 border-[#8B5CF6]/40 text-[10px] text-[#8B5CF6] hover:bg-[#8B5CF6]/10"
+                >
+                  {osintCollecting ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Network className="size-3" />
+                  )}
+                  {osintCollecting ? "Running…" : "Include OSINT investigation"}
+                </Button>
+              </div>
+
+              {osintIncluded && (
+                <>
+                  <p className="mt-1.5 font-mono text-[9px] text-[#8B5CF6]">
+                    Included: {osintIncluded.evidence.length} evidence item(s) and{" "}
+                    {osintIncluded.relationships.length} relationship(s) from{" "}
+                    {osintIncluded.plan.collectors.length} candidate collector(s).
+                  </p>
+                  {osintIncluded.errors.map((e, i) => (
+                    <p key={i} className="mt-0.5 font-mono text-[9px] text-[#F59E0B]">
+                      ⚠ {e}
+                    </p>
+                  ))}
+                </>
+              )}
+
+              {osintError && (
+                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
+                  <span className="font-mono text-[10px] text-[#EF4444]">{osintError}</span>
                 </div>
               )}
             </CardContent>
