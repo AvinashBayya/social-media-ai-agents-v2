@@ -310,13 +310,60 @@ async function blueskySearchProbe(): Promise<CollectorProbe> {
   };
 }
 
+/**
+ * UCDP GED, the Module 5 conflict layer.
+ *
+ * It had no entry in this registry at all, so the one collector in the system
+ * that is switched off by a missing credential never appeared on the collector
+ * status page — it was neither "down" nor "no-credential", it was simply absent,
+ * and the only place its state surfaced was inside the /gis layer card.
+ *
+ * Not probed when a token IS configured: a probe would spend a request against
+ * an academic API on every page load, and the /gis conflict layer already
+ * exercises the real call.
+ */
+async function ucdpProbe(): Promise<CollectorProbe> {
+  const checkedAt = new Date().toISOString();
+  const base = {
+    id: "ucdp",
+    name: "UCDP GED conflict events",
+    module: "M5" as const,
+    endpoint: "https://ucdpapi.pcr.uu.se/api/gedevents/24.1",
+    httpStatus: null,
+    latencyMs: null,
+    checkedAt,
+  };
+
+  const resolved = await resolveCredential("ucdp");
+  if (!resolved) {
+    return {
+      ...base,
+      status: "no-credential",
+      detail:
+        "UCDP GED began requiring an access token before 2026-08-04 and answers HTTP 401 " +
+        "without one, on every dataset version. Set UCDP_API_TOKEN, or add a token on the " +
+        "Settings page, to enable the conflict layer. No events are shown — that is a missing " +
+        "credential, not a finding that no conflicts occurred.",
+    };
+  }
+  return {
+    ...base,
+    status: "not-probeable",
+    detail:
+      `A token is configured (source: ${resolved.source}). Not probed here because a probe would ` +
+      "spend a request against an academic API on every load; the conflict layer on the GIS page " +
+      "makes the real call.",
+  };
+}
+
 export async function probeCollectors(): Promise<CollectorProbe[]> {
-  const [probed, reddit, blueskySearch] = await Promise.all([
+  const [probed, reddit, blueskySearch, ucdp] = await Promise.all([
     Promise.all(SPECS.map(probeOne)),
     redditProbe(),
     blueskySearchProbe(),
+    ucdpProbe(),
   ]);
-  return [...probed, reddit, blueskySearch, ...unprobeable()];
+  return [...probed, reddit, blueskySearch, ucdp, ...unprobeable()];
 }
 
 export const collectorHealth = createServerFn({ method: "GET" })

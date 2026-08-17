@@ -592,7 +592,7 @@ async function _getMetadata(url: string): Promise<ServerResponse<YoutubeMetadata
           id: details.videoId,
           title: details.title,
           description: details.description || "",
-          uploader: details.author?.name || details.ownerChannelName || "Unknown Uploader",
+          uploader: details.author?.name || details.ownerChannelName || "channel not reported",
           channel_id: details.author?.channel_url || details.author?.id || "",
           /*
            * ytdl-core names this `publishDate`, not `uploadDate`.
@@ -654,9 +654,12 @@ async function _getMetadata(url: string): Promise<ServerResponse<YoutubeMetadata
       success: true,
       data: {
         id: videoId,
-        title: data.title || "Untitled Video",
-        description: `Channel: ${data.author_name || "YouTube Uploader"}\nURL: ${data.author_url || ""}`,
-        uploader: data.author_name || "YouTube Uploader",
+        title: data.title || "title not reported",
+        // "YouTube Uploader" stood in the `uploader` field, where it reads as a
+        // channel identity — an invented attribution for a video whose channel
+        // oEmbed did not name. The absence is now stated as an absence.
+        description: `Channel: ${data.author_name || "channel not reported"}\nURL: ${data.author_url || ""}`,
+        uploader: data.author_name || "channel not reported",
         channel_id: data.author_url || "",
         // Not "unknown because the video has none" — unknown because this
         // endpoint does not carry them. The provenance label says which.

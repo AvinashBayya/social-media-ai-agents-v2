@@ -65,7 +65,28 @@ import { renderProductPdf } from "@/utils/report-pdf";
  * the resulting brief is validated to resolve back to a pinned item.
  */
 
+/**
+ * `?case=INV-1001` preselects a case.
+ *
+ * Added because /vault and /live both linked here carrying a case id that this
+ * route then ignored — the vault's LINK CASE row rendered
+ * `<Link to="/investigations">{caseId}</Link>` with no param at all, so clicking
+ * a case reference landed on the list with an arbitrary case selected.
+ *
+ * Validation is deliberately strict about SHAPE, not existence: an id that no
+ * longer resolves is handled in the component with a visible message, because
+ * "this case was deleted" and "this link is malformed" are different facts. The
+ * precedent is /images, which shipped a hand-off with no validateSearch and
+ * silently did nothing.
+ */
 export const Route = createFileRoute("/investigations")({
+  validateSearch: (search: Record<string, unknown>): { case?: string } => {
+    const raw = search.case;
+    if (typeof raw !== "string") return {};
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > 64) return {};
+    return { case: trimmed };
+  },
   head: () => ({ meta: [{ title: "AI Investigations — Sentinel AI" }] }),
   component: InvestigationsPage,
 });
@@ -88,8 +109,11 @@ const KIND_COLOUR: Record<EvidenceKind, string> = {
 };
 
 function InvestigationsPage() {
+  const { case: requestedCase } = Route.useSearch();
   const [cases, setCases] = useState<Investigation[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  /** Set when ?case= named an id that is not in the store. */
+  const [missingCase, setMissingCase] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
   const [newTarget, setNewTarget] = useState("");
@@ -115,8 +139,29 @@ function InvestigationsPage() {
   };
 
   useEffect(() => {
-    refresh();
-  }, []);
+    const list = getInvestigations();
+    setCases(list);
+
+    // A requested case wins over the default selection. If it is not in the
+    // store the id is reported rather than silently falling through to whichever
+    // case happens to be first — the analyst followed a link to a SPECIFIC case
+    // and needs to know it is gone.
+    if (requestedCase) {
+      const found = list.find((c) => c.id === requestedCase);
+      if (found) {
+        setSelectedId(found.id);
+        setNoteDraft(found.notes);
+        return;
+      }
+      setMissingCase(requestedCase);
+    }
+    if (list.length > 0) {
+      setSelectedId(list[0].id);
+      setNoteDraft(list[0].notes);
+    } else {
+      setSelectedId("");
+    }
+  }, [requestedCase]);
 
   const active = useMemo(() => cases.find((c) => c.id === selectedId) ?? null, [cases, selectedId]);
   const metrics = useMemo(() => (active ? caseMetrics(active) : null), [active]);
@@ -286,6 +331,16 @@ function InvestigationsPage() {
               <FolderOpen className="size-3.5 text-[#3B82F6]" />
               Open cases ({cases.length})
             </h3>
+
+            {missingCase && !cases.some((c) => c.id === missingCase) && (
+              <div className="mt-2 flex items-start gap-1.5 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2">
+                <AlertTriangle className="mt-px size-3 shrink-0 text-[#F59E0B]" />
+                <p className="font-mono text-[9px] leading-relaxed text-[#F59E0B]">
+                  Case <span className="font-bold">{missingCase}</span> no longer exists. The link
+                  that brought you here points at a case that has been deleted.
+                </p>
+              </div>
+            )}
 
             {cases.length === 0 ? (
               <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">

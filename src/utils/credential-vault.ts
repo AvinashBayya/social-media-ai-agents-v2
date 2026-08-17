@@ -941,6 +941,20 @@ export interface CapabilityRow {
   unlocks: string;
   consumedBy: string;
   blockedReason?: string;
+  /**
+   * Where an operator obtains the credential, and the env vars that carry it.
+   *
+   * Added because the capability card said a collector was blocked without
+   * saying what to do about it — an analyst reading "No credential — collection
+   * blocked" had to go and find the provider registry to learn that a free
+   * Reddit script app fixes it. These are non-secret registry facts, so
+   * surfacing them costs nothing.
+   */
+  howTo: string;
+  envIdentifier?: string;
+  envSecret?: string;
+  /** True when `verifyProviderCredential` can make a real call for this one. */
+  verifiable: boolean;
 }
 
 /**
@@ -969,6 +983,10 @@ export async function buildCapabilityMatrix(): Promise<CapabilityRow[]> {
       unlocks: def.unlocks,
       consumedBy: def.consumedBy,
       blockedReason: def.blockedReason,
+      howTo: def.howTo,
+      envIdentifier: def.envIdentifier,
+      envSecret: def.envSecret,
+      verifiable: def.verifiable,
     });
   }
   return rows;

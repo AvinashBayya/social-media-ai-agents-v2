@@ -6,118 +6,71 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
+import {
+  getInvestigations,
+  pinToInvestigationWithId,
+  removeEvidence,
+  INVESTIGATIONS_CHANGED_EVENT,
+  type Investigation,
+} from "@/utils/investigations-store";
 import { sha256OfFile } from "@/utils/evidence";
+import {
+  appendEvidence,
+  deleteEvidence,
+  getEvidence,
+  nextEvidenceId,
+  saveEvidence,
+  setEvidenceCase,
+  type EvidenceRecord,
+} from "@/utils/evidence-store";
 import { EmptyState } from "@/components/workspace-ui";
 import {
-  FileArchive,
   Search,
-  Plus,
   UploadCloud,
   FileText,
   ImageIcon,
   Video as VideoIcon,
   Link2,
-  Share2,
-  Calendar,
-  MapPin,
   Shield,
   Tag,
   Download,
-  AlertTriangle,
+  Trash2,
+  Unlink,
   FolderLock,
 } from "lucide-react";
-import { SampleDataBanner } from "@/components/sample-data-banner";
 
 export const Route = createFileRoute("/vault")({
   head: () => ({ meta: [{ title: "Evidence Vault — Sentinel AI" }] }),
   component: VaultPage,
 });
 
-interface EvidenceItem {
-  id: string;
-  title: string;
-  type: "Image" | "Video" | "PDF" | "Screenshot" | "URL" | "Document" | "Social" | "News" | string;
-  timestamp: string;
-  source: string;
-  /** Real SHA-256 of the file bytes; null for manual records with no file. */
-  hash: string | null;
-  geo: string;
-  entities: string[];
-  caseId: string;
-  /** Null when no analyst has rated this item. Never auto-generated. */
-  risk: number | null;
-  tags: string[];
-  /** Null for manually-entered records where no file was supplied. */
-  fileSize?: string | null;
-  previewUrl?: string;
-  /**
-   * True for the demonstration records seeded on first load.
-   *
-   * The SampleDataBanner labels the VIEW, not the RECORDS. Once a real upload
-   * was unshifted onto the same array, the seeded items and analyst evidence
-   * were separable only by eyeballing the id or source string - and they sit in
-   * the same localStorage key. A flag on the record itself survives into
-   * storage, into anything pinned to a case, and into an export.
-   */
-  seeded?: true;
-}
+/**
+ * The record shape now lives in utils/evidence-store.ts, which is the single
+ * owner of the `sentinel_evidence` key. This alias keeps the existing local
+ * name working.
+ */
+type EvidenceItem = EvidenceRecord;
 
-const DEFAULT_EVIDENCE: EvidenceItem[] = [
-  {
-    id: "EVID-0402",
-    title: "Surveillance drone photo Vector-17",
-    type: "Image",
-    timestamp: "2026-07-24 09:31:02 UTC",
-    source: "Telegram · channel_9821",
-    // Seeded record: no file was ever hashed, so there is no digest.
-    hash: null,
-    geo: "35.6892° N, 51.3890° E",
-    entities: ["Vector-17", "Drone"],
-    caseId: "INV-2041",
-    risk: null,
-    tags: ["surveillance", "exif", "dossier"],
-    fileSize: "4.2 MB",
-    seeded: true,
-  },
-  {
-    id: "EVID-0405",
-    title: "Redacted Surveillance memo PDF",
-    type: "PDF",
-    timestamp: "2026-07-24 08:58:14 UTC",
-    source: "Anonfiles leak link",
-    // Seeded record: no file was ever hashed, so there is no digest.
-    hash: null,
-    geo: "Global / Tor Network",
-    entities: ["Vector-17", "Fintech vendor"],
-    caseId: "INV-2041",
-    risk: null,
-    tags: ["confidential", "memo", "leak"],
-    fileSize: "1.8 MB",
-    seeded: true,
-  },
-  {
-    id: "EVID-0391",
-    title: "#ElectionIntegrity bot networks tweet log",
-    type: "Social",
-    timestamp: "2026-07-23 14:12:00 UTC",
-    source: "Twitter feed watch",
-    // Seeded record: no file was ever hashed, so there is no digest.
-    //
-    // The literal that stood here was 66 hex characters — not a SHA-256 at all,
-    // which no reader would ever have noticed. That is the argument against
-    // fabricating this field in particular: the digest is the one value this
-    // page exists to guarantee, and an invented one is unfalsifiable by eye.
-    hash: null,
-    geo: "United States",
-    entities: ["CIB cluster", "Election narrative"],
-    caseId: "INV-2038",
-    risk: null,
-    tags: ["social", "cib", "disinfo"],
-    fileSize: "245 KB",
-    seeded: true,
-  },
-];
+/*
+ * DEFAULT_EVIDENCE is gone.
+ *
+ * It seeded three demonstration records — "Surveillance drone photo Vector-17",
+ * a redacted memo, and an #ElectionIntegrity bot log — and every one of them
+ * carried a caseId of INV-2041 or INV-2038. `createInvestigation` numbers cases
+ * from INV-1001 upward, so those ids could never exist; combined with the v2
+ * investigations wipe that guarantees a fresh browser holds zero cases, the
+ * LINK CASE row on every seeded card rendered a bold blue case reference that
+ * resolved to nothing at all.
+ *
+ * One of them also used to carry a fabricated 66-character "SHA-256" — not a
+ * SHA-256 at all, and unnoticed for months. That is the argument against seeding
+ * this store in particular: the digest is the one value this page exists to
+ * guarantee, and an invented one is unfalsifiable by eye.
+ *
+ * The vault now starts empty. `withoutSeeded` in the store removes any seeded
+ * rows left in a browser that loaded the old build, without touching real
+ * uploads or attested captures sharing the same key.
+ */
 
 /**
  * Human file size that does not round small files to "0.0 MB".
@@ -140,40 +93,48 @@ function VaultPage() {
   const [isDragging, setIsDragging] = useState(false);
 
   // Upload Form state
-  const [cases, setCases] = useState<any[]>([]);
+  const [cases, setCases] = useState<Investigation[]>([]);
   const [uploadCaseId, setUploadCaseId] = useState("");
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadType, setUploadType] = useState("Image");
-  const [uploadGeo, setUploadGeo] = useState("Global");
+  const [uploadGeo, setUploadGeo] = useState("");
   const [uploadTags, setUploadTags] = useState("");
 
-  // Load evidence from localStorage
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const store = localStorage.getItem("sentinel_evidence");
-      if (store) {
-        try {
-          setEvidenceList(JSON.parse(store));
-        } catch {
-          setEvidenceList(DEFAULT_EVIDENCE);
-        }
-      } else {
-        localStorage.setItem("sentinel_evidence", JSON.stringify(DEFAULT_EVIDENCE));
-        setEvidenceList(DEFAULT_EVIDENCE);
-      }
-
-      // Load cases
-      const caseList = getInvestigations();
-      setCases(caseList);
-      if (caseList.length > 0) {
-        setUploadCaseId(caseList[0].id);
-      }
-    }
+    setEvidenceList(getEvidence());
   }, []);
 
-  const saveEvidence = (list: EvidenceItem[]) => {
+  /**
+   * Keep the case list live.
+   *
+   * `getInvestigations()` used to run once inside a mount-only effect, so a case
+   * created on /investigations — or by PinButton on any other page, or in
+   * another tab — was invisible to the LINK CASE dropdown until a full reload.
+   * `saveInvestigations` now announces itself, and `storage` covers other tabs.
+   */
+  useEffect(() => {
+    const load = () => setCases(getInvestigations());
+    load();
+    window.addEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
+    window.addEventListener("storage", load);
+    window.addEventListener("focus", load);
+    return () => {
+      window.removeEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
+      window.removeEventListener("storage", load);
+      window.removeEventListener("focus", load);
+    };
+  }, []);
+
+  // A case that vanished while this page was open must not stay selected.
+  useEffect(() => {
+    if (uploadCaseId && !cases.some((c) => c.id === uploadCaseId)) setUploadCaseId("");
+  }, [cases, uploadCaseId]);
+
+  const caseExists = (id: string) => cases.some((c) => c.id === id);
+
+  const persist = (list: EvidenceItem[]) => {
     setEvidenceList(list);
-    localStorage.setItem("sentinel_evidence", JSON.stringify(list));
+    saveEvidence(list);
   };
 
   // Drag and drop handlers
@@ -242,7 +203,10 @@ function VaultPage() {
     hash: string | null,
   ) => {
     const list = [...evidenceList];
-    const newId = `EVID-0${400 + list.length + 1}`;
+    // Was `EVID-0${400 + list.length + 1}`, which reuses an id the moment
+    // anything is deleted — two different exhibits under one identifier, in the
+    // one store whose purpose is identifying exhibits.
+    const newId = nextEvidenceId(list);
 
     const newItem: EvidenceItem = {
       id: newId,
@@ -252,8 +216,10 @@ function VaultPage() {
       source: "Local drag & drop upload",
       // Real SHA-256 of the uploaded bytes.
       hash,
-      geo: uploadGeo || "Global",
-      entities: ["General Subject"],
+      // `|| "Global"` rendered under a GEOPOINT label, so an analyst who typed
+      // no location saw a location. "Global" is not a coordinate.
+      geo: uploadGeo.trim() || "not recorded",
+      entities: [],
       caseId: uploadCaseId,
       // Risk was Math.round(50 + Math.random() * 40) — an invented score that then
       // drove the high/medium tone on the pinned investigation entry. There is no
@@ -265,30 +231,89 @@ function VaultPage() {
       fileSize: size,
     };
 
-    list.unshift(newItem);
-    saveEvidence(list);
-
-    // Automatically pin evidence to related investigation if assigned
+    /*
+     * The pin result is now honoured.
+     *
+     * This block ignored `pinToInvestigation`'s return value and then toasted
+     * "…linked to case ${uploadCaseId}" unconditionally — including when
+     * uploadCaseId was the empty string, which produced "linked to case " and
+     * claimed a link that had not been made. The function returns null both when
+     * the case is gone and when this URL is already pinned to it.
+     */
     if (uploadCaseId) {
-      pinToInvestigation(uploadCaseId, {
+      const evidenceId = pinToInvestigationWithId(uploadCaseId, {
         kind: "note",
         title: name,
         source: "Evidence vault upload",
+        // A real event time: this is when the analyst added the file, not an
+        // invented publication date for its contents.
         publishedAt: new Date().toISOString(),
-        excerpt: `${type} attached to the evidence vault (${size}).`,
+        excerpt: `${type} attached to the evidence vault${size ? ` (${size})` : ""}.`,
         credibility: null,
         credibilityRationale:
           "Analyst-supplied file. Its SHA-256 is recorded in the vault; nothing about its " +
           "contents has been assessed.",
         data: newItem,
       });
-    }
 
-    toast.success(`Evidence node ${newId} initialized and linked to case ${uploadCaseId}`);
+      if (evidenceId) {
+        newItem.pinnedEvidenceId = evidenceId;
+        list.unshift(newItem);
+        persist(list);
+        toast.success(`Evidence ${newId} recorded and pinned to ${uploadCaseId}.`);
+      } else {
+        list.unshift(newItem);
+        persist(list);
+        toast.info(
+          `Evidence ${newId} recorded, but not pinned — ${uploadCaseId} no longer exists or ` +
+            `already holds this item.`,
+        );
+      }
+    } else {
+      list.unshift(newItem);
+      persist(list);
+      toast.success(`Evidence ${newId} recorded. No case linked.`);
+    }
 
     // Clear inputs
     setUploadTitle("");
     setUploadTags("");
+  };
+
+  /**
+   * Delete a record, and the copy inside its case.
+   *
+   * Removing only the vault row would leave the case citing an exhibit that no
+   * longer exists — and `sourcesFromEvidence` feeds pinned evidence straight
+   * into Module 5's citation validator, so the dangling entry would surface as a
+   * numbered source in a generated product.
+   */
+  const removeRecord = (item: EvidenceItem, e: React.MouseEvent) => {
+    // Required: the card itself has an onClick that selects the record, so
+    // without this the delete button would also select what it just removed.
+    e.stopPropagation();
+    if (item.caseId && item.pinnedEvidenceId) {
+      removeEvidence(item.caseId, item.pinnedEvidenceId);
+    }
+    const next = deleteEvidence(item.id);
+    setEvidenceList(next);
+    if (selectedItem?.id === item.id) setSelectedItem(null);
+    toast.success(
+      item.caseId && item.pinnedEvidenceId
+        ? `${item.id} deleted, and removed from ${item.caseId}.`
+        : `${item.id} deleted.`,
+    );
+  };
+
+  /** Break the case link without deleting the evidence record. */
+  const unlinkCase = (item: EvidenceItem) => {
+    if (item.caseId && item.pinnedEvidenceId) {
+      removeEvidence(item.caseId, item.pinnedEvidenceId);
+    }
+    const next = setEvidenceCase(item.id, "", null);
+    setEvidenceList(next);
+    setSelectedItem(next.find((e) => e.id === item.id) ?? null);
+    toast.success(`${item.id} unlinked from ${item.caseId || "its case"}.`);
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
@@ -332,7 +357,11 @@ function VaultPage() {
         title="Evidence Vault"
         description="Files dropped here are hashed with SHA-256 in your browser and the digest is recorded. The bytes are not stored, and this is not tamper-proof storage - records live in this browser only."
       />
-      <SampleDataBanner detail="Records badged SEEDED are demonstration entries that carry no digest - no file was ever hashed for them. Anything you drop in is hashed for real." />
+      {/*
+        The SampleDataBanner is gone with the records it described. Nothing in
+        this vault is seeded any more — every record here was put here by an
+        analyst, and every digest is a real SHA-256 of real bytes.
+      */}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-[#94A3B8]">
         {/* Main Vault Workspace */}
@@ -358,15 +387,22 @@ function VaultPage() {
                 <select
                   value={uploadCaseId}
                   onChange={(e) => setUploadCaseId(e.target.value)}
-                  className="px-1 border border-[#263548] bg-[#0B1220] rounded h-5 text-[9px] text-[#06B6D4]"
+                  aria-label="Link uploaded evidence to a case"
+                  className="h-5 rounded border border-[#263548] bg-[#0B1220] px-1 text-[9px] text-[#06B6D4]"
                 >
                   <option value="">-- No Case Link --</option>
+                  {/* Was the bare id. The title is what an analyst recognises. */}
                   {cases.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.id}
+                      {c.id} · {c.title}
                     </option>
                   ))}
                 </select>
+                {cases.length === 0 && (
+                  <Link to="/investigations" className="text-[#3B82F6] hover:underline">
+                    no cases yet — create one
+                  </Link>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <span className="text-white">TAGS:</span>
@@ -505,22 +541,36 @@ function VaultPage() {
                         <span className="font-bold text-[#06B6D4] flex items-center gap-1">
                           <IconComponent className="size-3" /> {item.id}
                         </span>
-                        <span>{item.fileSize || "no file"}</span>
-                        {item.seeded && (
-                          <Badge className="ml-1 h-4 rounded-none border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[8px] text-[#F59E0B]">
-                            SEEDED
-                          </Badge>
-                        )}
+                        <span className="ml-auto">{item.fileSize || "no file"}</span>
+                        <button
+                          onClick={(e) => removeRecord(item, e)}
+                          aria-label={`Delete evidence record ${item.id}`}
+                          title="Delete this record"
+                          className="shrink-0 text-[#64748B] hover:text-[#EF4444]"
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
                       </div>
-                      <h4 className="font-semibold text-white text-[11px] line-clamp-1">
+                      <h4 className="line-clamp-1 text-[11px] font-semibold text-white">
                         {item.title}
                       </h4>
 
-                      <div className="flex justify-between text-[8px] border-t border-[#263548]/30 pt-1.5">
-                        <span className="text-[#94A3B8]/70 truncate max-w-[140px]">
+                      <div className="flex justify-between border-t border-[#263548]/30 pt-1.5 text-[8px]">
+                        <span className="max-w-[140px] truncate text-[#94A3B8]/70">
                           {item.source}
                         </span>
-                        <span className="text-[#3B82F6] font-bold">{item.caseId}</span>
+                        {/*
+                          An unlinked record used to render an empty span here,
+                          and a record pointing at a deleted case rendered its id
+                          in the same confident blue as a live one.
+                        */}
+                        {!item.caseId ? (
+                          <span className="text-[#64748B]">no case</span>
+                        ) : caseExists(item.caseId) ? (
+                          <span className="font-bold text-[#3B82F6]">{item.caseId}</span>
+                        ) : (
+                          <span className="text-[#F59E0B]">{item.caseId} (missing)</span>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -571,14 +621,41 @@ function VaultPage() {
                           {selectedItem.geo}
                         </span>
                       </div>
-                      <div className="flex justify-between">
+                      {/*
+                        This rendered `<Link to="/investigations">{caseId}</Link>`
+                        with no search param, so clicking a case reference landed
+                        on the case list with an arbitrary case selected. The id
+                        also went unchecked, and the seeded records pointed at
+                        INV-2041 / INV-2038 — ids the store can never mint — so
+                        the link was frequently to a case that cannot exist.
+                      */}
+                      <div className="flex items-start justify-between gap-2">
                         <span className="text-[#94A3B8]/60">LINK CASE:</span>
-                        <Link
-                          to="/investigations"
-                          className="text-[#3B82F6] hover:underline font-bold"
-                        >
-                          {selectedItem.caseId}
-                        </Link>
+                        {!selectedItem.caseId ? (
+                          <span className="text-[#64748B]">not linked</span>
+                        ) : caseExists(selectedItem.caseId) ? (
+                          <span className="flex items-center gap-1.5">
+                            <Link
+                              to="/investigations"
+                              search={{ case: selectedItem.caseId }}
+                              className="font-bold text-[#3B82F6] hover:underline"
+                            >
+                              {selectedItem.caseId}
+                            </Link>
+                            <button
+                              onClick={() => unlinkCase(selectedItem)}
+                              aria-label="Unlink this evidence from its case"
+                              title="Unlink from case"
+                              className="text-[#64748B] hover:text-[#EF4444]"
+                            >
+                              <Unlink className="size-3" />
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="text-right text-[#F59E0B]">
+                            {selectedItem.caseId} no longer exists
+                          </span>
+                        )}
                       </div>
                       <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
                         <div className="text-[#94A3B8]/50 uppercase text-[8px]">

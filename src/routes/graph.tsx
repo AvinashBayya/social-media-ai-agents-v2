@@ -1,136 +1,338 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Search, ZoomIn, ZoomOut } from "lucide-react";
-import { SampleDataBanner } from "@/components/sample-data-banner";
+import { Search, ZoomIn, ZoomOut, Loader2, AlertTriangle, Info, Network } from "lucide-react";
+import { getActiveTarget } from "@/utils/active-target";
+import { fetchNews } from "./news";
+import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
+import { clusterStories, type Article } from "@/utils/analysis";
+import { defaultFactors, scoreCorpus, type CredibilityScore } from "@/utils/credibility";
+import {
+  buildEntityGraph,
+  layoutGraph,
+  nodeRadius,
+  shortestPath,
+  COOCCURRENCE_CAVEAT,
+  type EntityGraph,
+  type GraphArticleInput,
+  type PositionedNode,
+} from "@/utils/graph-build";
+import { PinButton } from "@/components/pin-button";
+import type { EntityType } from "@/types/core";
+
+/**
+ * Knowledge Graph — Module 2.
+ *
+ * What this page used to be: ten nodes and ten edges written into the file, with
+ * literal x/y coordinates. Vector-17, Aster Motors, channel_9821,
+ * vector17@proton.me, "+91 98••••4211". No fetch, no server function, no
+ * `useEffect` anywhere in the module. Beside it, a permanently-selected node card
+ * asserting "Risk score 88 / 100" and "Connections 12" — a number that
+ * contradicted the ten edges drawn next to it — and a hardcoded "Shortest path"
+ * naming the same three fictional entities every time.
+ *
+ * It now runs the pipeline `/entities` already runs successfully: collect a live
+ * corpus for the active target, extract entities per article with the configured
+ * open-weight model, and build a co-occurrence graph from the result. Every node
+ * and edge traces back to article ids the analyst can open.
+ *
+ * Extraction stays MANUAL. One model call per article on page load would empty a
+ * free tier immediately — the same reason `/entities` makes it a per-article
+ * button.
+ */
 
 export const Route = createFileRoute("/graph")({
   head: () => ({ meta: [{ title: "Knowledge Graph — Sentinel AI" }] }),
   component: Page,
 });
 
-type Node = {
-  id: string;
-  label: string;
-  type: "person" | "org" | "country" | "domain" | "phone" | "email" | "social";
-  x: number;
-  y: number;
-  r: number;
+/**
+ * Colours for the canonical `core.ts` vocabulary.
+ *
+ * The old legend also listed `domain`, `phone`, `email` and `social`. No
+ * extractor in this system produces those types, so a legend entry for them
+ * advertised a capability that does not exist.
+ */
+const TYPE_STYLE: Record<EntityType, string> = {
+  PERSON: "oklch(0.6 0.19 255)",
+  ORG: "oklch(0.68 0.17 145)",
+  LOCATION: "oklch(0.78 0.16 85)",
+  EVENT: "oklch(0.62 0.23 27)",
+  EQUIPMENT: "oklch(0.55 0.15 300)",
+  OTHER: "oklch(0.5 0.02 250)",
 };
-const NODES: Node[] = [
-  { id: "v17", label: "Vector-17", type: "person", x: 400, y: 260, r: 22 },
-  { id: "ch", label: "channel_9821", type: "social", x: 260, y: 180, r: 16 },
-  { id: "am", label: "Aster Motors", type: "org", x: 550, y: 200, r: 20 },
-  { id: "sy", label: "Syria", type: "country", x: 340, y: 360, r: 18 },
-  { id: "ru", label: "Russia", type: "country", x: 180, y: 340, r: 18 },
-  { id: "dom", label: "aster-motors.com", type: "domain", x: 640, y: 300, r: 14 },
-  { id: "ph", label: "+91 98••••4211", type: "phone", x: 500, y: 400, r: 12 },
-  { id: "em", label: "vector17@proton.me", type: "email", x: 300, y: 440, r: 14 },
-  { id: "hn", label: "@osint_watch", type: "social", x: 180, y: 230, r: 14 },
-  { id: "ort", label: "M. Ortega", type: "person", x: 620, y: 420, r: 12 },
-];
-const EDGES: [string, string, string][] = [
-  ["v17", "ch", "posts via"],
-  ["v17", "em", "owns"],
-  ["v17", "sy", "located"],
-  ["ch", "ru", "hosted"],
-  ["ch", "hn", "amplifies"],
-  ["am", "dom", "operates"],
-  ["am", "v17", "mentioned"],
-  ["ph", "v17", "linked"],
-  ["ort", "am", "employee"],
-  ["hn", "v17", "reports on"],
-];
 
-const TYPE_STYLE: Record<Node["type"], { fill: string; ring: string }> = {
-  person: { fill: "oklch(0.6 0.19 255)", ring: "oklch(0.6 0.19 255)" },
-  org: { fill: "oklch(0.68 0.17 145)", ring: "oklch(0.68 0.17 145)" },
-  country: { fill: "oklch(0.78 0.16 85)", ring: "oklch(0.78 0.16 85)" },
-  domain: { fill: "oklch(0.7 0.16 210)", ring: "oklch(0.7 0.16 210)" },
-  phone: { fill: "oklch(0.62 0.23 27)", ring: "oklch(0.62 0.23 27)" },
-  email: { fill: "oklch(0.55 0.15 300)", ring: "oklch(0.55 0.15 300)" },
-  social: { fill: "oklch(0.4 0.02 250)", ring: "oklch(0.4 0.02 250)" },
-};
+const VIEW_W = 800;
+const VIEW_H = 560;
 
 function Page() {
-  const byId = Object.fromEntries(NODES.map((n) => [n.id, n]));
+  const [target, setTarget] = useState(() => getActiveTarget());
+  const [searchVal, setSearchVal] = useState(() => getActiveTarget());
+
+  const [corpus, setCorpus] = useState<Article[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  const [extracted, setExtracted] = useState<Record<string, AnalysisEntity[]>>({});
+  const [extracting, setExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState({ done: 0, total: 0 });
+  const [extractError, setExtractError] = useState("");
+  const [model, setModel] = useState("");
+
   const [query, setQuery] = useState("");
   const [zoom, setZoom] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pathFrom, setPathFrom] = useState<string | null>(null);
 
-  /** Nodes matching the filter box. Empty query shows everything. */
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setSearchVal(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handler);
+    return () => window.removeEventListener("sentinel_target_changed", handler);
+  }, []);
+
+  // Collect a live corpus for the target. Extraction never runs automatically.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setLoadError("");
+      setExtracted({});
+      setExtractError("");
+      setSelectedId(null);
+      setPathFrom(null);
+      try {
+        const res: any = await fetchNews({ data: { query: target } });
+        if (cancelled) return;
+        const mapped: Article[] = (res?.stories ?? [])
+          .map((s: any, i: number) => ({
+            id: String(s.id ?? s.primaryLink ?? s.url ?? i),
+            title: s.primaryTitle || "",
+            source: s.primarySource || "",
+            url: s.primaryLink || s.url || "",
+            pubDate: s.pubDate || "",
+            body: s.body || "",
+          }))
+          .filter((a: Article) => a.title);
+        setCorpus(mapped);
+      } catch (err: any) {
+        if (!cancelled) setLoadError(err?.message ?? String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
+
+  // Module 1 scores, so a node can report the best-scored article naming it.
+  const scores = useMemo<Map<string, CredibilityScore>>(() => {
+    if (corpus.length === 0) return new Map();
+    const clusters = clusterStories(corpus);
+    return new Map(
+      scoreCorpus(corpus, defaultFactors(), { clusters }).map((s) => [s.article.id, s]),
+    );
+  }, [corpus]);
+
+  const graph: EntityGraph = useMemo(() => {
+    const articles: GraphArticleInput[] = corpus
+      .filter((a) => extracted[a.id]?.length)
+      .map((a) => ({
+        id: a.id,
+        source: a.source,
+        url: a.url,
+        credibility: scores.get(a.id)?.score ?? null,
+        entities: extracted[a.id].map((e) => ({
+          entity: e.entity,
+          type: e.type,
+          confidence: e.confidence,
+        })),
+      }));
+    return buildEntityGraph(articles);
+  }, [corpus, extracted, scores]);
+
+  const positioned: PositionedNode[] = useMemo(
+    () => layoutGraph(graph, { width: VIEW_W, height: VIEW_H }),
+    [graph],
+  );
+  const byId = useMemo(() => new Map(positioned.map((n) => [n.id, n])), [positioned]);
+
   const matched = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return new Set(NODES.map((n) => n.id));
+    if (!q) return new Set(positioned.map((n) => n.id));
     return new Set(
-      NODES.filter((n) => n.label.toLowerCase().includes(q) || n.type.includes(q)).map((n) => n.id),
+      positioned
+        .filter((n) => n.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q))
+        .map((n) => n.id),
     );
-  }, [query]);
+  }, [query, positioned]);
 
-  // Zoom scales the viewBox about the centre, so the fixed layout stays put.
+  const selected = selectedId ? (byId.get(selectedId) ?? null) : null;
+
+  /** Path between the pinned start node and the current selection. */
+  const path = useMemo(() => {
+    if (!pathFrom || !selectedId || pathFrom === selectedId) return null;
+    return shortestPath(graph, pathFrom, selectedId);
+  }, [graph, pathFrom, selectedId]);
+  const pathEdges = useMemo(() => {
+    if (!path) return new Set<string>();
+    const s = new Set<string>();
+    for (let i = 0; i < path.length - 1; i += 1) {
+      const [a, b] = path[i] < path[i + 1] ? [path[i], path[i + 1]] : [path[i + 1], path[i]];
+      s.add(`${a}|${b}`);
+    }
+    return s;
+  }, [path]);
+
   const vb = useMemo(() => {
-    const w = 800 / zoom;
-    const h = 560 / zoom;
-    return `${(800 - w) / 2} ${(560 - h) / 2} ${w} ${h}`;
+    const w = VIEW_W / zoom;
+    const h = VIEW_H / zoom;
+    return `${(VIEW_W - w) / 2} ${(VIEW_H - h) / 2} ${w} ${h}`;
   }, [zoom]);
+
+  const runExtraction = async () => {
+    const pending = corpus.filter((a) => !extracted[a.id]);
+    if (pending.length === 0) return;
+    setExtracting(true);
+    setExtractError("");
+    setExtractProgress({ done: 0, total: pending.length });
+    for (let i = 0; i < pending.length; i += 1) {
+      const article = pending[i];
+      try {
+        const res: any = await aiExtractEntities({ data: { article } });
+        setExtracted((prev) => ({ ...prev, [article.id]: res.entities ?? [] }));
+        setModel(res.model);
+      } catch (err: any) {
+        // Stop on the first failure and say how far it got. Continuing would
+        // build a graph over a partial corpus without saying so.
+        setExtractError(
+          `${err?.message ?? String(err)} — stopped after ${i} of ${pending.length} article(s).`,
+        );
+        break;
+      }
+      setExtractProgress({ done: i + 1, total: pending.length });
+    }
+    setExtracting(false);
+  };
+
+  const analysed = Object.keys(extracted).length;
+
   return (
     <AppShell>
       <PageHeader
         title="Knowledge Graph"
-        description="Explore relationships between people, organizations, places, and digital identifiers."
+        description="Entities co-mentioned across live open-source reporting on the active subject. Every node and edge is derived from collected articles."
       />
 
-      {/*
-        The SampleDataBanner used to be nested INSIDE the "Path finding" button.
-        A measurement of the rendered page found the consequences: the button
-        stretched to 1123px because it wrapped the whole 190-character warning,
-        its accessible name became the entire disclaimer, the banner overflowed
-        its 32px host, "Filter" and "Full screen" were pushed onto a second row,
-        and the warning text itself became a click target that activated a
-        button with no handler. It failed in the safe direction - the warning
-        got bigger, not hidden - but it belongs at page level.
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchVal}
+              onChange={(e) => setSearchVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && setTarget(searchVal.trim() || target)}
+              placeholder="Subject to collect reporting on..."
+              className="h-11 pl-9 pr-28 text-base"
+            />
+            <Button
+              size="sm"
+              onClick={() => setTarget(searchVal.trim() || target)}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2"
+            >
+              Collect
+            </Button>
+          </div>
 
-        The three header buttons are gone rather than left inert. "Path
-        finding", "Filter" and "Full screen" had no onClick, and neither did
-        Expand, Collapse, Highlight path or the two zoom controls. A control
-        that cannot do anything is worse than an absent one: it invites the
-        analyst to believe the capability exists.
-      */}
-      <SampleDataBanner detail="This graph is a fixed 10-node topology written into the page. It is NOT derived from collected entities, and no path finding, filtering or expansion is implemented." />
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-xs">
+            <span className="text-muted-foreground">
+              {loading
+                ? "Collecting corpus…"
+                : `${corpus.length} article(s) collected · ${analysed} analysed`}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto h-8 gap-1.5"
+              disabled={extracting || loading || corpus.length === 0 || analysed === corpus.length}
+              onClick={runExtraction}
+            >
+              {extracting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Network className="size-3.5" />
+              )}
+              {extracting
+                ? `Extracting ${extractProgress.done}/${extractProgress.total}…`
+                : `Extract entities from ${corpus.length - analysed} article(s)`}
+            </Button>
+            {model && <span className="font-mono text-[10px] text-muted-foreground">{model}</span>}
+          </div>
+
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            <Info className="mt-px size-3 shrink-0" />
+            Extraction is one model call per article and is never run automatically — on a free
+            tier, extracting a whole corpus on page load would exhaust it. {COOCCURRENCE_CAVEAT}
+          </p>
+        </CardContent>
+      </Card>
+
+      {loadError && (
+        <Card className="mb-4 border-destructive/40">
+          <CardContent className="flex items-start gap-2 p-3">
+            <AlertTriangle className="size-4 shrink-0 text-destructive" />
+            <div className="font-mono text-[11px] text-destructive">
+              <span className="font-bold">Collection failed.</span> No corpus was retrieved for
+              this subject.
+              <div className="pt-0.5 opacity-80">{loadError}</div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {extractError && (
+        <Card className="mb-4 border-destructive/40">
+          <CardContent className="flex items-start gap-2 p-3">
+            <AlertTriangle className="size-4 shrink-0 text-destructive" />
+            <div className="font-mono text-[11px] text-destructive">
+              <span className="font-bold">Extraction failed.</span> The graph below covers only
+              the articles that completed.
+              <div className="pt-0.5 opacity-80">{extractError}</div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <Card>
           <CardContent className="p-0">
-            <div className="flex items-center justify-between border-b px-4 py-2">
-              {/*
-                This was an uncontrolled <Input> with no value and no onChange -
-                typing into it did nothing at all. It now filters the fixed node
-                set, which is a real (if small) capability over real page state.
-              */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="h-8 w-64 pl-8 text-xs"
+                  className="h-8 w-56 pl-8 text-xs"
                   placeholder="Filter nodes by label or type..."
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                {Object.entries(TYPE_STYLE).map(([t, s]) => (
+                {Object.entries(TYPE_STYLE).map(([t, fill]) => (
                   <span key={t} className="flex items-center gap-1 text-muted-foreground">
-                    <span className="size-2.5 rounded-full" style={{ background: s.fill }} />
+                    <span className="size-2.5 rounded-full" style={{ background: fill }} />
                     {t}
                   </span>
                 ))}
               </div>
-              {/*
-                Both zoom buttons had no onClick and no aria-label, so they were
-                inert AND unreachable by name. They now scale the SVG viewBox,
-                which is real behaviour over real state.
-              */}
               <div className="flex gap-1">
                 <Button
                   variant="ghost"
@@ -152,6 +354,7 @@ function Page() {
                 </Button>
               </div>
             </div>
+
             <div
               className="relative h-[560px] w-full overflow-hidden rounded-b-lg"
               style={{
@@ -159,87 +362,107 @@ function Page() {
                   "radial-gradient(circle at 50% 45%, oklch(0.97 0.02 240), oklch(0.99 0.005 240))",
               }}
             >
-              <svg viewBox={vb} className="h-full w-full">
-                <defs>
-                  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path
-                      d="M24 0H0V24"
-                      fill="none"
-                      stroke="oklch(0.94 0.01 245)"
-                      strokeWidth="0.5"
-                    />
-                  </pattern>
-                </defs>
-                <rect width="800" height="560" fill="url(#grid)" />
-                {EDGES.map(([a, b, rel], i) => {
-                  const na = byId[a];
-                  const nb = byId[b];
-                  return (
-                    <g key={i}>
+              {positioned.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+                  <Network className="size-8 text-muted-foreground/40" />
+                  <p className="mt-3 text-sm font-medium">No graph yet.</p>
+                  <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+                    {corpus.length === 0
+                      ? "No corpus collected for this subject. Search above to collect open-source reporting."
+                      : "Nothing has been extracted yet. Run extraction to build the graph from the collected articles — this page holds no sample topology of its own."}
+                  </p>
+                </div>
+              ) : (
+                <svg viewBox={vb} className="h-full w-full">
+                  <defs>
+                    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                      <path
+                        d="M24 0H0V24"
+                        fill="none"
+                        stroke="oklch(0.94 0.01 245)"
+                        strokeWidth="0.5"
+                      />
+                    </pattern>
+                  </defs>
+                  <rect width={VIEW_W} height={VIEW_H} fill="url(#grid)" />
+
+                  {graph.edges.map((e) => {
+                    const na = byId.get(e.a);
+                    const nb = byId.get(e.b);
+                    if (!na || !nb) return null;
+                    const onPath = pathEdges.has(`${e.a}|${e.b}`);
+                    const dim = !matched.has(e.a) && !matched.has(e.b);
+                    return (
                       <line
+                        key={`${e.a}|${e.b}`}
                         x1={na.x}
                         y1={na.y}
                         x2={nb.x}
                         y2={nb.y}
-                        stroke="oklch(0.75 0.03 245)"
-                        strokeWidth="1.5"
-                      />
-                      <text
-                        x={(na.x + nb.x) / 2}
-                        y={(na.y + nb.y) / 2 - 4}
-                        textAnchor="middle"
-                        fontSize="9"
-                        fill="oklch(0.5 0.02 250)"
+                        stroke={onPath ? "oklch(0.62 0.23 27)" : "oklch(0.75 0.03 245)"}
+                        strokeWidth={onPath ? 3 : Math.min(4, 1 + e.weight * 0.6)}
+                        opacity={dim ? 0.12 : 0.85}
                       >
-                        {rel}
-                      </text>
-                    </g>
-                  );
-                })}
-                {NODES.map((n) => {
-                  const s = TYPE_STYLE[n.type];
-                  // Non-matching nodes dim rather than disappear, so the shape
-                  // of the graph stays readable while the filter narrows it.
-                  const hit = matched.has(n.id);
-                  return (
-                    <g key={n.id} opacity={hit ? 1 : 0.18}>
-                      <circle cx={n.x} cy={n.y} r={n.r + 6} fill={s.fill} opacity="0.15" />
-                      <circle
-                        cx={n.x}
-                        cy={n.y}
-                        r={n.r}
-                        fill="white"
-                        stroke={s.ring}
-                        strokeWidth="2"
-                      />
-                      <text
-                        x={n.x}
-                        y={n.y + n.r + 12}
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="600"
-                        fill="oklch(0.22 0.03 250)"
+                        <title>{`${na.label} — ${nb.label}: named together in ${e.weight} article(s)`}</title>
+                      </line>
+                    );
+                  })}
+
+                  {positioned.map((n) => {
+                    const hit = matched.has(n.id);
+                    const r = nodeRadius(n);
+                    const isSelected = n.id === selectedId;
+                    const isStart = n.id === pathFrom;
+                    return (
+                      <g
+                        key={n.id}
+                        opacity={hit ? 1 : 0.18}
+                        onClick={() => setSelectedId(n.id)}
+                        style={{ cursor: "pointer" }}
                       >
-                        {n.label}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-              {/*
-                Expand / Collapse / Highlight path all had no onClick. Expanding
-                a node means fetching its neighbours, and this graph has no data
-                source to fetch from; highlighting a path means a traversal over
-                a real edge set. Removed rather than left as decoration.
-              */}
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
-                  zoom {zoom.toFixed(1)}x
-                </span>
-                <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
-                  Reset view
-                </Button>
-              </div>
+                        <circle cx={n.x} cy={n.y} r={r + 6} fill={TYPE_STYLE[n.type]} opacity={0.15} />
+                        <circle
+                          cx={n.x}
+                          cy={n.y}
+                          r={r}
+                          fill="white"
+                          stroke={
+                            isStart
+                              ? "oklch(0.62 0.23 27)"
+                              : isSelected
+                                ? "oklch(0.3 0.02 250)"
+                                : TYPE_STYLE[n.type]
+                          }
+                          strokeWidth={isSelected || isStart ? 4 : 2}
+                        />
+                        <text
+                          x={n.x}
+                          y={n.y + r + 12}
+                          textAnchor="middle"
+                          fontSize="10"
+                          fontWeight="600"
+                          fill="oklch(0.22 0.03 250)"
+                        >
+                          {n.label.length > 24 ? `${n.label.slice(0, 23)}…` : n.label}
+                        </text>
+                        <title>{`${n.label} · ${n.type} · degree ${n.degree} · ${n.articleIds.length} article(s)`}</title>
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+
+              {positioned.length > 0 && (
+                <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                  <span className="rounded border bg-background/80 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                    {graph.nodes.length} nodes · {graph.edges.length} edges · zoom{" "}
+                    {zoom.toFixed(1)}x
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => setZoom(1)}>
+                    Reset view
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -250,39 +473,145 @@ function Page() {
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 Selected node
               </div>
-              <div className="mt-1 flex items-center gap-2">
-                <span
-                  className="size-3 rounded-full"
-                  style={{ background: TYPE_STYLE.person.fill }}
-                />
-                <h3 className="text-lg font-semibold">Vector-17</h3>
-              </div>
-              <Badge variant="outline" className="mt-1">
-                Person · Watchlist
-              </Badge>
-              <dl className="mt-3 space-y-1 text-xs">
-                <Row k="Aliases" v="V17, vect_seventeen" />
-                <Row k="Country" v="SY / RU" />
-                <Row k="First seen" v="2024-04-11" />
-                <Row k="Risk score" v="88 / 100" />
-                <Row k="Connections" v="12" />
-              </dl>
+              {!selected ? (
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  Click a node. This panel previously showed a fixed entity with a
+                  &ldquo;Risk score 88 / 100&rdquo; and &ldquo;Connections 12&rdquo; regardless of
+                  what was on screen. Nothing in this system computes a risk score, so none is
+                  shown.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span
+                      className="size-3 rounded-full"
+                      style={{ background: TYPE_STYLE[selected.type] }}
+                    />
+                    <h3 className="text-base font-semibold">{selected.label}</h3>
+                  </div>
+                  <Badge variant="outline" className="mt-1">
+                    {selected.type}
+                  </Badge>
+
+                  <dl className="mt-3 space-y-1 text-xs">
+                    <Row k="Connections" v={String(selected.degree)} />
+                    <Row k="Articles naming it" v={String(selected.articleIds.length)} />
+                    <Row k="Distinct publishers" v={String(selected.sources.length)} />
+                    <Row
+                      k="Best extractor confidence"
+                      v={`${(selected.bestConfidence * 100).toFixed(0)}%`}
+                    />
+                    <Row
+                      k="Best Module 1 credibility"
+                      v={
+                        selected.bestCredibility === null
+                          ? "not scored"
+                          : `${(selected.bestCredibility * 100).toFixed(0)}%`
+                      }
+                    />
+                  </dl>
+
+                  <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    Confidence and credibility are the highest observed, never a mean — averaging
+                    two model-reported confidences produces a third number no model asserted.
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <Button
+                      size="sm"
+                      variant={pathFrom === selected.id ? "default" : "outline"}
+                      className="h-7 text-[11px]"
+                      onClick={() =>
+                        setPathFrom((p) => (p === selected.id ? null : selected.id))
+                      }
+                    >
+                      {pathFrom === selected.id ? "Path start set" : "Set as path start"}
+                    </Button>
+                    <PinButton
+                      label="Pin"
+                      payload={{
+                        kind: "note",
+                        title: `Entity: ${selected.label} (${selected.type})`,
+                        source: `Module 2 knowledge graph · ${selected.sources.length} publisher(s)`,
+                        publishedAt: "",
+                        excerpt:
+                          `${selected.label} (${selected.type}) was named in ` +
+                          `${selected.articleIds.length} collected article(s) from ` +
+                          `${selected.sources.length} distinct publisher(s), co-mentioned with ` +
+                          `${selected.degree} other entity/entities. ${COOCCURRENCE_CAVEAT}`,
+                        credibility: selected.bestCredibility,
+                        credibilityRationale:
+                          selected.bestCredibility === null
+                            ? "No article naming this entity carried a Module 1 score."
+                            : "Highest Module 1 score among the articles naming this entity.",
+                      }}
+                    />
+                  </div>
+
+                  <div className="mt-3 border-t pt-2">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Source articles
+                    </div>
+                    <ul className="mt-1 space-y-1">
+                      {selected.articleIds.map((id) => {
+                        const a = corpus.find((x) => x.id === id);
+                        if (!a) return null;
+                        return (
+                          <li key={id} className="text-[11px] leading-snug">
+                            <a
+                              href={a.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              {a.title.slice(0, 70)}
+                              {a.title.length > 70 ? "…" : ""}
+                            </a>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              — {a.source || "publisher not reported"}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
+
           <Card>
             <CardContent className="p-4">
               <h3 className="text-sm font-semibold">Shortest path</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Vector-17 → Aster Motors</p>
-              <ol className="mt-2 space-y-1 text-xs">
-                <li>
-                  1. Vector-17 <span className="text-muted-foreground">mentioned</span> Aster Motors
-                </li>
-                <li>
-                  2. Vector-17 <span className="text-muted-foreground">posts via</span> channel_9821{" "}
-                  <span className="text-muted-foreground">→</span> @osint_watch{" "}
-                  <span className="text-muted-foreground">reports on</span> Aster Motors
-                </li>
-              </ol>
+              {!pathFrom || !selectedId ? (
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Select a node, press &ldquo;Set as path start&rdquo;, then select a second node.
+                  This card used to print a fixed two-hop route between the same fictional
+                  entities on every load.
+                </p>
+              ) : pathFrom === selectedId ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Start and end are the same node.
+                </p>
+              ) : path === null ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <strong>No path found in the collected graph.</strong> These two entities were
+                  never named in the same article, and no chain of co-mentions connects them.
+                  That is a finding about the corpus, not a failure.
+                </p>
+              ) : (
+                <ol className="mt-2 space-y-1 text-xs">
+                  {path.map((id, i) => (
+                    <li key={id}>
+                      {i + 1}. {byId.get(id)?.label ?? id}
+                      {i < path.length - 1 && (
+                        <span className="text-muted-foreground"> → co-mentioned with</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
             </CardContent>
           </Card>
         </div>

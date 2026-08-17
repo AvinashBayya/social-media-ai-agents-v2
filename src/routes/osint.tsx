@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { containsWord, matchesQuery, parseQueryCached } from "@/utils/search";
@@ -50,6 +50,18 @@ function CollectorAbsence({
     );
   }
   return <div className="py-8 text-center text-[#94A3B8]">{emptyLabel}</div>;
+}
+
+/**
+ * Is this failure specifically "no UCDP token"?
+ *
+ * Matched on the message `collectConflict` produces rather than on a status
+ * code, because the error crosses a server-function boundary as a string. A
+ * missing credential and a network fault need different things from the analyst,
+ * so they must not render the same.
+ */
+function isMissingUcdpToken(error: string | null): boolean {
+  return Boolean(error && error.includes("UCDP requires an API token"));
 }
 
 import { createServerFn } from "@tanstack/react-start";
@@ -395,44 +407,45 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const query = data?.query || data?.q || "";
 
-    // 1. Fetch UCDP GED events
+    /*
+     * 1. UCDP GED events.
+     *
+     * This used to be an independent second copy of the collector that hit
+     * ucdpapi.pcr.uu.se with ONLY a User-Agent header — no
+     * `x-ucdp-access-token`, no `resolveCredential("ucdp")`. UCDP has been
+     * token-gated since before 2026-08-04 and answers 401 on every dataset
+     * version without one, so this path failed unconditionally EVEN WHEN A
+     * TOKEN WAS CONFIGURED. An analyst could add the token on /settings, watch
+     * it verify against the live API, and see no change here.
+     *
+     * It also re-implemented the casualty null-handling that geo.ts:319-325
+     * warns was "fixed in osint.tsx's UCDP handler while this copy was missed" —
+     * the duplication had already caused one divergence.
+     *
+     * It now delegates to `collectConflict()`, which resolves the token
+     * environment-first-then-vault, records the credential use, maps through the
+     * single `fromUcdpEvent`, and returns an explicit missing-credential message
+     * rather than an empty array.
+     */
     const fetchUcdp = async () => {
-      try {
-        const res = await fetch("https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=30", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const list = data.Result || [];
-          return list.map((e: any) => ({
-            id: e.id,
-            country: e.country,
-            // An event with NO casualty figures reported is not an event with
-            // zero casualties. Only sum the fields UCDP actually supplied;
-            // null means unreported and renders as such.
-            deaths: [e.deaths_a, e.deaths_b, e.deaths_civilians].some(
-              (v: unknown) => v !== null && v !== undefined && v !== "",
-            )
-              ? Number(e.deaths_a || 0) + Number(e.deaths_b || 0) + Number(e.deaths_civilians || 0)
-              : null,
-            latitude: e.latitude,
-            longitude: e.longitude,
-            date: e.date_start,
-            // null, not "State Conflict" — that invented a conflict
-            // classification for any event whose id UCDP did not supply.
-            conflict: e.conflict_new_id || null,
-          }));
-        }
-      } catch (err) {
-        console.error("UCDP fetch failed:", err);
-        // Rethrow so the caller can name the cause. Returning [] here rendered
-        // "No conflict events found." for what is usually a 401 - UCDP GED
-        // requires an access token, and a missing credential was being shown to
-        // the analyst as an absence of armed conflict.
-        throw err;
-      }
-      return [];
+      const { collectConflict } = await import("@/utils/geo-sources");
+      const layer = await collectConflict();
+      if (layer.error) throw new Error(layer.error);
+      return layer.records.map((r) => ({
+        id: r.id,
+        // detail.country is UCDP's own country field. `locates` describes the
+        // coordinate's precision, not the place.
+        country: (r.detail as any)?.country ?? "country not reported",
+        // Already null-vs-zero correct in fromUcdpEvent: null means UCDP
+        // reported no casualty figure, which is not the same as zero deaths.
+        deaths: r.magnitude,
+        latitude: r.lat,
+        longitude: r.lon,
+        date: r.timestamp,
+        // The parties, or UCDP's conflict name. Never a substituted
+        // "State Conflict" label for an event UCDP did not classify.
+        conflict: r.title,
+      }));
     };
 
     // 2. Fetch GDELT Doc API
@@ -452,7 +465,12 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
             id: idx,
             title: a.title,
             url: a.url,
-            source: a.source || "GDELT",
+            // Was `|| "GDELT"`. GDELT is the aggregator that returned the
+            // article, not the outlet that published it — naming it as the
+            // source attributes the reporting to the wrong organisation. This
+            // is the same class of error rss-source.ts exists to fix, where
+            // every Google News redirect was scored as news.google.com.
+            source: a.source || "publisher not reported",
             date: a.seendate || null,
           }));
         }
@@ -470,10 +488,13 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
               id: idx,
               title: item.title,
               url: item.link,
+              // `|| "Google News"` named the aggregator as the publisher. Every
+              // item here is a Google News redirect to some other outlet, so
+              // that attributed the reporting to the wrong organisation.
               source:
                 typeof item.source === "object"
                   ? (item.source as any).text
-                  : item.source || "Google News",
+                  : item.source || "publisher not reported",
               date: item.pubDate || null,
             }));
           } catch (rssErr) {
@@ -585,10 +606,11 @@ export const fetchRSSAggregator = createServerFn({ method: "GET" })
           // carried no date invents a publication time, and the RSS panel sorts
           // and displays that value as though the outlet reported it.
           pubDate: item.pubDate ?? null,
+          // Same as above: the aggregator is not the publisher.
           source:
             typeof item.source === "object"
               ? (item.source as any).text
-              : item.source || "Google News",
+              : item.source || "publisher not reported",
         }));
       } catch (err) {
         console.error("Failed to parse dynamic incident RSS feed:", err);
@@ -1415,11 +1437,57 @@ function Page() {
                     <RefreshCw className="size-6 animate-spin text-primary" />
                   </div>
                 ) : filteredUcdp.length === 0 ? (
-                  <CollectorAbsence
-                    error={geopoliticalData?.ucdpError ?? null}
-                    loading={isLoading}
-                    emptyLabel="UCDP answered; no conflict events matched."
-                  />
+                  isMissingUcdpToken(geopoliticalData?.ucdpError ?? null) ? (
+                    /*
+                      A missing credential is not a collection failure and is
+                      certainly not a finding that no armed conflict occurred.
+                      It has one specific remedy, so it gets its own panel that
+                      names the variable and links to where the token is entered.
+                    */
+                    <div className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-4 text-[10px]">
+                      <div className="font-bold uppercase text-[#F59E0B]">
+                        UCDP access token not configured
+                      </div>
+                      <p className="mt-1 leading-relaxed text-[#94A3B8]">
+                        UCDP GED returns HTTP 401 without one, so no events could be requested.
+                        <strong className="text-[#F59E0B]">
+                          {" "}
+                          This is a missing credential, not a finding that no conflicts occurred.
+                        </strong>
+                      </p>
+                      <ul className="mt-2 space-y-1 text-[#64748B]">
+                        <li>
+                          Set <code className="text-[#06B6D4]">UCDP_API_TOKEN</code> in the
+                          deployment environment (the durable path), or
+                        </li>
+                        <li>
+                          add a UCDP token on{" "}
+                          <Link to="/settings" className="text-[#3B82F6] hover:underline">
+                            Settings
+                          </Link>{" "}
+                          and press Verify — the provider and its live probe already exist there.
+                        </li>
+                        <li>
+                          Request a token at{" "}
+                          <a
+                            href="https://ucdp.uu.se/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#3B82F6] hover:underline"
+                          >
+                            ucdp.uu.se
+                          </a>
+                          .
+                        </li>
+                      </ul>
+                    </div>
+                  ) : (
+                    <CollectorAbsence
+                      error={geopoliticalData?.ucdpError ?? null}
+                      loading={isLoading}
+                      emptyLabel="UCDP answered; no conflict events matched."
+                    />
+                  )
                 ) : (
                   filteredUcdp.map((event: any, idx: number) => (
                     <div

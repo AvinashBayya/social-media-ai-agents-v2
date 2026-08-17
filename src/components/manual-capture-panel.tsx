@@ -29,41 +29,18 @@ import {
   type CapturePlatform,
 } from "@/utils/manual-evidence";
 import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
+import { appendEvidence, type EvidenceRecord } from "@/utils/evidence-store";
 
-const EVIDENCE_KEY = "sentinel_evidence";
-
-/** Local mirror of vault.tsx's stored shape. Same key, same reader. */
-interface StoredEvidence {
-  id: string;
-  title: string;
-  type: string;
-  timestamp: string;
-  source: string;
-  hash: string | null;
-  geo: string;
-  entities: string[];
-  caseId: string;
-  risk: number | null;
-  tags: string[];
-  fileSize?: string | null;
-}
-
-function appendEvidence(item: StoredEvidence): void {
-  if (typeof window === "undefined") return;
-  let list: StoredEvidence[] = [];
-  try {
-    const raw = window.localStorage.getItem(EVIDENCE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(parsed)) list = parsed;
-  } catch {
-    // A corrupt store must not silently discard the analyst's new record, but
-    // it also must not be overwritten wholesale — prepending to an empty list
-    // is the least destructive option and the vault page will show the result.
-    list = [];
-  }
-  list.unshift(item);
-  window.localStorage.setItem(EVIDENCE_KEY, JSON.stringify(list));
-}
+/*
+ * The record shape and the write both moved to utils/evidence-store.ts.
+ *
+ * This file used to declare its own `EVIDENCE_KEY`, its own `StoredEvidence`
+ * interface and its own `appendEvidence`, with the comment "Local mirror of
+ * vault.tsx's stored shape. Same key, same reader." Two writers over one key,
+ * each with its own idea of the shape, is how the two ends drift apart — which
+ * is the same reason `sha256OfFile` was extracted into utils/evidence.ts.
+ */
+type StoredEvidence = EvidenceRecord;
 
 export function ManualCapturePanel() {
   const [file, setFile] = useState<File | null>(null);

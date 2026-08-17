@@ -474,8 +474,22 @@ function CommandHub() {
                       Target: {c.target} · {c.evidence?.length ?? 0} evidence item(s)
                     </div>
                   </div>
-                  <Badge className="bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30 text-[10px]">
-                    {c.status || "OPEN"}
+                  {/*
+                    Was `{c.status || "OPEN"}` in a permanently red destructive
+                    badge, so a Closed case rendered in the same alarm colour as
+                    an Active one, and a case with no status displayed "OPEN" —
+                    a state createInvestigation never assigns.
+                  */}
+                  <Badge
+                    className={`border text-[10px] ${
+                      c.status === "Closed"
+                        ? "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                        : c.status === "Triage"
+                          ? "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]"
+                          : "border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]"
+                    }`}
+                  >
+                    {c.status ?? "status not set"}
                   </Badge>
                 </div>
               ))}
@@ -503,11 +517,19 @@ function CommandHub() {
                   <div>
                     <div className="text-[#3B82F6] font-bold">{w.name}</div>
                     <div className="text-[#94A3B8] text-[10px] mt-0.5">
-                      Keywords: {w.filters?.keywords?.join(", ") || "General"}
+                      {/* `|| "General"` rendered an empty filter as though it had a scope. */}
+                      Keywords: {w.filters?.keywords?.join(", ") || "none set"}
                     </div>
                   </div>
-                  <Badge className="bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/30 text-[10px]">
-                    MONITORING
+                  {/*
+                    This badge read "MONITORING", which contradicted both
+                    /watchlists and /subjects: nothing runs on a schedule,
+                    because the container scales to zero and there is no process
+                    between requests to run one in. A filter is matched when an
+                    analyst opens the page, and not before.
+                  */}
+                  <Badge className="border-[#263548] bg-[#0B1220] text-[10px] text-[#94A3B8]">
+                    FILTER
                   </Badge>
                 </div>
               ))}

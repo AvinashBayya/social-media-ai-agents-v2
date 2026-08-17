@@ -373,6 +373,44 @@ function SettingsPage() {
                     <p className="mt-1 font-mono text-[10px] text-muted-foreground/70">
                       Read by: {cap.consumedBy}
                     </p>
+
+                    {/*
+                      A card that says "collection blocked" and stops there
+                      leaves the analyst to go and find the provider registry to
+                      learn that a free Reddit script app fixes it. These are all
+                      non-secret registry facts, so showing them costs nothing
+                      and turns the blocked state into an instruction.
+                    */}
+                    {cap.collectable && !cap.configured && (
+                      <div className="mt-2 space-y-1 rounded border border-border/60 bg-background/40 p-2">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          How to enable
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          {cap.howTo}
+                        </p>
+                        {(cap.envIdentifier || cap.envSecret) && (
+                          <p className="font-mono text-[10px] text-muted-foreground/70">
+                            Environment (takes precedence, and survives a restart):{" "}
+                            {[cap.envIdentifier, cap.envSecret].filter(Boolean).join(" + ")}
+                          </p>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-1 h-7 text-[11px]"
+                          onClick={() => {
+                            setProviderId(cap.providerId);
+                            setFormError(null);
+                            document
+                              .getElementById("add-credential")
+                              ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }}
+                        >
+                          Add this credential
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -537,7 +575,7 @@ function SettingsPage() {
 
         {/* ── RIGHT: add form + storage policy ── */}
         <div className="space-y-4">
-          <Card>
+          <Card id="add-credential">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Plus className="size-4 text-primary" />

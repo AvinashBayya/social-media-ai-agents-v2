@@ -15,6 +15,7 @@ import {
   createWatchlist,
   deleteWatchlist,
   getWatchlistMatches,
+  bucketMatchesByHour,
   type Watchlist,
   type WatchlistMatch,
 } from "@/utils/watchlist-store";
@@ -193,16 +194,19 @@ function SubjectsPage() {
     return matches.filter((m) => m.severity === "high" || m.severity === "critical");
   }, [matches]);
 
-  // Generate chart mock trend points based on match density
-  const chartData = useMemo(() => {
-    const hours = ["12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
-    const baseVal = matches.length > 0 ? matches.length : 5;
-    return hours.map((h, idx) => ({
-      hour: h,
-      threats: Math.max(2, Math.round(baseVal * 0.4 + ((idx * 2) % 5))),
-      scans: Math.round(150 + idx * 12 + ((idx * idx * 3) % 25)),
-    }));
-  }, [matches]);
+  /**
+   * Real hourly distribution of the matches above.
+   *
+   * The series this replaces was generated from the loop index and had a floor
+   * of 5, so the chart was never empty even when nothing had matched. It also
+   * carried a second "Total Scans" series counting an activity this system does
+   * not perform. See `bucketMatchesByHour` for the full history.
+   */
+  const timeline = useMemo(() => bucketMatchesByHour(matches, Date.now(), 24), [matches]);
+  const chartData = useMemo(
+    () => timeline.buckets.map((b) => ({ hour: b.label, matches: b.matches })),
+    [timeline],
+  );
 
   return (
     <AppShell>
@@ -388,8 +392,15 @@ function SubjectsPage() {
               <div className="absolute top-0 left-0 h-full w-0.5 bg-[#06B6D4]" />
               <CardContent className="p-4 flex flex-wrap justify-between items-center gap-4">
                 <div className="space-y-1 min-w-[280px]">
-                  <div className="text-[10px] text-[#94A3B8]/60 flex items-center gap-2">
-                    <span className="font-bold text-[#06B6D4]">MONITORING ACTIVE</span>
+                  {/*
+                    "MONITORING ACTIVE" contradicted this page's own header and
+                    /watchlists, both of which state that nothing runs on a
+                    schedule — the container scales to zero, so there is no
+                    process between requests to run one in. The match ran once,
+                    when this page loaded.
+                  */}
+                  <div className="flex items-center gap-2 text-[10px] text-[#94A3B8]/60">
+                    <span className="font-bold text-[#06B6D4]">MATCHED ON PAGE LOAD</span>
                     <span>·</span>
                     <span>CREATED: {new Date(activeWatchlist.createdAt).toLocaleDateString()}</span>
                   </div>
@@ -418,16 +429,34 @@ function SubjectsPage() {
                   {criticalAlerts.length}
                 </div>
               </Card>
+              {/*
+                This tile read "Growth Rate" and showed
+                `+{matches.length > 3 ? Math.round(matches.length * 1.5) : 8}%`
+                — a match count multiplied by 1.5, or the literal 8. Nothing
+                measures growth here: there is no earlier period to compare
+                against, because the match runs once per page load. What CAN be
+                counted is how much of the match set is plottable at all.
+              */}
               <Card className="bg-[#111827] border-[#263548] p-3 text-center">
-                <span className="text-[8px] uppercase text-[#06B6D4]">Growth Rate</span>
+                <span className="text-[8px] uppercase text-[#06B6D4]">Dated Matches</span>
                 <div className="text-xl font-bold text-[#06B6D4] mt-1 font-mono">
-                  +{matches.length > 3 ? Math.round(matches.length * 1.5) : 8}%
+                  {timeline.dated}/{timeline.total}
                 </div>
               </Card>
               <Card className="bg-[#111827] border-[#263548] p-3 text-center">
                 <span className="text-[8px] uppercase text-[#F59E0B]">Risk Index</span>
-                <div className="text-xl font-bold text-[#F59E0B] mt-1 font-mono">
-                  {activeWatchlist.riskScore}/100
+                {/*
+                  This rendered `{riskScore}/100` unguarded. createWatchlist sets
+                  riskScore to null deliberately (the value was once
+                  Math.random()), so every analyst-created watchlist displayed
+                  the string "null/100".
+                */}
+                <div className="mt-1 font-mono text-xl font-bold text-[#F59E0B]">
+                  {activeWatchlist.riskScore === null ? (
+                    <span className="text-[10px] font-normal text-[#64748B]">not scored</span>
+                  ) : (
+                    `${activeWatchlist.riskScore}/100`
+                  )}
                 </div>
               </Card>
             </div>
@@ -437,51 +466,61 @@ function SubjectsPage() {
               <Card className="bg-[#111827] border-[#263548] rounded lg:col-span-2">
                 <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/20">
                   <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#94A3B8]">
-                    <TrendingUp className="size-4 text-[#3B82F6]" /> Activity Scanner Pulse
+                    <TrendingUp className="size-4 text-[#3B82F6]" /> Matches by publication hour
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 pt-6 h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData}>
-                      <defs>
-                        <linearGradient id="colorThreats" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#EF4444" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="colorScans" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.2} />
-                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#263548" opacity={0.3} />
-                      <XAxis dataKey="hour" stroke="#94A3B8" fontSize={9} />
-                      <YAxis stroke="#94A3B8" fontSize={9} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#111827",
-                          borderColor: "#263548",
-                          fontSize: 10,
-                        }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="threats"
-                        name="Threat Matches"
-                        stroke="#EF4444"
-                        fillOpacity={1}
-                        fill="url(#colorThreats)"
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="scans"
-                        name="Total Scans"
-                        stroke="#3B82F6"
-                        fillOpacity={1}
-                        fill="url(#colorScans)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                <CardContent className="h-64 p-4 pt-6">
+                  {timeline.dated - timeline.outsideWindow === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center text-center">
+                      <Activity className="size-7 text-[#263548]" />
+                      <p className="mt-2 text-[11px] text-[#94A3B8]">Nothing to plot.</p>
+                      <p className="mx-auto mt-1 max-w-xs text-[10px] leading-relaxed text-[#64748B]">
+                        {timeline.total === 0
+                          ? "This filter matched nothing in the feeds pulled on load."
+                          : timeline.dated === 0
+                            ? `All ${timeline.total} match(es) came from items whose source reported no publication time. An unreported time is not a time, so none can be placed on an axis.`
+                            : `${timeline.outsideWindow} of ${timeline.total} match(es) were published outside the last 24 hours.`}
+                      </p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id="colorMatches" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#263548" opacity={0.3} />
+                        <XAxis dataKey="hour" stroke="#94A3B8" fontSize={9} />
+                        <YAxis stroke="#94A3B8" fontSize={9} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#111827",
+                            borderColor: "#263548",
+                            fontSize: 10,
+                          }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="matches"
+                          name="Matches"
+                          stroke="#3B82F6"
+                          fillOpacity={1}
+                          fill="url(#colorMatches)"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
+                <div className="border-t border-[#263548] px-4 py-2 text-[9px] leading-relaxed text-[#64748B]">
+                  Counts are matches at the time their source reported publishing them, over the
+                  last 24 hours.
+                  {timeline.undated > 0 &&
+                    ` ${timeline.undated} match(es) carried no reported date and appear in no column.`}
+                  {timeline.outsideWindow > 0 &&
+                    ` ${timeline.outsideWindow} fell outside the window.`}
+                </div>
               </Card>
 
               {/* Activity Timeline */}

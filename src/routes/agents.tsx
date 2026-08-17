@@ -100,8 +100,12 @@ function AgentsPage() {
   // Selection states
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [selectedWatchlistId, setSelectedWatchlistId] = useState("");
-  const [selectedEntityA, setSelectedEntityA] = useState("Vector-17");
-  const [selectedEntityB, setSelectedEntityB] = useState("Aster Motors");
+  // These were pre-selected as "Vector-17" and "Aster Motors" — two invented
+  // names that were then fed to the model as the analysis target (see
+  // `activeTarget` below). Selection now starts empty and is populated only from
+  // the analyst's own cases and watchlists.
+  const [selectedEntityA, setSelectedEntityA] = useState("");
+  const [selectedEntityB, setSelectedEntityB] = useState("");
   const [selectedCapability, setSelectedCapability] = useState("SUMMARIZE_CASE");
 
   // Output states
@@ -122,15 +126,18 @@ function AgentsPage() {
     }
   }, [cases]);
 
-  // Compute entities from active cases and watchlists
+  /**
+   * Entities the analyst can point an agent at.
+   *
+   * This set was seeded with five invented names — "Vector-17", "Aster Motors",
+   * "Meridian Capital", "channel_9821", "Northwind Logistics" — with two of them
+   * pre-selected, and the selection is passed to the model as the subject of the
+   * analysis. Unlike /graph and /vault, this page carried no sample-data banner,
+   * so nothing on screen distinguished them from an analyst's real subjects.
+   * The list is now derived entirely from real cases and watchlists.
+   */
   const availableEntities = useMemo(() => {
-    const set = new Set([
-      "Vector-17",
-      "Aster Motors",
-      "Meridian Capital",
-      "channel_9821",
-      "Northwind Logistics",
-    ]);
+    const set = new Set<string>();
     cases.forEach((c) => {
       if (c.target) set.add(c.target);
       c.entities?.forEach((e: string) => set.add(e));
@@ -146,10 +153,17 @@ function AgentsPage() {
 
   // Execute analysis against the configured open-weight LLM provider
   const handleExecuteTask = async () => {
+    const cap = selectedCapability;
+    // `|| "General Target"` used to stand here, so with nothing selected the
+    // model was asked to analyse a subject that does not exist and answered
+    // about it anyway. Refuse instead of inventing a subject.
+    const activeTarget = activeCaseObj ? activeCaseObj.target : selectedEntityA;
+    if (!activeTarget) {
+      toast.error("Select a case or a primary entity first — there is no subject to analyse.");
+      return;
+    }
     setLoading(true);
     setOutputResult(null);
-    const cap = selectedCapability;
-    const activeTarget = activeCaseObj ? activeCaseObj.target : selectedEntityA || "General Target";
 
     // Only the capabilities that actually call a model may log model activity.
     // THREAT_CLASSIFY and FOCAL_POINT are deterministic and make ZERO network
@@ -179,7 +193,9 @@ function AgentsPage() {
         title = `INVESTIGATION DOSSIER: ${activeCaseObj?.title || "GENERAL"}`;
         const res = await llmCaseSummary({
           data: {
-            title: activeCaseObj?.title || "General Investigation",
+            // No case selected: say so, rather than naming a "General
+            // Investigation" the model will then write about as if it existed.
+            title: activeCaseObj?.title || `Ad-hoc analysis of ${activeTarget} (no case selected)`,
             target: activeTarget,
             description: activeCaseObj?.description || "No description recorded for this case.",
             // Negative means unassigned; llm.ts renders that as "not assigned by
@@ -409,8 +425,9 @@ function AgentsPage() {
                   <select
                     value={selectedEntityA}
                     onChange={(e) => setSelectedEntityA(e.target.value)}
-                    className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#06B6D4] font-mono outline-none"
+                    className="h-7 w-full rounded border border-[#263548] bg-[#0B1220] px-1.5 font-mono text-[9px] text-[#06B6D4] outline-none"
                   >
+                    <option value="">-- select --</option>
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
                         {ent}
@@ -423,8 +440,9 @@ function AgentsPage() {
                   <select
                     value={selectedEntityB}
                     onChange={(e) => setSelectedEntityB(e.target.value)}
-                    className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#F59E0B] font-mono outline-none"
+                    className="h-7 w-full rounded border border-[#263548] bg-[#0B1220] px-1.5 font-mono text-[9px] text-[#F59E0B] outline-none"
                   >
+                    <option value="">-- select --</option>
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
                         {ent}
@@ -433,6 +451,13 @@ function AgentsPage() {
                   </select>
                 </div>
               </div>
+              {availableEntities.length === 0 && (
+                <p className="text-[9px] leading-relaxed text-[#64748B]">
+                  No entities available. This list is built from the targets and keywords on your
+                  own cases and watchlists — it previously offered five invented names. Create a
+                  case or a watchlist to populate it.
+                </p>
+              )}
 
               {/* Select Capability Task */}
               <div className="space-y-1 pt-1.5 border-t border-[#263548]/30">

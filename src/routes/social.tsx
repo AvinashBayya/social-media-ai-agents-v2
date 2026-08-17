@@ -48,6 +48,7 @@ import {
 import { assessSocialCorpus } from "@/utils/social-credibility";
 import { PinButton } from "@/components/pin-button";
 import { ManualCapturePanel } from "@/components/manual-capture-panel";
+import { CredentialNotice } from "@/components/credential-notice";
 import {
   COLLECTION_POLICIES,
   MODE_LABELS,
@@ -131,6 +132,12 @@ function SocialPage() {
   const [pulled, setPulled] = useState<SocialPost[]>([]);
   /** null = not yet checked. Distinct from false, which is "checked, absent". */
   const [redditReady, setRedditReady] = useState<boolean | null>(null);
+  /**
+   * Bluesky historical search, which is credential-gated separately from the
+   * firehose. The two fail independently and the socket being healthy while
+   * search is unavailable is the DEFAULT state, so they must not share a flag.
+   */
+  const [blueskySearchReady, setBlueskySearchReady] = useState<boolean | null>(null);
 
   useEffect(() => setMonitors(loadMonitors()), []);
 
@@ -150,10 +157,15 @@ function SocialPage() {
   useEffect(() => {
     (async () => {
       try {
-        const c = (await socialCredentials()) as unknown as { reddit: boolean };
+        const c = (await socialCredentials()) as unknown as {
+          reddit: boolean;
+          bluesky: boolean;
+        };
         setRedditReady(Boolean(c?.reddit));
+        setBlueskySearchReady(Boolean(c?.bluesky));
       } catch {
         setRedditReady(false);
+        setBlueskySearchReady(false);
       }
     })();
   }, []);
@@ -553,13 +565,32 @@ function SocialPage() {
                 platform. Mastodon takes a hashtag; Reddit takes a search query; Telegram takes a
                 public channel handle.
               </p>
+              {/*
+                Was a bare amber paragraph that named the env vars but not the
+                Settings page — where the credential can be entered without a
+                redeploy. The shared notice states both paths and is used
+                identically on /network, so a missing credential looks the same
+                wherever it bites.
+              */}
               {redditReady === false && (
-                <p className="mt-1.5 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#F59E0B]">
-                  Reddit is unavailable: it began refusing all unauthenticated requests with HTTP
-                  403 on 2026-08-10. Register a free script app at reddit.com/prefs/apps and set
-                  REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to re-enable it. Telegram and Bluesky
-                  are unaffected.
-                </p>
+                <div className="mt-1.5">
+                  <CredentialNotice
+                    provider="Reddit script app"
+                    envVars={["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"]}
+                    unlocks="Keyword search across Reddit. It began refusing every unauthenticated request with HTTP 403 on 2026-08-10, so no query can run without OAuth credentials."
+                    stillWorks="Telegram, Mastodon and the Bluesky firehose are unaffected and still collect."
+                  />
+                </div>
+              )}
+              {blueskySearchReady === false && (
+                <div className="mt-1.5">
+                  <CredentialNotice
+                    provider="Bluesky app password"
+                    envVars={["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD"]}
+                    unlocks="Historical keyword search via app.bsky.feed.searchPosts, which returns 403 unauthenticated."
+                    stillWorks="The Jetstream firehose above is unaffected — it collects forward from the moment this tab connected, but cannot reach anything posted before that."
+                  />
+                </div>
               )}
               <Input
                 value={pullTarget}

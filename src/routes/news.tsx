@@ -1149,7 +1149,10 @@ export const fetchOSINT = createServerFn({ method: "GET" })
               Q884: "South Korea",
               Q1009: "Cameroon",
             };
-            const jurisdiction = countryMap[countryId] || countryId || "Global";
+            // `|| "Global"` rendered an unreported jurisdiction as a
+            // multinational one, which is a claim about the entity rather than
+            // an admission that Wikidata carried no country for it.
+            const jurisdiction = countryMap[countryId] || countryId || "jurisdiction not reported";
 
             // Get standard FileNo/LEI registration key
             const lei = entity.claims?.P1278?.[0]?.mainsnak?.datavalue?.value;
@@ -1802,10 +1805,12 @@ function formatRelativeTime(dateStr: string): string | null {
 function getOutletCoverage(storiesList: APIStory[]) {
   const counts = new Map<string, { count: number; region: string; domain: string }>();
   for (const s of storiesList) {
-    const name = s.primarySource || "Unknown Source";
+    const name = s.primarySource || "publisher not reported";
     const entry = counts.get(name) ?? {
       count: 0,
-      region: s.countryCode || "Global",
+      // `|| "Global"` claimed a worldwide remit for an outlet whose country the
+      // feed simply did not carry.
+      region: s.countryCode || "—",
       domain: sourceKeyOf(toArticle(s)),
     };
     entry.count += 1;
@@ -1924,7 +1929,8 @@ function Page() {
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-semibold text-foreground">{lead.primarySource}</span>
                       <MapPin className="size-3" />
-                      {lead.countryCode || "Global"}
+                      {/* `|| "Global"` next to a map pin reads as a located finding. */}
+                      {lead.countryCode || "country not reported"}
                       <span>·</span>
                       <span>{formatRelativeTime(lead.pubDate) ?? "no date reported"}</span>
                       {lead.language && (

@@ -85,6 +85,51 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
 
 ### Completed Milestones
 
+- [x] **Six reported defects + a fresh fabrication sweep (2026-08-17)**: A user driving the UI
+  reported six broken features. **Two of the six premises were factually wrong**, and a sweep
+  with the three CLAUDE.md greps found **seven further live fabrications nobody had reported**
+  — every one of which passed `bun test`, `tsc --noEmit`, the export audit and `smoke:controls`,
+  because no unit test can see a number that is invented at render time.
+
+  **The corrections.** `/live`'s bookmark button was *not* a dead control: it was wired and did
+  persist, but wrote a bare URL array to `sentinel_bookmarks` that **no other file in the
+  repository ever read** — a dead end, not a dead button, and one that discarded the publisher,
+  date and body, so a bookmark could never become citable evidence. And Reddit / Bluesky /
+  Mastodon / GitHub were **already** on `/settings` with vault entries, env overrides, live
+  Verify probes and working collectors; the real problem was that nothing was configured, so
+  every consuming module correctly reported a missing credential and the app read as broken.
+
+  **The seven unreported fabrications.** `/subjects` generated its "Activity Scanner Pulse"
+  series from the loop index — `threats: Math.max(2, Math.round(baseVal * 0.4 + ((idx * 2) % 5)))`
+  and `scans: Math.round(150 + idx * 12 + ((idx * idx * 3) % 25))`, with a floor of 5 so the
+  chart was never empty even with zero matches, and a second series counting an activity this
+  system does not perform. Its own comment said "chart mock trend points". The same page showed
+  a **"Growth Rate"** tile of `matches.length * 1.5` percent (or the literal `8`), and rendered
+  `{riskScore}/100` unguarded, so an analyst-created watchlist displayed **`null/100`**.
+  `watchlist-store.ts` seeded `riskScore: 78` and `42` in the same file where `createWatchlist`
+  was changed to `null` because that score was invented, with `createdAt: new Date()` at module
+  scope so both samples always claimed to be seconds old. `/agents` seeded five fictional
+  entities into its picker with two **pre-selected** and fed to the model as the analysis
+  target, with no sample-data banner. The dashboard badged every watchlist `MONITORING`,
+  contradicting `/watchlists`' own statement that nothing is scheduled. `/osint` substituted
+  `"GDELT"` and `"Google News"` — aggregators — for missing publishers, the same class of error
+  `rss-source.ts` exists to fix.
+
+  **What was built.** Five new pure modules, all tested: `evidence-store.ts` (single owner of
+  `sentinel_evidence`, which had two writers with two independently-declared shapes),
+  `bookmark-store.ts` (v1 URL array → v2 records, migrating **without back-filling a single
+  field**), `live-filters.ts` (the "Any time" window plus a testable predicate),
+  `graph-build.ts` (co-occurrence graph, deterministic Fruchterman–Reingold seeded on a circle
+  — **no `Math.random()`**, no new dependency), and `bucketMatchesByHour` in `watchlist-store.ts`.
+  `/graph` was rewritten from a fixed ten-node topology onto the live entity-extraction pipeline
+  `/entities` already runs; `/network` now draws the CIB clusters it was already computing;
+  `/osint`'s UCDP path was deleted and delegated to `collectConflict()`, which actually sends the
+  token. **719 unit tests passing** (+66), **`tsc --noEmit` clean**, **200 core exports verified**
+  (+49 — the new modules are now guarded), `bun run build` green.
+
+  Full defect list and file:line references: [`ANTIGRAVITY_TASK.md`](file:///d:/social_media_research/ANTIGRAVITY_TASK.md).
+
+
 - [x] **Collection-policy model + media ingestion + manual capture (2026-08-12)**: Implemented the ingestion-legality matrix across Module 3. `PLATFORM_NOTES.available` was a **boolean**, rendered as a green "collected" / red "unavailable" badge, which could not express "YouTube text yes, frames no" (so YouTube had no row at all), could not express "Meta not automated but an analyst may capture", and gave a ToS prohibition and a missing free tier the same red badge. New `src/utils/collection-policy.ts` adds four modes (`automated` / `partial` / `manual-only` / `none`), five legal bases, and the ingestion route per source; `policyId` links each platform note to its row, additively — `available` is untouched because three test files assert on it. **Media ingestion closed** for Bluesky, Reddit, Telegram and Mastodon (`SocialPost.media`, five extractors), with an Analyse hand-off into Module 4 via a new validated `?url=` param on `/images`. **Manual capture path** added for Meta (`manual-evidence.ts` + `components/manual-capture-panel.tsx`), writing to the same `sentinel_evidence` store `/vault` reads. **YouTube comments** added via the official Data API v3, behind a new `youtube` vault provider with a live verification probe. **625 unit tests passing** (+58), **`tsc --noEmit` clean**, **151 core exports verified**, `bun run build` green. Two pre-existing defects fixed in passing — see below.
 - [x] **Browser-audit remediation, Phases 1, 2 and 4 (2026-08-12)**: Six agents drove all 31 routes in real Chrome, clicking every control on a fresh page load. The finding: the analytical core is sound and the presentation layer was not.
 
@@ -262,6 +307,22 @@ This registry lists key files and their exported symbols. When adding features, 
   - `attestedCaptureToMediaAsset` **throws** when `phash` is null rather than inventing one — a synthesised perceptual hash matches nothing, which renders as "no near-duplicates found", a finding from a value never measured.
 - **[evidence.ts](file:///d:/social_media_research/src/utils/evidence.ts)**: `sha256OfFile` extracted from `routes/vault.tsx` so the vault and the capture panel hash identically. Refuses rather than falling back when SubtleCrypto is unavailable — this digest was once 64 random hex characters.
   - Exports: `EvidenceIntegrityError`, `sha256OfFile`, `bytesToHex`, `isSha256`, `HASH_MEANING`.
+- **[evidence-store.ts](file:///d:/social_media_research/src/utils/evidence-store.ts)**: The single owner of `sentinel_evidence`. That key had TWO writers with two independently-declared shapes — `routes/vault.tsx` (inlining the literal three times) and `components/manual-capture-panel.tsx`, whose own comment admitted it: *"Local mirror of vault.tsx's stored shape."* Same duplication `evidence.ts` was extracted to prevent for hashing.
+  - Exports: `EVIDENCE_KEY`, `EvidenceRecord`, `withoutSeeded`, `getEvidence`, `saveEvidence`, `appendEvidence`, `deleteEvidence`, `setEvidenceCase`, `nextEvidenceId`.
+  - **`withoutSeeded` drops only `seeded: true` rows.** The three that shipped carried `caseId: "INV-2041"` / `"INV-2038"` — ids `createInvestigation` can never mint, since it numbers from INV-1001 up — so every one rendered a bold blue case reference resolving to nothing. It **migrates rather than wipes**: the same key holds real analyst uploads and attested manual captures.
+  - **`nextEvidenceId` never reuses an id.** The route computed `EVID-0${400 + list.length + 1}`, so deleting one record and adding another produced two exhibits under one identifier — in the one store whose purpose is identifying exhibits.
+- **[bookmark-store.ts](file:///d:/social_media_research/src/utils/bookmark-store.ts)**: The `/live` shortlist. v1 was a bare `string[]` of URLs that **no file in the repo ever read back**, discarding publisher, date, headline and body — so a bookmark could never be reconstituted into `PinnedEvidence`.
+  - Exports: `BOOKMARK_KEY`, `Bookmark`, `BookmarkInput`, `migrateBookmarks`, `getBookmarks`, `saveBookmarks`, `isBookmarked`, `toggleBookmark`, `removeBookmark`, `setBookmarkCase`, `shortlisted`, `pinnedBookmarks`.
+  - **Migration back-fills NOTHING.** A v1 record keeps its URL and reports every other field as `null`, because v1 genuinely did not store them. Inventing a headline or date at migration time would manufacture provenance.
+- **[live-filters.ts](file:///d:/social_media_research/src/utils/live-filters.ts)**: The `/live` date window, extracted so the predicate is testable — a route module calls `createFileRoute` at load and cannot be imported by `bun test`.
+  - Exports: `DATE_WINDOWS`, `DEFAULT_WINDOW_ID`, `DateWindow`, `windowHours`, `withinWindow`, `WINDOW_REACH_NOTE`.
+  - **An undated item passes every window**, deliberately — dropping it would delete real reporting over a field the publisher never supplied. **An unknown window id fails open.** "Any time" is `hours: null`, a real window rather than a missing key the predicate happened to no-op on.
+- **[graph-build.ts](file:///d:/social_media_research/src/utils/graph-build.ts)**: Module 2's entity co-occurrence graph. Replaces a fixed ten-node topology written into `routes/graph.tsx` with literal x/y coordinates.
+  - Exports: `ENTITY_TYPES`, `normaliseEntityType`, `entityKey`, `buildEntityGraph`, `degreeCentrality`, `shortestPath`, `layoutGraph`, `nodeRadius`, `COOCCURRENCE_CAVEAT`, plus the `GraphNode` / `GraphEdge` / `EntityGraph` / `PositionedNode` types.
+  - **`layoutGraph` is deterministic** — Fruchterman–Reingold seeded **on a circle by index**, never randomly. A graph that reshuffles between renders cannot be cited, and `Math.random()` is banned in this layer. Hand-written rather than adding d3-force or cytoscape, the same call as the DCT hash in `imaging.ts`.
+  - **`entityKey` moved here from `entities.tsx` unchanged.** Read its comment before touching it: the old class covered U+0900–U+0DFF only, so every Urdu name (Arabic script) was stripped to an empty key and merged into one node.
+  - **No betweenness, no modularity, no "avg. degree".** Degree over a graph we built is computable and is shown; modularity needs a walked follow graph this system does not have. `network.tsx:372-377` records what happened last time one was printed anyway.
+  - `COOCCURRENCE_CAVEAT` must stay on screen: an edge means two entities were named in the same article, and **nothing more**. A node-edge diagram is very good at making a weak claim look strong.
 - **[social.ts](file:///d:/social_media_research/src/utils/social.ts)**: Module 3 collection & monitors.
   - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resolveRedditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchBlueskySearch`, `resetBlueskySession`, `fetchMastodonTag`, `mastodonStatusToPost`, `fetchMastodonSearch`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialBlueskySearch`, `socialMastodonSearch`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`, `blueskyMediaFromRecord`, `blueskyMediaFromView`, `redditMediaFrom`, `telegramMediaFrom`, `mastodonMediaFrom`, `splitTelegramMessages`, `telegramBlockToPost`, `SocialMedia`.
   - **`SocialPost.media`: `undefined` = NOT COLLECTED, `[]` = collected and none.** Load bearing; do not collapse. Media is collected as **URLs only, never bytes** — re-hosting is redistribution and these are images of identifiable people under the DPDP Act.

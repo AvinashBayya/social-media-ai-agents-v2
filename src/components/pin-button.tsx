@@ -21,7 +21,22 @@ import { toast } from "sonner";
  * cite one of these items. A pin that lost its credibility score would produce
  * a product whose sources all read "not scored".
  */
-export function PinButton({ payload, label }: { payload: PinInput; label?: string }) {
+export function PinButton({
+  payload,
+  label,
+  onPinned,
+}: {
+  payload: PinInput;
+  label?: string;
+  /**
+   * Fired after a successful pin, with the case it went to.
+   *
+   * Optional and additive: every existing call site (news, social, images) omits
+   * it and is unaffected. /live uses it to record on its own shortlist which
+   * case an item reached, so its "pinned" panel does not have to guess.
+   */
+  onPinned?: (caseId: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -33,6 +48,7 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
     const ok = pinToInvestigation(caseId, payload);
     if (ok) {
       setPinned(true);
+      onPinned?.(caseId);
       toast.success(`Pinned to ${caseId} · ${title.slice(0, 28)}`);
     } else {
       // The only failure that is not an error: the same URL is already in this

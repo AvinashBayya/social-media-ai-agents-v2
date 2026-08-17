@@ -2206,6 +2206,12 @@ export const socialCredentials = createServerFn({ method: "GET" })
     reddit: (await resolveRedditCredentials()) !== null,
     bluesky: (await resolveCredential("bluesky")) !== null,
     mastodon: (await resolveCredential("mastodon")) !== null,
+    // Additive. `github` and `ucdp` are gated the same way and their absence
+    // surfaces on pages that had no way to ask about it — /news' exposure sweep
+    // and the Module 2 conflict panel. Booleans only: a key's value never
+    // crosses to the browser.
+    github: (await resolveCredential("github")) !== null,
+    ucdp: (await resolveCredential("ucdp")) !== null,
   }));
 
 /*
