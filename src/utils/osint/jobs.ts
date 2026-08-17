@@ -59,11 +59,13 @@ import type { OsintPlan } from "./query-planner";
 import { planInvestigation } from "./query-planner";
 import type { InvestigationJob, JobResult, JobStatus, JobStore } from "./job-store";
 import { InMemoryJobStore } from "./job-store";
-import { SqliteJobStore } from "./job-store-sqlite";
 
 export type { JobStatus, InvestigationJob, JobStore } from "./job-store";
 export { InMemoryJobStore } from "./job-store";
-export { SqliteJobStore } from "./job-store-sqlite";
+// `SqliteJobStore` itself is deliberately NOT re-exported here as a value —
+// see `createJobStore()`'s comment below for why importing it statically at
+// this file's top level is unsafe.
+export type { SqliteJobStore } from "./job-store-sqlite";
 
 const TERMINAL_STATUSES: readonly JobStatus[] = ["completed", "partial", "failed", "cancelled"];
 
@@ -76,10 +78,33 @@ const TERMINAL_STATUSES: readonly JobStatus[] = ["completed", "partial", "failed
  * `./data/` convention) switches to `SqliteJobStore` with zero other code
  * changes — every function below only ever depends on the `JobStore`
  * interface, never on which concrete class `jobStore` is.
+ *
+ * **`SqliteJobStore` is loaded via `require()`, not a static `import`, and
+ * only when `typeof window === "undefined"`.** This module (`jobs.ts`) is
+ * imported by client route components too (`/recon`, for the
+ * `createServerFn` wrappers below) — TanStack Start only strips code
+ * actually inside a `.handler()` body from the client bundle, not arbitrary
+ * top-level module code, so `export const jobStore = createJobStore()`
+ * itself always runs client-side as well. A real live-browser run of
+ * `/recon` confirmed the consequence: a static
+ * `import { SqliteJobStore } from "./job-store-sqlite"` here pulled
+ * `bun:sqlite` into the browser bundle, and Vite's client-side stub for a
+ * native binding with no browser shim throws the moment the ESM import
+ * binding is evaluated — merely importing it broke every route, regardless
+ * of whether `JOB_STORE_PATH` was ever set. The `typeof window` guard
+ * matches this codebase's existing client/server split convention
+ * (`credential-vault.ts`, `graph-store.ts`); `require()` (a real Bun
+ * global, unlike browser/Node-ESM) keeps the reference out of the client
+ * bundle's static import graph entirely, where a dynamic `import()` guarded
+ * only by a runtime `if` is not guaranteed to be.
  */
 function createJobStore(): JobStore {
+  if (typeof window !== "undefined") return new InMemoryJobStore();
   const path = process.env.JOB_STORE_PATH?.trim();
-  return path ? new SqliteJobStore(path) : new InMemoryJobStore();
+  if (!path) return new InMemoryJobStore();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deliberate: a static `import` here previously broke every browser route by pulling bun:sqlite into the client bundle (see this function's doc comment); require() keeps it out of the client's static import graph, reached only behind the `typeof window` guard above.
+  const { SqliteJobStore } = require("./job-store-sqlite") as typeof import("./job-store-sqlite");
+  return new SqliteJobStore(path);
 }
 
 /** Process-wide job store. Nothing writes to this except an explicit call — see the file header on persistence, and `createJobStore()` above for how the backend is chosen. */
