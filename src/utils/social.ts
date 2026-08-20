@@ -1774,10 +1774,10 @@ export const MASTODON_ALLOWED_HOSTS = [
  * which strips a scheme and a path and NOTHING ELSE. A port survived, `@`
  * userinfo survived, and the value was never checked against any list. Since
  * `socialMastodon` is an unauthenticated server function,
- * `instance: "169.254.169.254:80"` produced a server-side GET against the Azure
- * instance metadata endpoint, with the response body — or the upstream status,
+ * `instance: "169.254.169.254:80"` produced a server-side GET against the cloud
+ * instance-metadata endpoint, with the response body — or the upstream status,
  * via the error text — returned to the caller. That is a read-SSRF primitive
- * against the container's own ports and the Container Apps internal VNet.
+ * against the host's own ports and whatever internal network it sits on.
  *
  * This lives here rather than only in the server function's schema because
  * `fetchMastodonTag` is EXPORTED: other server-side code can call it directly

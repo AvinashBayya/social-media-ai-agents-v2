@@ -13,8 +13,8 @@
  *      remember.
  *
  * The trustworthy value is the one the ingress proxy APPENDED, i.e. counted
- * from the RIGHT. Azure Container Apps' Envoy ingress is one hop, so the
- * rightmost entry is the peer Envoy saw. `trustedProxyHops` is configurable
+ * from the RIGHT. A single reverse proxy is one hop, so the rightmost entry is
+ * the peer it saw. `trustedProxyHops` is configurable
  * because that number is a property of the deployment, not of this code, and
  * getting it wrong is the single most likely way to break the app: too many
  * hops and every caller collapses into one bucket.
@@ -185,7 +185,7 @@ export function parseTrustedForwardedFor(header: string | null | undefined, hops
 }
 
 export interface ResolveClientKeyOptions {
-  /** How many proxies sit in front of this process. ACA Envoy ingress = 1. */
+  /** How many proxies sit in front of this process. Most single reverse proxies = 1. */
   trustedProxyHops?: number;
   /** Prefix width IPv6 addresses collapse to. */
   ipv6PrefixBits?: number;

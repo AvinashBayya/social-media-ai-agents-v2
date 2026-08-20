@@ -153,10 +153,10 @@ export function withSecurityHeaders(response: Response, https: boolean): Respons
 /**
  * Was this request served over HTTPS?
  *
- * Behind Azure Container Apps' ingress the connection to the container is
+ * Behind almost any TLS-terminating reverse proxy the connection to the app is
  * plain HTTP, so `url.protocol` is the wrong thing to read — it would say
- * "http" for every production request and HSTS would never be sent.
- * `x-forwarded-proto` is what the ingress records.
+ * "http" for every proxied request and HSTS would never be sent.
+ * `x-forwarded-proto` is what the proxy records.
  */
 export function isHttpsRequest(request: Request): boolean {
   const proto = request.headers.get("x-forwarded-proto");

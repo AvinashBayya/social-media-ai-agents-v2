@@ -36,59 +36,39 @@ Plus real-time monitoring of user-defined subjects, and data mining at scale.
 
 The frontend is good and worth keeping. Everything behind it needs building: no database (all state is localStorage), no auth, no backend. Roughly 15–20% of PS-18 is covered.
 
-**Deployment drift — RESOLVED 2026-08-10. Live state below is current as of 2026-08-11.**
-The container app `sentinel-web` runs **`v15`**, built from `main` by `az acr build` and
-serving revision **`sentinel-web--0000013`** (healthy, `RunningAtMaxScale`, 1 replica).
-The tree and the live app match, and the app is rebuildable from source.
+## Deployment — THERE IS NONE. Azure removed 2026-08-20.
 
-**Check this section against the live app before trusting it.** It said `v13` /
-`sentinel-web--0000011` until 2026-08-11, by which point `v14` had been built and deployed
-without the note being updated. One command settles it:
+**Do not run `az`. Do not propose Azure.** The subscription was disabled and then removed;
+the Container Apps environment reported `ManagedClusterSuspended` and the app went dark.
+Everything Azure — the container app, ACR, Key Vault, Log Analytics, the GPU-quota plan —
+is gone, and `azure-env.sh` has been deleted.
 
-```sh
-az containerapp show -g "$RG" -n "$APP" \
-  --query "{image:properties.template.containers[0].image, rev:properties.latestReadyRevisionName}"
-```
+**Sentinel now runs locally, and only locally.** The frontend runs from this machine
+(`bun run dev`, or `bun run build` then `node .output/server/index.mjs`), and the OSINT tool
+stack runs beside it under `docker compose -f osint-workers/docker-compose.yml up -d`.
+Demos are given from the laptop.
 
-The drift this replaces: `v10` was built from an auth system committed, deployed, then
-reverted out of `main`, so the live app gated every route behind a login no source here
-produced. That work is now pushed as branch `backup/pre-auth-rollback` (tip `1f3259f`, auth
-at `214f0df`) and tag `pre-auth-rollback-20260806` — no longer reflog-only. It is **not**
-restored; the route gate on `main` is the disclosed client-side demo session
-(`src/utils/demo-session.ts`), which is not authentication and says so.
+Two things that survived the removal and still matter:
 
-Traps when deploying — the first two were hit again on 2026-08-11:
+- **The app has no cloud coupling.** The Dockerfile targets plain `node:22-alpine` and the
+  code contained exactly one Azure reference (a doc comment). Whatever host is chosen later,
+  this is a config decision, not a port. Do not add one speculatively.
+- **`data/`, `ai-service/` and `osint-workers/` stay in `.dockerignore`.** The reason was
+  never Azure-specific: the build stage does `COPY . .`, and `data/credentials.json` is an
+  operator credential store in cleartext.
 
-- **No Docker locally.** Build with `az acr build`, never `docker build`.
-- **The Azure CLI crashes while streaming build logs on Windows** — Vite prints `✓`, and
-  cp1252 cannot encode it (`UnicodeEncodeError`). **This is client-side log streaming only:
-  the remote build still completes and pushes.** Never conclude a build failed from CLI
-  output alone — check
-  `az acr repository show -n $ACR --image sentinel-web:<tag> --query createdTime`.
+Two Azure-era findings worth keeping, because they are really Windows findings and will
+recur with any CLI that streams logs here:
 
-  **`PYTHONIOENCODING=utf-8` is NOT sufficient — corrected 2026-08-11.** The v15 build set
-  it and still crashed. The traceback is not in `_stream_utils.py`'s own write: it ends in
-  `colorama/ansitowin32.py` → `encodings\cp1252.py`, i.e. colorama re-wraps stdout and
-  encodes to the **console code page**, which `PYTHONIOENCODING` does not change. The build
-  itself was fine — `v15` was pushed at 07:37:23Z while the CLI reported exit 1. If you want
-  the crash gone rather than merely understood, change the console encoding
-  (`[Console]::OutputEncoding = [Text.Encoding]::UTF8` in PowerShell, or `chcp 65001`);
-  neither is verified here, so verify the tag either way.
-
-- **Transient DNS failure kills `az` outright — new 2026-08-11.** Not the same thing as the
-  log-streaming crash, and not limited to the ACR log-blob host: `az` failed
-  `getaddrinfo` on **`login.microsoftonline.com`** (token refresh) on three consecutive
-  attempts across both Git Bash and PowerShell, each hanging for ~5 minutes of retries. It
-  is not a sandbox or proxy issue and not a broken install — `curl`, `git`, system Python
-  **and the Azure CLI's own bundled `python.exe` invoked directly** all resolved the host
-  correctly throughout. The fourth attempt succeeded with no change. **Retry before
-  diagnosing.**
-
-- Leftover `DATABASE_URL`, `SESSION_SECRET` and `seed-admin-password` remain configured on
-  the container app from the `v10` auth deployment. Nothing on `main` reads them.
-- **`data/` is excluded from the build context** (`.dockerignore`, 2026-08-11). The build
-  stage does `COPY . .`, so before that it was uploading `data/credentials.json` — an
-  operator credential store in cleartext — to the ACR build service on every deploy.
+- **A Windows console cannot encode Vite's `✓` (U+2713) under cp1252**, and a tool that
+  streams build output through Python dies on it with `UnicodeEncodeError`. Neither
+  `PYTHONIOENCODING=utf-8`, `[Console]::OutputEncoding = [Text.Encoding]::UTF8`, nor
+  `chcp 65001` fixed it — all three were tested 2026-08-17 and all three failed, because
+  colorama re-wraps stdout and encodes to the console code page. **Never conclude a build
+  failed from CLI output alone.**
+- **Retry before diagnosing a network failure.** Transient `getaddrinfo` failures here have
+  taken three consecutive attempts to clear, with `curl`, `git` and Python all resolving the
+  same host correctly throughout.
 
 `src/utils/gemini.ts` has been **deleted**. It is replaced by `src/utils/llm.ts` — see the LLM section below.
 
@@ -169,7 +149,7 @@ capability exists. Wire it or remove it.
 
 **Free-tier tooling only.** Zero budget for licences and APIs.
 
-**Deployment target** is Azure Container Apps in Central India.
+**Deployment target: none.** Runs locally — see the deployment section above.
 
 ## LLM layer
 
@@ -223,10 +203,13 @@ Behaviour that must not regress:
 Migration to self-hosted vLLM: point `LLM_BASE_URL` at the vLLM service and set
 `LLM_MODEL`. No application code changes.
 
-**Deployed config (v2, 2026-08-03).** Keys live in Key Vault (`sarvam-key`, `groq-key`) and
-reach the app as `secretref:` env vars via its **system-assigned identity**, which holds
-`Key Vault Secrets User` on the vault. No plaintext key is stored on the container app.
-Rotating a key means updating the vault secret and restarting the revision.
+**Key handling, post-Azure (2026-08-20).** Keys used to live in Azure Key Vault and reach
+the app as `secretref:` env vars via a managed identity. That vault is gone with the
+subscription. Keys now come from a local `.env` (gitignored) or the operator vault on
+`/settings` (`data/credentials.json`, also gitignored, and excluded from the Docker build
+context). **This is a real reduction in key hygiene, not a lateral move** — a cleartext file
+on a laptop replaces a managed secret store, so treat these as demo credentials and rotate
+anything that was ever in the vault.
 
 Core logic lives in plain exported functions (`summariseText`, `extractEntitiesFrom`,
 `assessLanguageOf`, `llmStatsSnapshot`, …) with `createServerFn` as thin wrappers. Server
@@ -446,58 +429,31 @@ with the violations and then throws. Partial products are never returned.
 `export-helpers.ts` was deleted — exports.tsx now renders the same product object the analyst
 reviewed, so a figure can no longer differ between screen and file.
 
-## GPU quota request — NOT YET RAISED
+## GPU for self-hosted inference — no longer planned via Azure
 
-Needed later for self-hosted open-source LLM inference (vLLM). **Do not run the
-workload-profile command until quota is granted.**
+The GPU-quota request (`Consumption-GPU-NC8as-T4`, Central India) died with the
+subscription. It was never submitted, so nothing is lost.
 
-|              |                                                          |
-| ------------ | -------------------------------------------------------- |
-| Status       | **Not yet submitted** — no support ticket has been filed |
-| Documented   | 2026-08-03                                               |
-| Date raised  | _(fill in when submitted)_                               |
-| Ticket ref   | _(fill in)_                                              |
-| Date granted | _(fill in)_                                              |
+The constraint it existed to solve is unchanged: **a self-hosted vLLM needs a GPU, and GPU
+compute is not free.** That always contradicted the zero-budget rule — an NC8as-T4 was
+roughly USD 0.5–0.8/hour against a USD 30/month alert, i.e. 40–60 hours for the whole month.
 
-- Request: `Consumption-GPU-NC8as-T4`, Central India, subscription
-  `8a8baea4-547c-4f55-b206-d6af16a24970`. Ask for **8 vCPU** of the
-  `Standard NCASv3_T4 Family` (one node); 16 for two concurrent.
-- Central India and South India support the **T4 profile only**. The A100 profile
-  (`Consumption-GPU-NC24-A100`) is **not available in either Indian region** — re-verified
-  2026-08-03 via `az containerapp env workload-profile list-supported`. Both regions return
-  the same set: D4–D32, E4–E32, Consumption, Flex, Consumption-GPU-NC8as-T4. Do not plan
-  around A100 without moving region.
-- `sentinel-env` currently carries only the `Consumption` profile (checked 2026-08-03).
-- T4 is 16GB: fits 7B–14B models at 4-bit quantisation. Adequate for the demo. Sarvam and
-  Mistral 3 both fit; size the model to this ceiling.
-- Target environment `sentinel-env` (`rg-sentinel-demo`) is already workload-profiles
-  enabled, so the profile can be added in place — no environment rebuild.
-
-Once approved:
-
-```sh
-export MSYS_NO_PATHCONV=1
-source ./azure-env.sh
-az containerapp env workload-profile add \
-  -g "$RG" -n "$ENV" \
-  --workload-profile-name gpu-t4 \
-  --workload-profile-type Consumption-GPU-NC8as-T4
-```
-
-**Cost conflict — unresolved.** GPU compute is not free-tier and contradicts the zero-budget
-constraint above. An NC8as-T4 runs roughly USD 0.5–0.8/hour, so the USD 30/month budget
-alert (`sentinel-monthly-30usd`) is about 40–60 GPU-hours for the month, before anything
-else. Keep the GPU app scaled to zero when idle and treat it as demo-only. Decide the
-funding source before committing to a self-hosted inference architecture.
+Until a GPU exists, `llm.ts` keeps talking to hosted Sarvam/Groq free tiers over the
+OpenAI-compatible API, which is why endpoint and model are config and not code. If a GPU
+box does appear, point `LLM_BASE_URL` at the vLLM service and set `LLM_MODEL`. No
+application change.
 
 ## Environment
 
-Windows 11, Git Bash (MINGW64), repo at `D:\social_media_research`, Node 24, Bun, no Docker.
+Windows 11, Git Bash (MINGW64), repo at `D:\social_media_research`, Node 24, Bun.
 
-Azure CLI commands run in Git Bash and require:
+**Docker is now required**, and is expected to come from WSL2 rather than Docker Desktop —
+the app runs locally and `osint-workers/` is a compose stack. `bash preflight.sh` checks the
+toolchain.
+
+One Git Bash trap that outlived Azure: it rewrites any argument starting with `/` into a
+Windows path. If a tool ever receives a mangled `/`-prefixed argument, set:
 
 ```sh
 export MSYS_NO_PATHCONV=1
 ```
-
-Without it, Git Bash mangles any argument starting with `/` — which is every `--scope` in Azure RBAC commands.

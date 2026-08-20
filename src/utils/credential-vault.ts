@@ -33,10 +33,12 @@
  *
  * STORAGE HONESTY. This writes `data/credentials.json` in cleartext, mode 0600
  * where the platform supports it. `data/` is excluded from the Docker build
- * context and is not a mounted volume, so on Azure Container Apps the file dies
- * with the replica: a vault credential does not survive a revision restart or a
- * scale-to-zero. That is a real limitation, it is stated in the UI, and it is
- * why env/Key Vault stays the durable path for anything that matters.
+ * context and is not a mounted volume, so in any container without a mounted
+ * volume the file dies with the container: a vault credential does not survive
+ * a restart. That is a real limitation, it is stated in the UI, and it is why
+ * an env var stays the durable path for anything that matters. (Running
+ * locally, as the project does since Azure was removed 2026-08-20, the file
+ * does persist — but the code must not assume it.)
  */
 
 import { createServerFn } from "@tanstack/react-start";
@@ -1288,7 +1290,7 @@ export const capabilityMatrix = createServerFn({ method: "GET" })
  *
  * The login path was not better than the fabrication path, only rarer: it
  * breaches Meta's terms, gets the account banned, and needs a headless browser
- * the Azure container does not have. So the vault still STORES an Instagram or
+ * the runtime does not have. So the vault still STORES an Instagram or
  * Facebook credential — operators have them and asked to keep them — and
  * reports it as inert, which is the true state, instead of quietly feeding a
  * scraper that invents its output.

@@ -25,13 +25,36 @@
   re-running; see the phase-2 milestone. Earlier same-day pass: **895 unit tests passing**,
   **151 core exports verified**, and eight live browser runs of `/recon`/`/graph`/`/reports` against real free APIs, including a 3,461-entity real-world stress case, an end-to-end manual-selection run, an end-to-end Graph hand-off run, an end-to-end Reports OSINT-inclusion run, an end-to-end Maltego-export run (also catching and confirming the fix for the client-bundle regression above), and an end-to-end Jina Reader run (real Wikipedia article investigated on `/recon`, real 21,907-character extraction confirmed both via direct `bun -e` and in-browser). `fabrication-check` fails at baseline with 81 pre-existing matches unrelated to any work this session (see `docs/OSINT-INTEGRATION-PLAN.md` §31 P0 Baseline note) — every file added this session is individually clean against it.
 
-### Deployed state — 2026-08-17 ✅ LATEST
+### Deployment — REMOVED 2026-08-20. There is no hosted app.
 
-`sentinel-web` runs **`v29`** / revision **`sentinel-web--0000027`**
-(`Healthy`, `RunningAtMaxScale`, 1 replica), at
-`sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`.
-**1177 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **210 core exports verified**.
-GitHub `origin/main` is at `2f1c83d`.
+**Azure is gone and must not be used.** The subscription was disabled and then removed. The
+Container Apps environment answered `ManagedClusterSuspended`, `provisioningState` went
+`Failed`, and every route returned nothing. `azure-env.sh` has been deleted; `preflight.sh`
+no longer checks for the Azure CLI. **Do not run `az`, and do not propose Azure.**
+
+The last thing that ever ran there was `v29` / `sentinel-web--0000027`, and it is now
+unreachable. Any statement elsewhere in this file about a live URL, a revision or a
+container image is **historical** and describes something that no longer exists.
+
+**Sentinel runs locally now, and only locally:**
+
+```bash
+bun install
+bun run dev                                  # or: bun run build && node .output/server/index.mjs
+docker compose -f osint-workers/docker-compose.yml up -d   # SpiderFoot, theHarvester, SearXNG, IVRE
+```
+
+`bash preflight.sh` checks the toolchain. Docker is required now, not optional — it used to
+be optional only because builds ran in the cloud.
+
+**The app has no cloud coupling**, which is why this was a documentation cleanup rather than
+a port: the Dockerfile targets plain `node:22-alpine`, and the only Azure reference in `src/`
+was a doc comment. Picking a new host later is a config decision. Do not add one
+speculatively.
+
+**Current state: 1459 tests passing, `tsc --noEmit` clean, 210 core exports verified**,
+verified against the production build under Node (6 routes render, server functions 200,
+15 collectors probed). GitHub `origin/main` is at `a33bb30`.
 
 > **⚠️ `bun:sqlite` STRIKES A SECOND TIME — read before adding ANY cross-module import
 > under `src/utils/` (2026-08-17).** `osint/job-store-sqlite.ts` statically imports
@@ -67,25 +90,13 @@ collectors probed**. That exercises the new `functionMiddleware` chain (sanitise
 on the real ingress; a 200 on the HTML alone would not have, since server functions are a separate
 path. Only console error is the pre-existing CSP report-only warning.
 
-> **`az containerapp logs show` CANNOT be read from this machine — both documented workarounds
-> tested and BOTH FAIL (2026-08-17).** Same cp1252 crash class as `az acr build`, different
-> command: it connects to the container, then dies on the Vite `➜` (`➜`) in the startup
-> banner — `UnicodeEncodeError` ending in `encodings\cp1252.py` inside `stream_containerapp_logs`.
-> CLAUDE.md offers `[Console]::OutputEncoding = [Text.Encoding]::UTF8` and `chcp 65001` as
-> unverified candidates. **They are now verified as ineffective** — tried both, plus
-> `PYTHONIOENCODING=utf-8`, in PowerShell; identical traceback every time. Do not spend time on
-> them again. Use Log Analytics, or verify behaviour through the app itself as above.
-
-#### Prior deployed state — 2026-08-13
-
-`v26` / `sentinel-web--0000024`, 653 tests, 151 exports, `origin/main` at `e83ffcf`.
-
-> **Always run the check below before trusting this section** — the deploy that produced
-> v26 was tagged from the live value, not from this file:
->
-> ```sh
-> az containerapp show -g rg-sentinel-demo -n sentinel-web >   --query "{image:properties.template.containers[0].image, rev:properties.latestReadyRevisionName}"
-> ```
+> **A Windows-console finding that outlived Azure, kept because it will recur.** Any CLI that
+> streams build or container logs through Python on this machine dies encoding Vite's `✓`/`➜`
+> to cp1252 (`UnicodeEncodeError`, via colorama re-wrapping stdout). `PYTHONIOENCODING=utf-8`,
+> `[Console]::OutputEncoding = [Text.Encoding]::UTF8` and `chcp 65001` were **all three tested
+> on 2026-08-17 and all three failed**. Do not spend time on them again. The general lesson —
+> which is what made the Azure logs unreadable and cost real time — is: **never conclude a
+> build or a process failed from streamed CLI output alone; verify the artefact.**
 
 #### YouTube Feature Architecture (v23+, rewritten 2026-08-12) — CRITICAL FOR AI TO KNOW
 
@@ -115,16 +126,17 @@ path. Only console error is the pre-existing CSP report-only warning.
 - **Verified live 2026-08-12** on `b6g6rDDt9x8`: duration 734s, 4,309,691 views, upload date
   2020-11-10, 347 caption segments from 93,199 bytes, download HEAD 200 `video/mp4` 22,830,807 bytes.
 
-#### Deployment Commands (run from `d:\social_media_research`)
+#### Local run commands (run from `d:\social_media_research`)
 
 ```bash
-# Build image
-az acr build --registry sentinelacr4821 --image sentinel-web:vXX --no-logs .
-# Deploy
-az containerapp update -g rg-sentinel-demo -n sentinel-web --image sentinelacr4821.azurecr.io/sentinel-web:vXX
-# Git push
+bun test && bun scripts/check-exports.ts     # gates
+bun run build && node .output/server/index.mjs
+docker compose -f osint-workers/docker-compose.yml up -d
 git add -A && git commit -m "..." && git push origin main
 ```
+
+**The former `az acr build` / `az containerapp update` pair has been deleted rather than
+commented out.** A commented-out deploy command is one somebody eventually uncomments.
 
 ### Live collection status — verified 2026-08-11
 

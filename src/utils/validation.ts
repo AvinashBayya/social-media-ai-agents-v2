@@ -207,8 +207,8 @@ export function jsonSizeLimit(maxBytes = DEFAULT_MAX_PAYLOAD_BYTES) {
 /**
  * Hosts that must never be reachable from a server-side fetch, whatever an
  * allowlist says. Cloud metadata first — it is the payload of every SSRF
- * proof-of-concept, and on Azure it fronts the managed identity this app uses
- * to read Key Vault.
+ * proof-of-concept: on every major cloud that address fronts the credentials of
+ * whatever identity the workload runs as.
  */
 export const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /^169\.254\./, // link-local, incl. 169.254.169.254 (cloud metadata)
