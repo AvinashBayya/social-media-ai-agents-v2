@@ -31,7 +31,27 @@
  * tooling only") is out of scope for this file.
  */
 
-import { Database } from "bun:sqlite";
+/**
+ * `bun:sqlite` IS DELIBERATELY NOT IMPORTED AT MODULE SCOPE.
+ *
+ * A top-level `import { Database } from "bun:sqlite"` here is what made this
+ * module unloadable on the production runtime. The image is `node:22-alpine`
+ * running `node .output/server/index.mjs` (Dockerfile), and Node's ESM loader
+ * throws ERR_UNSUPPORTED_ESM_URL_SCHEME on a `bun:` specifier — at LINK time,
+ * before any guard in any caller can run. So every chunk that so much as
+ * referenced this file took the whole server function down with it.
+ *
+ * That failure shipped three times, each via a different innocent import
+ * elsewhere that re-chunked this module: once into the browser bundle, once via
+ * `collector-health.ts` -> `gps-interference.ts`, and once via the OSINT
+ * collector barrel. `jobs.ts` guarding the CALL was never enough, because the
+ * cost is paid on IMPORT.
+ *
+ * The type is imported type-only (erased at build), and the value is resolved
+ * at construction time through a specifier the bundler cannot constant-fold.
+ * **Do not turn either of these back into a static import.**
+ */
+import type { Database as BunDatabase } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { CollectorErrorInfo } from "../collectors/errors";
@@ -97,7 +117,7 @@ function rowToJob(row: JobRow): InvestigationJob {
 }
 
 export class SqliteJobStore implements JobStore {
-  private readonly db: Database;
+  private readonly db: BunDatabase;
 
   /** `path` may be a real file path or `:memory:` (used by this file's own tests). A file path's parent directory is created if missing. */
   constructor(path: string) {
@@ -105,6 +125,11 @@ export class SqliteJobStore implements JobStore {
       const dir = dirname(path);
       if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
+    // Resolved here, not at module scope — see the note above the type import.
+    // The specifier is built at runtime so it survives bundling unresolved.
+    const bunSqlite = "bun:" + "sqlite";
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a static import of bun:sqlite makes this module unloadable under Node; see the header note.
+    const { Database } = require(bunSqlite) as typeof import("bun:sqlite");
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(SCHEMA);

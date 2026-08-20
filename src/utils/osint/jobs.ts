@@ -102,8 +102,38 @@ function createJobStore(): JobStore {
   if (typeof window !== "undefined") return new InMemoryJobStore();
   const path = process.env.JOB_STORE_PATH?.trim();
   if (!path) return new InMemoryJobStore();
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deliberate: a static `import` here previously broke every browser route by pulling bun:sqlite into the client bundle (see this function's doc comment); require() keeps it out of the client's static import graph, reached only behind the `typeof window` guard above.
-  const { SqliteJobStore } = require("./job-store-sqlite") as typeof import("./job-store-sqlite");
+
+  // `bun:sqlite` is a BUN built-in. The production image is `node:22-alpine`
+  // running `node .output/server/index.mjs` (see Dockerfile), and Node cannot
+  // load a `bun:` specifier at all — so on the deployed runtime this store is
+  // not merely unused, it is unusable. Checked explicitly rather than
+  // discovered by crashing.
+  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+  if (!isBun) {
+    // Loud, and it names the real cause. Falling back silently would leave a
+    // durability claim the storage cannot honour; crashing would take the whole
+    // app down for a feature nobody asked for on this runtime.
+    console.warn(
+      `osint/jobs: JOB_STORE_PATH="${path}" was set, but this process is not Bun and ` +
+        `SqliteJobStore requires the bun:sqlite built-in. Falling back to the in-memory store — ` +
+        `jobs will NOT survive a restart or a scale-to-zero cycle. Run the server under Bun, or ` +
+        `unset JOB_STORE_PATH to make the in-memory behaviour explicit.`,
+    );
+    return new InMemoryJobStore();
+  }
+
+  // THE SPECIFIER IS A VARIABLE ON PURPOSE — DO NOT INLINE IT.
+  //
+  // `require("./job-store-sqlite")` is statically analyzable, so Rollup follows
+  // it and links the chunk eagerly no matter what runtime guard wraps the call.
+  // That is how `bun:sqlite` reached an SSR chunk and answered
+  // ERR_UNSUPPORTED_ESM_URL_SCHEME on the Node runtime — three separate times,
+  // each time via a different innocent-looking import elsewhere that re-chunked
+  // this module. A variable specifier cannot be resolved at build time, so no
+  // static edge exists and nothing is linked unless this line actually runs.
+  const specifier = "./job-store-sqlite";
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- see above: a literal specifier here is statically linked by the bundler and breaks the Node runtime.
+  const { SqliteJobStore } = require(specifier) as typeof import("./job-store-sqlite");
   return new SqliteJobStore(path);
 }
 

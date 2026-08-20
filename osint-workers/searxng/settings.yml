@@ -1,0 +1,21 @@
+# SearXNG configuration for Sentinel.
+#
+# THE ONE LINE THAT MATTERS IS `json` UNDER search.formats.
+# A stock SearXNG serves HTML only and answers HTTP 403 to `format=json`, which
+# is indistinguishable from a refusal unless you know to look for it. The
+# collector reports that 403 as a configuration state rather than as "no
+# results", but it still cannot collect until this is set.
+use_default_settings: true
+
+server:
+  # Replace before any use beyond localhost. SearXNG refuses to start with the
+  # default placeholder in some builds, and a shared secret left at a published
+  # default is not a secret.
+  secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json

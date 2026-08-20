@@ -1,0 +1,103 @@
+# Self-hosted OSINT tool stack — SpiderFoot, theHarvester, SearXNG, IVRE.
+#
+# RUNS LOCALLY, IN WSL. Not deployed to Azure, and deliberately so: SpiderFoot
+# needs a long-lived process, which is incompatible with the frontend's
+# scale-to-zero Container App and therefore with the zero-budget constraint.
+# The deployed app keeps reporting these collectors as `unavailable`, which
+# stays true — for it, they are. Demos of these tools run against a locally
+# running frontend.
+#
+# EVERY SERVICE BINDS TO 127.0.0.1. None of these should be reachable from the
+# LAN, let alone the internet. SpiderFoot and IVRE will scan whatever they are
+# pointed at, and SearXNG is an open proxy to search engines if exposed; all
+# three are attractive things to leave listening on 0.0.0.0 by accident. The
+# explicit loopback bind is what stops that.
+#
+#   docker compose -f osint-workers/docker-compose.yml up -d
+#
+# Then in the repo's .env:
+#   SPIDERFOOT_WORKER_URL=http://localhost:5001
+#   THEHARVESTER_WORKER_URL=http://localhost:5002
+#   SEARXNG_URL=http://localhost:8080
+#   IVRE_URL=http://localhost:5000
+
+services:
+  # ── SpiderFoot ───────────────────────────────────────────────────────────
+  # MIT licensed, 200+ modules, most needing no API key. Ships its own CherryPy
+  # web server, so no wrapper is needed — SPIDERFOOT_WORKER_URL points straight
+  # at it. The adapter (collectors/external/spiderfoot.ts) polls /scanstatus
+  # until FINISHED; its assumed endpoint and parameter names came from
+  # training-time knowledge and have NEVER been checked against a live
+  # instance. Verify them here before trusting a result: the parser is
+  # defensive, so a wrong field name degrades to "not reported" rather than
+  # throwing, which means a mismatch fails silently.
+  spiderfoot:
+    image: ghcr.io/smicallef/spiderfoot:latest
+    container_name: sentinel-spiderfoot
+    ports:
+      - "127.0.0.1:5001:5001"
+    restart: unless-stopped
+
+  # ── theHarvester ─────────────────────────────────────────────────────────
+  # GPL, and a CLI with no HTTP interface of its own — hence the thin wrapper
+  # built in ./theharvester. Running it as a separate process behind HTTP is
+  # exactly why the GPL question does not arise: nothing is linked into
+  # Sentinel. That is the reason theharvester.ts was written as a worker client
+  # rather than a subprocess call in the first place.
+  theharvester:
+    build: ./theharvester
+    container_name: sentinel-theharvester
+    ports:
+      - "127.0.0.1:5002:5002"
+    restart: unless-stopped
+
+  # ── SearXNG ──────────────────────────────────────────────────────────────
+  # The replacement for Google Custom Search, which is closed to new customers
+  # and dies 2027-01-01. Free, keyless, self-hosted.
+  #
+  # ⚠️ THE JSON FORMAT IS OFF BY DEFAULT. A stock SearXNG answers HTTP 403 to
+  # `format=json` until settings.yml contains:
+  #
+  #     search:
+  #       formats:
+  #         - html
+  #         - json
+  #
+  # ./searxng/settings.yml is mounted below for exactly that. Without it the
+  # collector reports the 403 as a configuration state — not as "no results" —
+  # but it still will not work.
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: sentinel-searxng
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    restart: unless-stopped
+
+  # ── IVRE ─────────────────────────────────────────────────────────────────
+  # Self-hosted network recon storage. This is the ONLY service here whose data
+  # comes from packets sent to a third party, and the collector that reads it
+  # (collectors/external/ivre.ts) refuses every target not covered by a live
+  # written authorisation — see src/utils/scan-authorization.ts. Standing this
+  # up does not by itself authorise scanning anything.
+  ivre:
+    image: docker.io/ivre/web:latest
+    container_name: sentinel-ivre
+    ports:
+      - "127.0.0.1:5000:80"
+    depends_on:
+      - ivre-db
+    restart: unless-stopped
+
+  ivre-db:
+    image: docker.io/ivre/db:latest
+    container_name: sentinel-ivre-db
+    volumes:
+      - ivre-db-data:/var/lib/mongodb
+    restart: unless-stopped
+
+volumes:
+  ivre-db-data:

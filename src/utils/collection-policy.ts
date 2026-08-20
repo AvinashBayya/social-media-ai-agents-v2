@@ -63,7 +63,8 @@ export type LegalBasis =
   | "official-api"
   | "platform-tos"
   | "dpdp-act-2023"
-  | "no-free-tier";
+  | "no-free-tier"
+  | "written-authorisation";
 
 export const BASIS_LABELS: Record<LegalBasis, string> = {
   "syndication-by-design": "Syndication by design",
@@ -71,6 +72,7 @@ export const BASIS_LABELS: Record<LegalBasis, string> = {
   "platform-tos": "Platform terms of service",
   "dpdp-act-2023": "DPDP Act 2023",
   "no-free-tier": "No free tier",
+  "written-authorisation": "Written authorisation",
 };
 
 export const BASIS_DETAIL: Record<LegalBasis, string> = {
@@ -90,6 +92,12 @@ export const BASIS_DETAIL: Record<LegalBasis, string> = {
   "no-free-tier":
     "Access exists but is priced. This is a budget constraint, not a legal one — it would " +
     "become available under a paid plan, which the zero-budget constraint excludes.",
+  "written-authorisation":
+    "Permitted only for a specific target, for a specific period, under a written authorisation " +
+    "naming the officer who granted it. This is the basis ACTIVE scanning requires: unlike every " +
+    "other source here, it puts packets on the wire aimed at somebody else's host, which is " +
+    "lawful only with the owner's permission. Absence of an authorisation is a refusal, never a " +
+    "default.",
 };
 
 // ─── Policy rows ───────────────────────────────────────────────────────────
@@ -144,6 +152,34 @@ export const COLLECTION_POLICIES: CollectionPolicy[] = [
     implementedBy:
       "No collector exists, by design. The manual capture panel on /social writes to the " +
       "evidence store; see manual-evidence.ts.",
+  },
+  {
+    id: "active-scan",
+    sources: ["IVRE", "Nmap"],
+    mode: "partial",
+    basis: ["written-authorisation"],
+    rationale:
+      "Permitted per target, never by default. Every other Module 2 collector is PASSIVE — it " +
+      "reads a third-party record about a target (Certificate Transparency, RDAP, Shodan " +
+      "InternetDB) and never sends the target a packet, which is what makes those usable with no " +
+      "engagement authorisation. Active scanning breaks that property, so it is gated on a " +
+      "written authorisation naming the target, the authorising officer, a reference and a " +
+      "mandatory expiry. There is no override.",
+    ingestionRoute:
+      "An analyst supplies a target already covered by a live authorisation record. The gate in " +
+      "scan-authorization.ts refuses anything else before a single packet is sent, and every " +
+      "permitted read emits an audit entry naming the authorisation it relied on.",
+    permitted: ["Reading scan results already held for an authorised target"],
+    withheld: [
+      "Any target with no live written authorisation",
+      "Private, loopback, link-local and reserved ranges, unless explicitly opted in",
+      "Launching a new scan as a side effect of an investigation",
+    ],
+    manualUploadAllowed: false,
+    implementedBy:
+      "src/utils/scan-authorization.ts (the gate) and collectors/external/ivre.ts (the reader). " +
+      "IVRE holds only scan data the operator generated themselves, so its coverage is exactly " +
+      "the hosts that were authorised and nothing else.",
   },
   {
     id: "youtube",
