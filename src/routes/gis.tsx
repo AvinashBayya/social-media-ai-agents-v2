@@ -15,9 +15,22 @@ import {
   Layers as LayersIcon,
   MapPin,
   Camera,
+  Wheat,
+  FileOutput,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchGeoLayers } from "@/utils/geo-sources";
+import {
+  fetchSupplyDemand,
+  type GrainsProduct,
+  type SupplyDemandDomain,
+  type SupplyDemandParams,
+} from "@/utils/supply-demand-sources";
+import { llmReport } from "@/utils/llm";
+import { MarkdownReport } from "@/components/markdown-report";
+import { fetchNewsAggregation, type NewsAggregationResult } from "@/utils/news-aggregation";
+import { mergeTimeline, timelineFromGdeltEvents, timelineFromNewsItems } from "@/utils/timeline";
+import { Timeline } from "@/components/timeline";
 import {
   cellSizeForZoom,
   clusterByGrid,
@@ -35,13 +48,13 @@ import {
 } from "@/utils/geo";
 import { loadImageCorpus } from "@/utils/imaging-client";
 import {
-  CARTO_DARK,
   MAP_BACKGROUND,
   OFFLINE_BASEMAP_URL,
   addConsentedTileLayer,
   addGraticule,
   addOfflineBasemap,
   addScaleBar,
+  resolveTileProvider,
   loadLeaflet,
 } from "@/utils/leaflet-client";
 
@@ -67,9 +80,9 @@ export const Route = createFileRoute("/gis")({
   component: GISPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
-const layerColour = (id: GeoLayerId) => GEO_LAYERS.find((l) => l.id === id)?.colour ?? "#94A3B8";
+const layerColour = (id: GeoLayerId) => GEO_LAYERS.find((l) => l.id === id)?.colour ?? "var(--console-muted)";
 
 /** Marker radius in pixels from a layer-relative magnitude. Constant when unmeasured. */
 function radiusFor(record: GeoRecord, maxMagnitude: number): number {
@@ -78,13 +91,22 @@ function radiusFor(record: GeoRecord, maxMagnitude: number): number {
 }
 
 function GISPage() {
+  // Resolved once — the provider is env-config, not runtime state. See
+  // resolveTileProvider's doc comment in leaflet-client.ts.
+  const tileProvider = useMemo(() => resolveTileProvider(), []);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const layerGroupRef = useRef<any>(null);
   const leafletRef = useRef<any>(null);
 
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [draft, setDraft] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); a mount effect now sets the real
+  // value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [draft, setDraft] = useState("");
   const [results, setResults] = useState<LayerResult[]>([]);
   const [imageRecords, setImageRecords] = useState<GeoRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,11 +141,62 @@ function GISPage() {
     gpsjam: true,
     radiation: true,
     reliefweb: true,
+    supplyDemand: true,
+    gdeltEvents: true,
+    assetTracks: true,
+    mentions: true,
   });
   const [timeWindow, setTimeWindow] = useState<[number, number] | null>(null);
 
+  // ── Supply & Demand (Kpler) — analyst-driven, not auto-collected ─────────
+  // Unlike every other layer, this doesn't run from the free-text target
+  // search: Kpler takes explicit product/zone parameters. See
+  // supply-demand-sources.ts's file doc comment for why.
+  const [sdResults, setSdResults] = useState<LayerResult[]>([]);
+  const [sdDomain, setSdDomain] = useState<SupplyDemandDomain>("grains");
+  const [sdProduct, setSdProduct] = useState<GrainsProduct>("Corn");
+  const [sdZonesDraft, setSdZonesDraft] = useState("Argentina, Brazil, Ukraine");
+  const [sdMinYear, setSdMinYear] = useState(2023);
+  const [sdMaxYear, setSdMaxYear] = useState(2025);
+  const [sdStartDate, setSdStartDate] = useState("2024-01-01");
+  const [sdEndDate, setSdEndDate] = useState("2025-01-01");
+  const [sdLoading, setSdLoading] = useState(false);
+  const [sdError, setSdError] = useState("");
+  const [sdReport, setSdReport] = useState<{
+    text: string;
+    model: string;
+    provider: string;
+  } | null>(null);
+  const [sdReportError, setSdReportError] = useState("");
+  const [sdReportLoading, setSdReportLoading] = useState(false);
+
+  // ── Timeline (GIS v2) — RSS aggregation feeding the chronology alongside
+  // the gdeltEvents map layer. Fetched once: the feed list is fixed
+  // configuration, not query-driven like the map's collectors.
+  const [newsAgg, setNewsAgg] = useState<NewsAggregationResult | null>(null);
+
+  useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setDraft(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setDraft(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
   // ── Collect server-side layers ───────────────────────────────────────────
   useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -141,6 +214,29 @@ function GISPage() {
       cancelled = true;
     };
   }, [target]);
+
+  // ── RSS aggregation for the Timeline — fixed feed list, fetched once ──────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res: NewsAggregationResult = await fetchNewsAggregation();
+        if (!cancelled) setNewsAgg(res);
+      } catch (err: any) {
+        if (!cancelled) {
+          setNewsAgg({
+            feeds: [],
+            items: [],
+            collectedAt: new Date().toISOString(),
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Image GPS comes from the Module 4 corpus, which lives in this browser ──
   useEffect(() => {
@@ -162,14 +258,100 @@ function GISPage() {
     () => [
       ...results,
       { layer: "imagery" as const, records: imageRecords, unplaceable: 0, error: null },
+      ...sdResults,
     ],
-    [results, imageRecords],
+    [results, imageRecords, sdResults],
   );
+
+  const fetchSupplyDemandData = async () => {
+    const zones = sdZonesDraft
+      .split(",")
+      .map((z) => z.trim())
+      .filter(Boolean);
+    if (zones.length === 0) return;
+    setSdLoading(true);
+    setSdError("");
+    setSdReport(null);
+    setSdReportError("");
+    const params: SupplyDemandParams =
+      sdDomain === "grains"
+        ? { domain: "grains", product: sdProduct, zones, minYear: sdMinYear, maxYear: sdMaxYear }
+        : { domain: sdDomain, zones, startDate: sdStartDate, endDate: sdEndDate };
+    try {
+      const result: LayerResult = await fetchSupplyDemand({ data: params });
+      setSdResults([result]);
+      if (result.error) setSdError(result.error);
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      setSdError(message);
+      setSdResults([{ layer: "supplyDemand", records: [], unplaceable: 0, error: message }]);
+    } finally {
+      setSdLoading(false);
+    }
+  };
+
+  /**
+   * Synthesizes a report from whatever real balance data was just fetched —
+   * every metric Kpler reported, not a curated subset. llmReport already
+   * refuses to invent unsupported sections, so this never runs without at
+   * least one real zone's balance sheet in hand.
+   */
+  const generateSupplyDemandReport = async () => {
+    const records = sdResults.flatMap((r) => r.records);
+    if (records.length === 0) return;
+    setSdReportLoading(true);
+    setSdReportError("");
+    setSdReport(null);
+    try {
+      const lines = records.map((r) => {
+        const metrics = Object.entries(r.detail)
+          .filter(([k]) => !["zone", "product", "period"].includes(k))
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        return `${r.detail.zone} — ${r.detail.product}, period ${r.detail.period}: ${metrics}`;
+      });
+      const zones = [...new Set(records.map((r) => String(r.detail.zone)))];
+      const res = await llmReport({
+        data: {
+          type: "Supply & Demand Intelligence",
+          target: zones.join(", "),
+          data: lines.join("\n"),
+        },
+      });
+      setSdReport({ text: res.text, model: res.model, provider: res.provider });
+    } catch (err: any) {
+      setSdReportError(err?.message ?? String(err));
+    } finally {
+      setSdReportLoading(false);
+    }
+  };
 
   const allRecords = useMemo(
     () => allResults.filter((r) => enabled[r.layer]).flatMap((r) => r.records),
     [allResults, enabled],
   );
+
+  const gdeltEventsResult = useMemo(
+    () => allResults.find((r) => r.layer === "gdeltEvents") ?? null,
+    [allResults],
+  );
+
+  const timelineEntries = useMemo(
+    () =>
+      mergeTimeline(
+        timelineFromGdeltEvents(gdeltEventsResult?.records ?? []),
+        timelineFromNewsItems(newsAgg?.items ?? []),
+      ),
+    [gdeltEventsResult, newsAgg],
+  );
+
+  // Both sources report their own disabled/error state via the same field a
+  // layer card already uses (LayerResult.error / NewsAggregationResult.error)
+  // — reused here rather than inventing a second "is GIS v2 on" client check.
+  const timelineDisabledReason =
+    gdeltEventsResult?.error && newsAgg?.error
+      ? `Both timeline sources are unavailable. GDELT Events: ${gdeltEventsResult.error} News aggregation: ${newsAgg.error}`
+      : null;
 
   const extent = useMemo(() => timeExtent(allRecords), [allRecords]);
 
@@ -187,8 +369,8 @@ function GISPage() {
 
   // What the consent control below would disclose for the view on screen.
   const viewDisclosure = useMemo(
-    () => describeTileRequest(center[0], center[1], zoom, CARTO_DARK.pathTemplate),
-    [center, zoom],
+    () => describeTileRequest(center[0], center[1], zoom, tileProvider.pathTemplate),
+    [center, zoom, tileProvider],
   );
 
   // ── Map ──────────────────────────────────────────────────────────────────
@@ -238,7 +420,7 @@ function GISPage() {
 
     setBasemapError("");
     if (tiles) {
-      layer = addConsentedTileLayer(L, map, CARTO_DARK);
+      layer = addConsentedTileLayer(L, map, tileProvider);
     } else {
       addOfflineBasemap(L, map)
         .then((added: any) => {
@@ -257,7 +439,7 @@ function GISPage() {
       cancelled = true;
       if (layer && map.hasLayer(layer)) map.removeLayer(layer);
     };
-  }, [tiles, mapReady]);
+  }, [tiles, mapReady, tileProvider]);
 
   // ── Draw ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -279,9 +461,9 @@ function GISPage() {
           icon: L.divIcon({
             className: "",
             html:
-              `<div style="background:${colour};color:#0B1220;border-radius:999px;` +
+              `<div style="background:${colour};color:var(--console-accent-foreground);border-radius:999px;` +
               `width:26px;height:26px;display:grid;place-items:center;font:700 11px sans-serif;` +
-              `border:2px solid #0B1220">${cluster.members.length}</div>`,
+              `border:2px solid var(--console-accent-foreground)">${cluster.members.length}</div>`,
             iconSize: [26, 26],
           }),
         })
@@ -353,27 +535,27 @@ function GISPage() {
             <CardContent className="p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-[200px] flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748B]" />
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
                   <Input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && search()}
                     placeholder="Subject for the news layer…"
-                    className="h-8 border-[#263548] bg-[#0B1220] pl-8 text-[11px] text-white"
+                    className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
                   />
                 </div>
                 <Button size="sm" onClick={search} disabled={loading} className="h-8">
                   {loading ? <Loader2 className="size-3.5 animate-spin" /> : "Collect"}
                 </Button>
-                <span className="font-mono text-[10px] text-[#64748B]">
+                <span className="font-mono text-[10px] text-console-label">
                   {visible.length} of {allRecords.length} plotted · zoom {zoom}
                 </span>
               </div>
 
               {error && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <span className="font-mono text-[10px] text-[#EF4444]">{error}</span>
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <span className="font-mono text-[10px] text-console-red">{error}</span>
                 </div>
               )}
             </CardContent>
@@ -388,12 +570,12 @@ function GISPage() {
               />
 
               {/* ── Time slider ──────────────────────────────────────────── */}
-              <div className="border-t border-[#263548] p-3">
+              <div className="border-t border-console-border p-3">
                 {extent && timeWindow ? (
                   <>
-                    <div className="flex items-center justify-between font-mono text-[10px] text-[#94A3B8]">
+                    <div className="flex items-center justify-between font-mono text-[10px] text-console-muted">
                       <span>{fmtDay(timeWindow[0])}</span>
-                      <span className="text-[#64748B]">
+                      <span className="text-console-label">
                         spatial-temporal filter · {visible.length} in window
                       </span>
                       <span>{fmtDay(timeWindow[1])}</span>
@@ -406,13 +588,13 @@ function GISPage() {
                       value={timeWindow}
                       onValueChange={(v) => setTimeWindow([v[0], v[1] ?? v[0]])}
                     />
-                    <p className="mt-1 font-mono text-[9px] text-[#64748B]">
+                    <p className="mt-1 font-mono text-[9px] text-console-label">
                       Range is the true extent of the collected records ({fmtDay(extent.fromMs)} to{" "}
                       {fmtDay(extent.toMs)}), not a fixed window.
                     </p>
                   </>
                 ) : (
-                  <p className="font-mono text-[10px] text-[#64748B]">
+                  <p className="font-mono text-[10px] text-console-label">
                     No dated records to filter. The slider appears when the collection carries
                     usable timestamps.
                   </p>
@@ -422,44 +604,44 @@ function GISPage() {
           </Card>
 
           {/* ── Basemap disclosure ─────────────────────────────────────── */}
-          <Card className={tiles ? "border-[#F59E0B]/40 bg-[#111827]" : CARD}>
+          <Card className={tiles ? "border-console-amber/40 bg-console-surface" : CARD}>
             <CardContent className="p-3">
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"
                   checked={tiles}
                   onChange={(e) => setTiles(e.target.checked)}
-                  className="mt-0.5 size-3 shrink-0 accent-[#F59E0B]"
+                  className="mt-0.5 size-3 shrink-0 accent-console-amber"
                 />
-                <span className="text-[10px] leading-relaxed text-[#94A3B8]">
-                  <span className="font-semibold text-white">
-                    Request raster basemap tiles from {CARTO_DARK.host} —{" "}
+                <span className="text-[10px] leading-relaxed text-console-muted">
+                  <span className="font-semibold text-console-text">
+                    Request raster basemap tiles from {tileProvider.host} —{" "}
                     {tiles ? "ON, tiles are being requested" : "off"}
                   </span>
                   <br />
-                  <span className="text-[#64748B]">Off:</span> every pixel on this map comes from
+                  <span className="text-console-label">Off:</span> every pixel on this map comes from
                   this origin — Leaflet&apos;s stylesheet and marker icons are bundled with the app
                   and the country outlines are{" "}
                   <span className="font-mono text-[#CBD5E1]">{OFFLINE_BASEMAP_URL}</span>. No map
                   provider is contacted, at any zoom. The trade-off is real: coastlines and a
                   graticule, no roads or buildings.
                   <br />
-                  <span className="text-[#64748B]">On:</span> the browser sends one request per
+                  <span className="text-console-label">On:</span> the browser sends one request per
                   visible tile to{" "}
-                  <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span> (
-                  {CARTO_DARK.operator}) on every pan and zoom, and the request path IS the view:
+                  <span className="font-mono text-[#CBD5E1]">{tileProvider.host}</span> (
+                  {tileProvider.operator}) on every pan and zoom, and the request path IS the view:
                   the current centre is{" "}
-                  <span className="font-mono text-[#F59E0B]">{viewDisclosure.path}</span>, a{" "}
+                  <span className="font-mono text-console-amber">{viewDisclosure.path}</span>, a{" "}
                   {viewDisclosure.footprint} square, recorded there with your IP address and the
                   time. This page is not only public feed data — the Imagery layer plots EXIF GPS
                   fixes from images analysed in this browser, so zooming to one of those pins
-                  discloses that image&apos;s location to {CARTO_DARK.operator} even though the
+                  discloses that image&apos;s location to {tileProvider.operator} even though the
                   image file itself never leaves this machine. Not stored anywhere; it resets on
                   reload.
                 </span>
               </label>
               {basemapError && (
-                <p className="mt-2 font-mono text-[10px] leading-relaxed text-[#F59E0B]">
+                <p className="mt-2 font-mono text-[10px] leading-relaxed text-console-amber">
                   Offline basemap unavailable: {basemapError}. Markers are unaffected — only the
                   coastline backdrop is missing, and nothing was substituted for it.
                 </p>
@@ -467,51 +649,241 @@ function GISPage() {
             </CardContent>
           </Card>
 
+          {/* ── Supply & Demand (Kpler) ─────────────────────────────────── */}
+          <Card className={CARD}>
+            <CardContent className="p-4">
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                <Wheat className="size-3.5" style={{ color: layerColour("supplyDemand") }} />
+                Supply & Demand (Kpler)
+              </h3>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-console-label">
+                Kpler is a commercial commodity-intelligence provider — grains and LNG/gas
+                balance sheets require a paid KPLER_API_KEY, unlike every other layer on this
+                page. Analyst-selected product and zones only; this does not run automatically
+                from the search bar above.
+              </p>
+
+              <div className="mt-3 flex flex-wrap gap-1">
+                {(["grains", "lng", "gas"] as SupplyDemandDomain[]).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setSdDomain(d)}
+                    className={`rounded border px-2 py-1 text-[10px] uppercase ${
+                      sdDomain === d
+                        ? "border-[#84CC16]/50 bg-[#84CC16]/10 text-[#84CC16]"
+                        : "border-console-border bg-console-deep text-console-label"
+                    }`}
+                  >
+                    {d === "grains" ? "Grains" : d === "lng" ? "LNG" : "Natural gas"}
+                  </button>
+                ))}
+              </div>
+
+              {sdDomain === "grains" && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(["Corn", "Soybean", "Wheat"] as GrainsProduct[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setSdProduct(p)}
+                      className={`rounded border px-2 py-1 text-[10px] ${
+                        sdProduct === p
+                          ? "border-[#84CC16]/50 bg-[#84CC16]/10 text-[#84CC16]"
+                          : "border-console-border bg-console-deep text-console-label"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-2">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
+                  Zones / countries (comma-separated)
+                </label>
+                <Input
+                  value={sdZonesDraft}
+                  onChange={(e) => setSdZonesDraft(e.target.value)}
+                  placeholder="Argentina, Brazil, Ukraine"
+                  className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+                />
+              </div>
+
+              {sdDomain === "grains" ? (
+                <div className="mt-2 flex gap-2">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-console-label">
+                      Min year
+                    </label>
+                    <Input
+                      type="number"
+                      min={2017}
+                      value={sdMinYear}
+                      onChange={(e) => setSdMinYear(Number(e.target.value) || 2017)}
+                      className="mt-1 h-8 w-24 border-console-border bg-console-deep text-[11px] text-console-text"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-console-label">
+                      Max year
+                    </label>
+                    <Input
+                      type="number"
+                      min={2017}
+                      value={sdMaxYear}
+                      onChange={(e) => setSdMaxYear(Number(e.target.value) || sdMinYear)}
+                      className="mt-1 h-8 w-24 border-console-border bg-console-deep text-[11px] text-console-text"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex gap-2">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-console-label">
+                      Start date
+                    </label>
+                    <Input
+                      type="date"
+                      value={sdStartDate}
+                      onChange={(e) => setSdStartDate(e.target.value)}
+                      className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-console-label">
+                      End date
+                    </label>
+                    <Input
+                      type="date"
+                      value={sdEndDate}
+                      onChange={(e) => setSdEndDate(e.target.value)}
+                      className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sdLoading || !sdZonesDraft.trim()}
+                onClick={fetchSupplyDemandData}
+                className="mt-3 h-8 gap-1.5"
+              >
+                {sdLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Wheat className="size-3.5" />}
+                Fetch Supply & Demand Data
+              </Button>
+
+              {sdError && (
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <span className="text-[10px] leading-relaxed text-console-red">{sdError}</span>
+                </div>
+              )}
+
+              {sdResults.flatMap((r) => r.records).length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {sdResults
+                    .flatMap((r) => r.records)
+                    .map((r) => (
+                      <div
+                        key={r.id}
+                        className="cursor-pointer rounded border border-console-border bg-console-deep/60 p-2"
+                        onClick={() => setSelected(r)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-medium text-console-text">{r.title}</span>
+                          <span className="font-mono text-[10px] text-console-muted">
+                            {r.magnitudeLabel}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={sdReportLoading}
+                    onClick={generateSupplyDemandReport}
+                    className="mt-1 h-7 gap-1 text-[10px]"
+                  >
+                    {sdReportLoading ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <FileOutput className="size-3" />
+                    )}
+                    Generate AI Analysis Report
+                  </Button>
+
+                  {sdReportError && (
+                    <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                      <span className="text-[10px] leading-relaxed text-console-red">
+                        <span className="font-bold">AI unavailable.</span> {sdReportError}
+                      </span>
+                    </div>
+                  )}
+
+                  {sdReport && (
+                    <div>
+                      <div className="max-h-96 overflow-auto rounded border border-console-border bg-console-deep p-2.5">
+                        <MarkdownReport text={sdReport.text} />
+                      </div>
+                      <p className="mt-1.5 font-mono text-[9px] text-console-label">
+                        {sdReport.model} via {sdReport.provider}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* ── Selected record ────────────────────────────────────────── */}
           {selected && (
-            <Card className="border-[#3B82F6]/40 bg-[#111827]">
+            <Card className="border-console-blue/40 bg-console-surface">
               <CardContent className="p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <MapPin className="size-3.5" style={{ color: layerColour(selected.layer) }} />
-                  <span className="text-xs font-bold uppercase text-white">
+                  <span className="text-xs font-bold uppercase text-console-text">
                     {GEO_LAYERS.find((l) => l.id === selected.layer)?.label}
                   </span>
                   <button
                     onClick={() => setSelected(null)}
-                    className="ml-auto text-[10px] text-[#64748B] hover:text-white"
+                    className="ml-auto text-[10px] text-console-label hover:text-console-text"
                   >
                     close
                   </button>
                 </div>
 
-                <p className="mt-1.5 text-sm leading-snug text-[#F3F4F6]">{selected.title}</p>
+                <p className="mt-1.5 text-sm leading-snug text-console-text">{selected.title}</p>
 
-                <dl className="mt-2 space-y-1 border-t border-[#263548] pt-2 font-mono text-[10px]">
+                <dl className="mt-2 space-y-1 border-t border-console-border pt-2 font-mono text-[10px]">
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#64748B]">Coordinate</dt>
-                    <dd className="text-white">
+                    <dt className="text-console-label">Coordinate</dt>
+                    <dd className="text-console-text">
                       {selected.lat.toFixed(5)}, {selected.lon.toFixed(5)}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#64748B]">Precision</dt>
-                    <dd className="text-[#F59E0B]">{PRECISION_LABEL[selected.precision]}</dd>
+                    <dt className="text-console-label">Precision</dt>
+                    <dd className="text-console-amber">{PRECISION_LABEL[selected.precision]}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="shrink-0 text-[#64748B]">Locates</dt>
-                    <dd className="text-right text-white">{selected.locates}</dd>
+                    <dt className="shrink-0 text-console-label">Locates</dt>
+                    <dd className="text-right text-console-text">{selected.locates}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#64748B]">Reported</dt>
-                    <dd className="text-white">{selected.timestamp}</dd>
+                    <dt className="text-console-label">Reported</dt>
+                    <dd className="text-console-text">{selected.timestamp}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#64748B]">Magnitude</dt>
-                    <dd className="text-white">{selected.magnitudeLabel}</dd>
+                    <dt className="text-console-label">Magnitude</dt>
+                    <dd className="text-console-text">{selected.magnitudeLabel}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#64748B]">Module 1 credibility</dt>
-                    <dd className="text-white">
+                    <dt className="text-console-label">Module 1 credibility</dt>
+                    <dd className="text-console-text">
                       {selected.credibility === null
                         ? "not scored for this record type"
                         : `${(selected.credibility * 100).toFixed(0)}%`}
@@ -521,8 +893,8 @@ function GISPage() {
                     .filter(([k]) => k !== "thumbnail")
                     .map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-2">
-                        <dt className="text-[#64748B]">{k}</dt>
-                        <dd className="text-right text-white">{String(v)}</dd>
+                        <dt className="text-console-label">{k}</dt>
+                        <dd className="text-right text-console-text">{String(v)}</dd>
                       </div>
                     ))}
                 </dl>
@@ -531,7 +903,7 @@ function GISPage() {
                   <img
                     src={selected.detail.thumbnail}
                     alt={selected.title}
-                    className="mt-2 max-h-40 rounded border border-[#263548] object-contain"
+                    className="mt-2 max-h-40 rounded border border-console-border object-contain"
                   />
                 )}
 
@@ -540,7 +912,7 @@ function GISPage() {
                     href={selected.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 inline-block font-mono text-[10px] text-[#3B82F6] hover:underline"
+                    className="mt-2 inline-block font-mono text-[10px] text-console-blue hover:underline"
                   >
                     open source record
                   </a>
@@ -554,8 +926,8 @@ function GISPage() {
         <div className="space-y-4">
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-                <LayersIcon className="size-3.5 text-[#3B82F6]" />
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                <LayersIcon className="size-3.5 text-console-blue" />
                 Layers
               </h3>
 
@@ -567,7 +939,7 @@ function GISPage() {
                   return (
                     <div
                       key={layer.id}
-                      className="rounded border border-[#263548] bg-[#0B1220]/60 p-2"
+                      className="rounded border border-console-border bg-console-deep/60 p-2"
                     >
                       <button
                         onClick={() => setEnabled((p) => ({ ...p, [layer.id]: !p[layer.id] }))}
@@ -578,27 +950,27 @@ function GISPage() {
                           style={{ background: on ? layer.colour : "#334155" }}
                         />
                         <span
-                          className={`text-[11px] font-medium ${on ? "text-white" : "text-[#64748B]"}`}
+                          className={`text-[11px] font-medium ${on ? "text-console-text" : "text-console-label"}`}
                         >
                           {layer.label}
                         </span>
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#94A3B8]">
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-console-muted">
                           {count}
                         </span>
                       </button>
 
                       {result?.error && (
-                        <p className="mt-1 text-[9px] leading-relaxed text-[#F59E0B]">
+                        <p className="mt-1 text-[9px] leading-relaxed text-console-amber">
                           {result.error}
                         </p>
                       )}
                       {!result?.error && (result?.unplaceable ?? 0) > 0 && (
-                        <p className="mt-1 text-[9px] leading-relaxed text-[#F59E0B]">
+                        <p className="mt-1 text-[9px] leading-relaxed text-console-amber">
                           {result!.unplaceable} collected record(s) carried no usable coordinate and
                           were excluded rather than approximated.
                         </p>
                       )}
-                      <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">
+                      <p className="mt-1 text-[9px] leading-relaxed text-console-label">
                         {layer.provenance}
                       </p>
                     </div>
@@ -610,25 +982,25 @@ function GISPage() {
 
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="text-xs font-bold uppercase text-white">Collection integrity</h3>
-              <p className="mt-2 text-[10px] leading-relaxed text-[#94A3B8]">{summary.note}</p>
+              <h3 className="text-xs font-bold uppercase text-console-text">Collection integrity</h3>
+              <p className="mt-2 text-[10px] leading-relaxed text-console-muted">{summary.note}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 <Badge
                   variant="outline"
-                  className="border-[#10B981]/40 bg-[#10B981]/10 text-[9px] font-normal text-[#10B981]"
+                  className="border-console-green/40 bg-console-green/10 text-[9px] font-normal text-console-green"
                 >
                   {summary.plotted} plotted
                 </Badge>
                 {summary.unplaceable > 0 && (
                   <Badge
                     variant="outline"
-                    className="border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[9px] font-normal text-[#F59E0B]"
+                    className="border-console-amber/40 bg-console-amber/10 text-[9px] font-normal text-console-amber"
                   >
                     {summary.unplaceable} excluded
                   </Badge>
                 )}
               </div>
-              <p className="mt-2 flex items-start gap-1.5 text-[9px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 flex items-start gap-1.5 text-[9px] leading-relaxed text-console-label">
                 <Info className="mt-px size-3 shrink-0" />
                 Exact fixes render as filled points sized by magnitude. Anything coarser renders as
                 a dashed circle at its true uncertainty radius — a country-level record can never be
@@ -639,11 +1011,34 @@ function GISPage() {
 
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-                <Camera className="size-3.5 text-[#10B981]" />
+              <h3 className="text-xs font-bold uppercase text-console-text">Timeline</h3>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-console-muted">
+                Chronology of real GDELT events and RSS news, newest first. Every entry links to
+                its source.
+              </p>
+              <div className="mt-3 max-h-96 overflow-y-auto">
+                <Timeline
+                  entries={timelineEntries}
+                  disabledReason={timelineDisabledReason}
+                  error={
+                    gdeltEventsResult?.error && !timelineDisabledReason
+                      ? `GDELT Events: ${gdeltEventsResult.error}`
+                      : newsAgg?.error && !timelineDisabledReason
+                        ? `News aggregation: ${newsAgg.error}`
+                        : null
+                  }
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={CARD}>
+            <CardContent className="p-4">
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                <Camera className="size-3.5 text-console-green" />
                 Imagery from Module 4
               </h3>
-              <p className="mt-1.5 text-[10px] leading-relaxed text-[#94A3B8]">
+              <p className="mt-1.5 text-[10px] leading-relaxed text-console-muted">
                 {imageRecords.length === 0
                   ? "No analysed image carried an EXIF GPS fix. Analyse a geotagged image on the Image Intelligence page and it appears here — the corpus lives in this browser and is never uploaded."
                   : `${imageRecords.length} analysed image(s) carried a GPS fix and are plotted.`}
@@ -653,8 +1048,8 @@ function GISPage() {
 
           <Card className={CARD}>
             <CardContent className="flex items-start gap-2 p-3">
-              <Globe className="size-3.5 shrink-0 text-[#64748B]" />
-              <p className="text-[9px] leading-relaxed text-[#94A3B8]">
+              <Globe className="size-3.5 shrink-0 text-console-label" />
+              <p className="text-[9px] leading-relaxed text-console-muted">
                 This map previously placed news at a country centroid plus up to ±2.25° of random
                 jitter, cyber threats at a fixed point in central Europe and Telegram posts at a
                 fixed point in Ukraine — roughly 250 km of fabricated displacement per pin, rendered

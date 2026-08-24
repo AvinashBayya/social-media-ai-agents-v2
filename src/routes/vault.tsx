@@ -8,6 +8,7 @@ import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
 import { sha256OfFile } from "@/utils/evidence";
+import { localId } from "@/utils/local-id";
 import { EmptyState } from "@/components/workspace-ui";
 import {
   FileArchive,
@@ -242,7 +243,15 @@ function VaultPage() {
     hash: string | null,
   ) => {
     const list = [...evidenceList];
-    const newId = `EVID-0${400 + list.length + 1}`;
+    // Was `EVID-0${400 + list.length + 1}` — derived from the array's current
+    // length, not from ids actually in use. The three seeded records are
+    // non-sequential (0402, 0405, 0391), so the second item ever added
+    // collided with the seeded 0405 record: two distinct cards sharing one
+    // React key and one id, breaking selection/export/case-linking between
+    // them. localId() is this project's own collision-resistant id
+    // generator, already used the same way by investigations-store.ts and
+    // watchlist-store.ts.
+    const newId = localId("EVID");
 
     const newItem: EvidenceItem = {
       id: newId,
@@ -334,7 +343,7 @@ function VaultPage() {
       />
       <SampleDataBanner detail="Records badged SEEDED are demonstration entries that carry no digest - no file was ever hashed for them. Anything you drop in is hashed for real." />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-[#94A3B8]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-console-muted">
         {/* Main Vault Workspace */}
         <div className="space-y-4">
           {/* Drag & Drop Upload Zone */}
@@ -342,23 +351,23 @@ function VaultPage() {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[160px] ${isDragging ? "border-[#3B82F6] bg-[#3B82F6]/5" : "border-[#263548] bg-[#111827] hover:border-[#3B82F6]/50"}`}
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[160px] ${isDragging ? "border-console-blue bg-console-blue/5" : "border-console-border bg-console-surface hover:border-console-blue/50"}`}
           >
-            <UploadCloud className="size-8 text-[#3B82F6] animate-bounce mb-2" />
-            <h3 className="text-white text-xs font-bold uppercase tracking-wider">
+            <UploadCloud className="size-8 text-console-blue animate-bounce mb-2" />
+            <h3 className="text-console-text text-xs font-bold uppercase tracking-wider">
               Drag & Drop Cryptographic Node
             </h3>
-            <p className="text-[10px] text-[#94A3B8]/60 mt-1">
+            <p className="text-[10px] text-console-muted/60 mt-1">
               Supports Images, Videos, PDFs, and Document telemetry up to 50MB
             </p>
 
-            <div className="mt-4 flex flex-wrap justify-center gap-4 items-center border-t border-[#263548]/30 pt-3 text-[9px] w-full max-w-lg">
+            <div className="mt-4 flex flex-wrap justify-center gap-4 items-center border-t border-console-border/30 pt-3 text-[9px] w-full max-w-lg">
               <div className="flex items-center gap-1">
-                <span className="text-white">LINK CASE:</span>
+                <span className="text-console-text">LINK CASE:</span>
                 <select
                   value={uploadCaseId}
                   onChange={(e) => setUploadCaseId(e.target.value)}
-                  className="px-1 border border-[#263548] bg-[#0B1220] rounded h-5 text-[9px] text-[#06B6D4]"
+                  className="px-1 border border-console-border bg-console-deep rounded h-5 text-[9px] text-console-cyan"
                 >
                   <option value="">-- No Case Link --</option>
                   {cases.map((c) => (
@@ -369,13 +378,13 @@ function VaultPage() {
                 </select>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-white">TAGS:</span>
+                <span className="text-console-text">TAGS:</span>
                 <input
                   type="text"
                   value={uploadTags}
                   onChange={(e) => setUploadTags(e.target.value)}
                   placeholder="confidential, leak"
-                  className="px-1 border border-[#263548] bg-[#0B1220] rounded h-5 text-[9px] text-white max-w-[100px]"
+                  className="px-1 border border-console-border bg-console-deep rounded h-5 text-[9px] text-console-text max-w-[100px]"
                 />
               </div>
             </div>
@@ -394,13 +403,13 @@ function VaultPage() {
           */}
           <form
             onSubmit={handleFormSubmit}
-            className="space-y-2 rounded border border-[#263548] bg-[#111827] p-3"
+            className="space-y-2 rounded border border-console-border bg-console-surface p-3"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-white">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-console-text">
                 Record without a file
               </h3>
-              <span className="text-[9px] text-[#64748B]">No file = no SHA-256</span>
+              <span className="text-[9px] text-console-label">No file = no SHA-256</span>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <input
@@ -409,13 +418,13 @@ function VaultPage() {
                 onChange={(e) => setUploadTitle(e.target.value)}
                 placeholder="Title, e.g. Observed channel post"
                 aria-label="Evidence title"
-                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-white"
+                className="h-6 rounded border border-console-border bg-console-deep px-1.5 text-[9px] text-console-text"
               />
               <select
                 value={uploadType}
                 onChange={(e) => setUploadType(e.target.value)}
                 aria-label="Evidence type"
-                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-[#06B6D4]"
+                className="h-6 rounded border border-console-border bg-console-deep px-1.5 text-[9px] text-console-cyan"
               >
                 <option value="Image">Image</option>
                 <option value="PDF">PDF</option>
@@ -428,27 +437,27 @@ function VaultPage() {
                 onChange={(e) => setUploadGeo(e.target.value)}
                 placeholder="Location, if known"
                 aria-label="Location"
-                className="h-6 rounded border border-[#263548] bg-[#0B1220] px-1.5 text-[9px] text-white"
+                className="h-6 rounded border border-console-border bg-console-deep px-1.5 text-[9px] text-console-text"
               />
             </div>
             <Button
               type="submit"
-              className="h-6 bg-[#263548] px-3 font-mono text-[9px] uppercase tracking-wider text-white hover:bg-[#3B82F6]"
+              className="h-6 bg-console-border px-3 font-mono text-[9px] uppercase tracking-wider text-console-text hover:bg-console-blue"
             >
               Add record
             </Button>
           </form>
 
           {/* Filtering and search console */}
-          <div className="flex flex-wrap gap-2 items-center justify-between border-b border-[#263548]/40 pb-3">
+          <div className="flex flex-wrap gap-2 items-center justify-between border-b border-console-border/40 pb-3">
             <div className="relative w-full max-w-sm">
-              <Search className="absolute left-2.5 top-2 size-3.5 text-[#94A3B8]" />
+              <Search className="absolute left-2.5 top-2 size-3.5 text-console-muted" />
               <Input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search index by id, title, or source..."
-                className="pl-8 h-8 text-[11px] border-[#263548] bg-[#111827] text-white rounded"
+                className="pl-8 h-8 text-[11px] border-console-border bg-console-surface text-console-text rounded"
               />
             </div>
             <div className="flex gap-1.5 flex-wrap items-center">
@@ -456,7 +465,7 @@ function VaultPage() {
               {selectedTag && (
                 <Badge
                   onClick={() => setSelectedTag("")}
-                  className="bg-[#ef4444]/20 text-[#ef4444] border-[#ef4444]/30 text-[9px] rounded-none hover:bg-red-900/40 cursor-pointer"
+                  className="bg-console-red/20 text-console-red border-console-red/30 text-[9px] rounded-none hover:bg-red-900/40 cursor-pointer"
                 >
                   [Clear: #{selectedTag}]
                 </Badge>
@@ -466,7 +475,7 @@ function VaultPage() {
                   key={t}
                   onClick={() => setSelectedTag(t)}
                   variant={selectedTag === t ? "default" : "outline"}
-                  className={`text-[9px] rounded-none cursor-pointer border-[#263548] ${selectedTag === t ? "bg-[#3B82F6] text-white" : "text-[#94A3B8]/80 hover:text-white bg-[#0B1220]"}`}
+                  className={`text-[9px] rounded-none cursor-pointer border-console-border ${selectedTag === t ? "bg-console-blue text-console-text" : "text-console-muted/80 hover:text-console-text bg-console-deep"}`}
                 >
                   #{t} ({count})
                 </Badge>
@@ -498,29 +507,29 @@ function VaultPage() {
                   <Card
                     key={item.id}
                     onClick={() => setSelectedItem(item)}
-                    className={`bg-[#111827] border cursor-pointer rounded transition-all select-none ${isSelected ? "border-[#3B82F6] shadow-md shadow-[#3B82F6]/5 bg-[#3B82F6]/5" : "border-[#263548] hover:border-[#3B82F6]/50"}`}
+                    className={`bg-console-surface border cursor-pointer rounded transition-all select-none ${isSelected ? "border-console-blue shadow-md shadow-console-blue/5 bg-console-blue/5" : "border-console-border hover:border-console-blue/50"}`}
                   >
                     <CardContent className="p-3 space-y-2">
-                      <div className="flex items-center justify-between text-[8px] text-[#94A3B8]/60">
-                        <span className="font-bold text-[#06B6D4] flex items-center gap-1">
+                      <div className="flex items-center justify-between text-[8px] text-console-muted/60">
+                        <span className="font-bold text-console-cyan flex items-center gap-1">
                           <IconComponent className="size-3" /> {item.id}
                         </span>
                         <span>{item.fileSize || "no file"}</span>
                         {item.seeded && (
-                          <Badge className="ml-1 h-4 rounded-none border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[8px] text-[#F59E0B]">
+                          <Badge className="ml-1 h-4 rounded-none border-console-amber/30 bg-console-amber/10 text-[8px] text-console-amber">
                             SEEDED
                           </Badge>
                         )}
                       </div>
-                      <h4 className="font-semibold text-white text-[11px] line-clamp-1">
+                      <h4 className="font-semibold text-console-text text-[11px] line-clamp-1">
                         {item.title}
                       </h4>
 
-                      <div className="flex justify-between text-[8px] border-t border-[#263548]/30 pt-1.5">
-                        <span className="text-[#94A3B8]/70 truncate max-w-[140px]">
+                      <div className="flex justify-between text-[8px] border-t border-console-border/30 pt-1.5">
+                        <span className="text-console-muted/70 truncate max-w-[140px]">
                           {item.source}
                         </span>
-                        <span className="text-[#3B82F6] font-bold">{item.caseId}</span>
+                        <span className="text-console-blue font-bold">{item.caseId}</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -532,11 +541,11 @@ function VaultPage() {
 
         {/* Right Preview Side panel */}
         <div className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] rounded min-h-[300px] flex flex-col relative overflow-hidden">
-            <div className="absolute top-0 left-0 h-full w-0.5 bg-[#3B82F6]" />
-            <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
-                <FolderLock className="size-3.5 text-[#3B82F6]" /> Evidence Preview
+          <Card className="bg-console-surface border-console-border rounded min-h-[300px] flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 left-0 h-full w-0.5 bg-console-blue" />
+            <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted flex items-center gap-1.5">
+                <FolderLock className="size-3.5 text-console-blue" /> Evidence Preview
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 flex-1 flex flex-col justify-between space-y-4">
@@ -544,47 +553,47 @@ function VaultPage() {
                 <div className="space-y-4 flex-1 flex flex-col justify-between">
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[8px] text-[#06B6D4] font-bold font-mono">
+                      <div className="text-[8px] text-console-cyan font-bold font-mono">
                         {selectedItem.id} ({selectedItem.type})
                       </div>
-                      <h3 className="text-white text-xs font-bold leading-snug mt-0.5">
+                      <h3 className="text-console-text text-xs font-bold leading-snug mt-0.5">
                         {selectedItem.title}
                       </h3>
                     </div>
 
-                    <div className="border border-[#263548]/40 rounded bg-[#0B1220] p-2 space-y-2 text-[9px] font-mono leading-normal">
+                    <div className="border border-console-border/40 rounded bg-console-deep p-2 space-y-2 text-[9px] font-mono leading-normal">
                       <div className="flex justify-between">
-                        <span className="text-[#94A3B8]/60">TIMETAG:</span>
-                        <span className="text-white truncate max-w-[150px]">
+                        <span className="text-console-muted/60">TIMETAG:</span>
+                        <span className="text-console-text truncate max-w-[150px]">
                           {selectedItem.timestamp}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-[#94A3B8]/60">SOURCE:</span>
-                        <span className="text-white truncate max-w-[150px]">
+                        <span className="text-console-muted/60">SOURCE:</span>
+                        <span className="text-console-text truncate max-w-[150px]">
                           {selectedItem.source}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-[#94A3B8]/60">GEOPOINT:</span>
-                        <span className="text-white truncate max-w-[150px]">
+                        <span className="text-console-muted/60">GEOPOINT:</span>
+                        <span className="text-console-text truncate max-w-[150px]">
                           {selectedItem.geo}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-[#94A3B8]/60">LINK CASE:</span>
+                        <span className="text-console-muted/60">LINK CASE:</span>
                         <Link
                           to="/investigations"
-                          className="text-[#3B82F6] hover:underline font-bold"
+                          className="text-console-blue hover:underline font-bold"
                         >
                           {selectedItem.caseId}
                         </Link>
                       </div>
-                      <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
-                        <div className="text-[#94A3B8]/50 uppercase text-[8px]">
+                      <div className="space-y-0.5 border-t border-console-border/30 pt-1.5 mt-1.5">
+                        <div className="text-console-muted/50 uppercase text-[8px]">
                           SHA-256 Checksum:
                         </div>
-                        <div className="text-[8px] text-[#06B6D4] select-all break-all leading-normal">
+                        <div className="text-[8px] text-console-cyan select-all break-all leading-normal">
                           {selectedItem.hash ?? "No file supplied — nothing to hash."}
                         </div>
                       </div>
@@ -596,7 +605,7 @@ function VaultPage() {
                           <Badge
                             key={idx}
                             variant="outline"
-                            className="border-[#263548] text-[#94A3B8] text-[8px] bg-[#0B1220]/60 rounded-none h-4"
+                            className="border-console-border text-console-muted text-[8px] bg-console-deep/60 rounded-none h-4"
                           >
                             #{t}
                           </Badge>
@@ -605,7 +614,7 @@ function VaultPage() {
                     )}
                   </div>
 
-                  <div className="pt-3 border-t border-[#263548]/30 mt-auto">
+                  <div className="pt-3 border-t border-console-border/30 mt-auto">
                     {/*
                       This button had NO onClick at all - confirmed by reading
                       the React props off the live DOM node, which returned
@@ -619,19 +628,19 @@ function VaultPage() {
                     */}
                     <Button
                       onClick={() => exportRecord(selectedItem)}
-                      className="h-8 w-full gap-1.5 bg-[#3B82F6] font-mono text-[9px] uppercase tracking-wider text-white hover:bg-[#3B82F6]/90"
+                      className="h-8 w-full gap-1.5 bg-console-blue font-mono text-[9px] uppercase tracking-wider text-console-text hover:bg-console-blue/90"
                     >
                       <Download className="size-3.5" /> Export record (JSON)
                     </Button>
-                    <p className="mt-2 text-[9px] leading-relaxed text-[#64748B]">
+                    <p className="mt-2 text-[9px] leading-relaxed text-console-label">
                       Exports this record and its SHA-256. The original file is not held by this
                       system, so it cannot be re-downloaded from here.
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8]/40 py-12">
-                  <Shield className="size-8 text-[#263548] mb-2 animate-pulse" />
+                <div className="flex-1 flex flex-col items-center justify-center text-center text-console-muted/40 py-12">
+                  <Shield className="size-8 text-console-border mb-2 animate-pulse" />
                   Select an evidence node in the grid to display its cryptographic properties and
                   preview payload contents.
                 </div>

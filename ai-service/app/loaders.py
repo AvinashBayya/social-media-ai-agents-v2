@@ -7,9 +7,21 @@ from app.config import settings
 
 logger = logging.getLogger("ai-service.loaders")
 
-STUB_MODEL_NAMES = ["grounding_dino", "insightface", "tesseract", "whisper", "llm"]
+# "florence2" is an addition to the original stub plan — image
+# captioning/description wasn't one of the five originally-stubbed models,
+# but /ai/describe needed a real local engine same as the others.
+STUB_MODEL_NAMES = ["grounding_dino", "insightface", "florence2", "tesseract", "whisper", "llm"]
 
 GROUNDING_DINO_DIR = "grounding-dino-tiny"
+FLORENCE2_DIR = "florence-2-large"
+# insightface's own FaceAnalysis(root=...) convention: the pack lives at
+# root/models/<name>, e.g. models/insightface/models/buffalo_l. Vendored
+# once via its own one-time download (see project notes); this loader
+# checks the resulting directory exists before ever calling FaceAnalysis,
+# same air-gap guarantee as grounding_dino — a missing pack is reported as
+# unavailable, never triggers a live fetch.
+INSIGHTFACE_ROOT = "insightface"
+INSIGHTFACE_PACK = "buffalo_l"
 
 
 def _check_tesseract() -> str:
@@ -39,6 +51,66 @@ def _load_grounding_dino(models_dir: str, device: str):
         return None, f"unavailable: {e}"
 
 
+def _load_florence2(models_dir: str, device: str):
+    """Same vendored-directory-only rule as grounding_dino. Loaded in
+    float16 on CUDA to fit the 4GB budget this project's target hardware
+    (GTX 1650) sets; float32 on CPU, where float16 kernels are frequently
+    unsupported or slower. `attn_implementation="sdpa"` avoids a hard
+    dependency on flash-attn, which has no prebuilt Windows wheel.
+    Florence-2 ships custom modeling code (not a built-in transformers
+    architecture), hence `trust_remote_code=True` — accepted here because
+    the code is vendored from Microsoft's own repo and not fetched at
+    request time, matching this project's other trust-remote-code-free
+    models in spirit if not in the letter.
+    """
+    path = Path(models_dir) / FLORENCE2_DIR
+    if not path.is_dir():
+        return None, f"unavailable: no vendored model at {path}"
+
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoProcessor
+
+        torch_dtype = torch.float16 if device == "cuda" else torch.float32
+        processor = AutoProcessor.from_pretrained(str(path), trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            str(path),
+            trust_remote_code=True,
+            torch_dtype=torch_dtype,
+            attn_implementation="sdpa",
+        ).to(device)
+        model.eval()
+        return (model, processor, torch_dtype), f"loaded ({device}, {torch_dtype})"
+    except Exception as e:
+        return None, f"unavailable: {e}"
+
+
+def _load_insightface(models_dir: str, device: str):
+    path = Path(models_dir) / INSIGHTFACE_ROOT / "models" / INSIGHTFACE_PACK
+    if not path.is_dir():
+        return None, f"unavailable: no vendored model at {path}"
+
+    try:
+        from insightface.app import FaceAnalysis
+
+        # CUDAExecutionProvider is requested but onnxruntime falls back to
+        # CPU on its own (with a warning, not an exception) if the CUDA
+        # runtime it needs isn't resolvable — verified live on this
+        # project's dev hardware, where onnxruntime-gpu's CUDA EP could not
+        # load despite torch's own CUDA path working fine (a real, torch-
+        # vs-onnxruntime DLL-search-path mismatch, not a code bug). Face
+        # detection/matching still work correctly on CPU, just slower.
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device == "cuda" else ["CPUExecutionProvider"]
+        root = str(Path(models_dir) / INSIGHTFACE_ROOT)
+        face_app = FaceAnalysis(name=INSIGHTFACE_PACK, root=root, providers=providers)
+        ctx_id = 0 if device == "cuda" else -1
+        face_app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+        applied = face_app.det_model.session.get_providers()[0]
+        return face_app, f"loaded ({applied})"
+    except Exception as e:
+        return None, f"unavailable: {e}"
+
+
 class ModelRegistry:
     """Load-once model registry. Real engines register a status here as later
     phases wire them in; entries with no engine yet stay "not_loaded" stubs."""
@@ -49,13 +121,38 @@ class ModelRegistry:
         self.device = settings.resolved_device()
 
     def load(self) -> None:
+        """Load every real engine, but only the first time — genuinely
+        "load-once", not just documented as such. Every caller (FastAPI's
+        lifespan on real startup, and a `registry.load()` in several test
+        fixtures' own setup, since a fixture can't assume some OTHER test
+        module's fixture already ran first) is written as if calling this
+        twice is harmless. It was not: `from_pretrained()` on a model
+        already resident on the GPU is a real, reproduced crash — "Windows
+        fatal exception: access violation" inside torch, triggered by
+        running the full pytest suite once enough fixtures had each called
+        `load()` on top of each other. `tesseract`'s status is cheap
+        (a version check, not a model load) and stays unconditional.
+        """
         logger.info("Model registry init on device=%s (models dir=%s)", self.device, settings.MODELS_DIR)
         self._status["tesseract"] = _check_tesseract()
 
-        gdino, gdino_status = _load_grounding_dino(settings.MODELS_DIR, self.device)
-        self._status["grounding_dino"] = gdino_status
-        if gdino is not None:
-            self._models["grounding_dino"] = gdino
+        if "grounding_dino" not in self._models:
+            gdino, gdino_status = _load_grounding_dino(settings.MODELS_DIR, self.device)
+            self._status["grounding_dino"] = gdino_status
+            if gdino is not None:
+                self._models["grounding_dino"] = gdino
+
+        if "florence2" not in self._models:
+            florence2, florence2_status = _load_florence2(settings.MODELS_DIR, self.device)
+            self._status["florence2"] = florence2_status
+            if florence2 is not None:
+                self._models["florence2"] = florence2
+
+        if "insightface" not in self._models:
+            insightface_app, insightface_status = _load_insightface(settings.MODELS_DIR, self.device)
+            self._status["insightface"] = insightface_status
+            if insightface_app is not None:
+                self._models["insightface"] = insightface_app
 
         for name in STUB_MODEL_NAMES:
             logger.info("Model '%s' status: %s", name, self._status[name])

@@ -26,6 +26,7 @@
 
 import {
   detectSceneCuts,
+  grayscaleAutocontrastRgba,
   hashRgba,
   interpretC2pa,
   interpretExif,
@@ -325,6 +326,43 @@ export const OCR_ASSET_PROVENANCE: OcrAssetProvenance = LOCAL_TRAINEDDATA_PATH
     };
 
 /**
+ * Upscale threshold and cap. Tesseract's own guidance targets roughly 300
+ * DPI-equivalent text; a screenshot or frame-grab is routinely far below
+ * that. Only ever scales UP — a source already larger than the cap is left
+ * alone rather than downscaled, since that would only lose legibility.
+ */
+const OCR_MIN_LONG_EDGE = 1600;
+const OCR_MAX_LONG_EDGE = 3200;
+
+/**
+ * Grayscale + percentile autocontrast + upscale-if-small, before Tesseract
+ * ever sees the image — see grayscaleAutocontrastRgba's doc comment in
+ * imaging.ts for what this does and does not fix, and the live verification
+ * behind both. Returns a canvas; tesseract.js accepts one directly, so no
+ * extra Blob round-trip is needed.
+ */
+async function preprocessForOcr(source: File | Blob | string): Promise<HTMLCanvasElement> {
+  const url = typeof source === "string" ? source : URL.createObjectURL(source);
+  try {
+    const img = await loadImageElement(url);
+    const longEdge = Math.max(img.naturalWidth, img.naturalHeight);
+    const scale =
+      longEdge < OCR_MIN_LONG_EDGE ? Math.min(OCR_MIN_LONG_EDGE / longEdge, OCR_MAX_LONG_EDGE / longEdge) : 1;
+    const width = Math.max(1, Math.round(img.naturalWidth * scale));
+    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const { canvas, ctx } = canvas2d(width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    imageData.data.set(grayscaleAutocontrastRgba(imageData.data));
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
+  } finally {
+    if (typeof source !== "string") URL.revokeObjectURL(url);
+  }
+}
+
+/**
  * Run Tesseract over an image.
  *
  * The worker script and WASM engine come from this deployment (see
@@ -343,7 +381,7 @@ export async function runOcr(
     throw new MediaError("Select at least one language before running OCR.", "ocr");
   }
 
-  const { createWorker } = await import("tesseract.js");
+  const { createWorker, PSM } = await import("tesseract.js");
   let worker: any;
   let coreBuild = "unresolved";
   try {
@@ -362,7 +400,29 @@ export async function runOcr(
       ...(LOCAL_TRAINEDDATA_PATH ? { langPath: LOCAL_TRAINEDDATA_PATH } : {}),
       logger: (m: any) => onProgress?.({ status: m.status ?? "", progress: m.progress ?? 0 }),
     });
-    const result = await worker.recognize(source as any);
+    // Tesseract's default page-segmentation mode (AUTO) assumes a single
+    // uniform block of text, the scanned-document case. This app's real
+    // inputs are OSINT material — video frames, screenshots, title cards,
+    // memes — routinely a small text block sharing the frame with a photo,
+    // logo or decorative graphic, which AUTO's layout analysis regularly
+    // misreads as more text and garbles. Verified live 2026-08-20 against a
+    // reproduction of exactly that composition: AUTO returned near-total
+    // garbage ("Ea a) RI Xa A= ...") at mean confidence ~24; SPARSE_TEXT —
+    // "find as much text as possible, in no particular order", built for
+    // this exact case — correctly recovered "AI POWERED" / "DIGITAL HEALTH
+    // CARD". AUTO_OSD scored about the same; SPARSE_TEXT is the
+    // semantically correct mode for content with no assumed page layout.
+    await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+    // tesseract.js 7's `output` param controls which parts of the result are
+    // populated — `blocks` (the only place word-level text/confidence/bbox
+    // live, nested blocks[].paragraphs[].lines[].words[]) is NOT included by
+    // default. Left unset, `data.blocks` comes back null and every word is
+    // silently lost even though `data.text`/`data.confidence` succeed —
+    // verified live: a real image recognized with 95% confidence and the
+    // correct text, yet reported zero words, because nothing ever asked for
+    // block data. See interpretOcr's flattenOcrWords for the other half.
+    const preprocessed = await preprocessForOcr(source);
+    const result = await worker.recognize(preprocessed, {}, { text: true, blocks: true });
     return interpretOcr(result, languages);
   } catch (err: any) {
     throw new MediaError(
@@ -474,6 +534,66 @@ export async function extractKeyframes(
       scenes: detectSceneCuts(frames),
       truncated: wanted > maxFrames,
     };
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Re-seeks the source video and captures ONE frame at full quality — no
+ * lossy re-encoding, same resolution cap as any other decode path here.
+ *
+ * `extractKeyframes` above stores every frame as a JPEG data URL at quality
+ * 0.6, deliberately: up to `maxFrames` (60) full-resolution data URLs held
+ * in React state at once would be tens of megabytes of strings. That
+ * trade-off is fine for the thumbnail grid, but OCR and the AI-analysis
+ * panel were reading the SAME degraded copy — verified live: legible,
+ * high-contrast on-screen text (a title card, not fine print) produced
+ * zero OCR words, because 60%-quality JPEG's blocking artifacts around
+ * thin character strokes are exactly what breaks Tesseract's segmentation.
+ * A single on-demand frame has none of the 60-frames-at-once memory
+ * pressure the thumbnail path is optimized against, so this re-decodes the
+ * one frame the analyst actually selected, straight to a lossless PNG
+ * blob, only when they ask to analyse it.
+ */
+export async function extractFrameBlob(file: File | Blob, time: number): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () =>
+        reject(new MediaError("Video could not be decoded by this browser.", "video"));
+      video.src = url;
+    });
+
+    const width = Math.max(1, video.videoWidth);
+    const height = Math.max(1, video.videoHeight);
+    const scale = Math.min(1, MAX_ANALYSIS_EDGE / Math.max(width, height));
+    const cw = Math.max(1, Math.round(width * scale));
+    const ch = Math.max(1, Math.round(height * scale));
+    const { canvas, ctx } = canvas2d(cw, ch);
+
+    await new Promise<void>((resolve, reject) => {
+      const onSeeked = () => {
+        video.removeEventListener("seeked", onSeeked);
+        resolve();
+      };
+      video.addEventListener("seeked", onSeeked);
+      video.onerror = () => reject(new MediaError(`Seek to ${time.toFixed(1)}s failed.`, "video"));
+      video.currentTime = time;
+    });
+
+    ctx.drawImage(video, 0, 0, cw, ch);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new MediaError("Could not encode the extracted frame.", "video");
+    return blob;
   } finally {
     video.removeAttribute("src");
     video.load();

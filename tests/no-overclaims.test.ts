@@ -161,32 +161,33 @@ const CLAIM_PATTERNS: Pattern[] = [
     gap: "Diffusion-generated image detection",
     re: /\b(synthetic[- ]media|ai[- ]generated|diffusion|generative)\b[\s\S]{0,30}?\b(detect\w+|classif\w+|scor\w+|likelihood)\b/gi,
   },
+  // Object and materiel recognition (Grounding DINO tiny, via ai-service) and
+  // bare face detection/matching (InsightFace, via ai-service) are both real
+  // now — see AI_SERVICE_PROVENANCE. What is still genuinely absent is a
+  // STANDING, cross-case face watchlist (DPDP Act 2023 lawful-basis gap), so
+  // only that narrower claim is still an overclaim.
   {
-    gap: "Object and materiel recognition",
-    re: /\bobject\s+(detection|detector|recognition|count|classif\w+)\b/gi,
+    gap: "Face matching against a standing watchlist",
+    re: /\b(face|facial)\s+watchlist\b/gi,
   },
   {
-    gap: "Object and materiel recognition",
-    re: /\bmateriel\s+(detection|recognition|identif\w+)\b/gi,
-  },
-  { gap: "Object and materiel recognition", re: /\b(objects?|vehicles?|weapons?)\s+detected\b/gi },
-  {
-    gap: "Face matching against a watchlist",
-    re: /\bfac(e|ial)\s+(count|match\w*|recognition|detect\w+|identif\w+)\b/gi,
-  },
-  { gap: "Face matching against a watchlist", re: /\bfaces\s+(detected|counted|matched)\b/gi },
-  { gap: "Audio transcription and voice-clone detection", re: /\bwhisper\b/gi },
-  {
-    gap: "Audio transcription and voice-clone detection",
-    re: /\b(audio|speech|voice)\s+(transcription|transcript|analysis|recognition)\b/gi,
+    gap: "Face matching against a standing watchlist",
+    re: /\bwatchlist\s+(match\w*|of\s+faces)\b/gi,
   },
   {
-    gap: "Audio transcription and voice-clone detection",
-    re: /\btranscript\s+(analysis|extraction|generation)\b/gi,
+    gap: "Face matching against a standing watchlist",
+    re: /\b(face|facial)\s+recognition\s+(database|registry)\b/gi,
   },
+  // Transcription itself moved off NOT_IMPLEMENTED — Sarvam saaras:v3 really
+  // transcribes uploaded video audio now (src/utils/transcription.ts). What
+  // is still genuinely absent is voice-clone/anti-spoofing detection, so
+  // only that narrower claim (and an unguarded "Whisper" — this codebase
+  // uses Sarvam, never Whisper, anywhere) is still an overclaim.
+  { gap: "Voice-clone / audio deepfake detection", re: /\bwhisper\b/gi },
+  { gap: "Voice-clone / audio deepfake detection", re: /\bvoice[- ]clone\w*\b/gi },
   {
-    gap: "Audio transcription and voice-clone detection",
-    re: /\b(voice[- ]clone\w*|speech[- ]to[- ]text|transcrib\w+)\b/gi,
+    gap: "Voice-clone / audio deepfake detection",
+    re: /\b(voice|speech|audio)\s+(spoof\w*|anti-spoof\w*)\b/gi,
   },
 ];
 
@@ -330,19 +331,23 @@ describe("UI does not claim capabilities the system lacks", () => {
 });
 
 describe("the overclaim detector itself", () => {
-  const claim = `<p className="x">Frame-by-frame object detection, face count and Whisper transcript analysis.</p>`;
-  const disclaimer = `<p className="x">No object detection and no face matching are performed. Whisper transcription is not deployed.</p>`;
+  const claim = `<p className="x">A face watchlist match and voice-clone detection.</p>`;
+  const disclaimer = `<p className="x">No face watchlist and no voice-clone detection are performed.</p>`;
   const inComment = `/* The old panel read "Deepfake analysis 14%" and listed Faces 4. */\nconst x = 1;`;
   const jsxComment = `{/* Object detection and face count were invented values. */}`;
 
   test("flags a bare capability claim", () => {
     const hits = scanSource("synthetic.tsx", claim, CLAIM_PATTERNS);
     expect(hits.map((h) => h.text.toLowerCase()).sort()).toEqual([
-      "face count",
-      "object detection",
-      "transcript analysis",
-      "whisper",
+      "face watchlist",
+      "voice-clone",
+      "watchlist match",
     ]);
+  });
+
+  test("does not flag bare object/face detection, now genuinely implemented via ai-service", () => {
+    const real = `<p className="x">Object detection and face detection run via ai-service.</p>`;
+    expect(scanSource("synthetic.tsx", real, CLAIM_PATTERNS)).toEqual([]);
   });
 
   test("does not flag the same words inside a disclaimer", () => {

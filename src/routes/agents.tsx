@@ -3,6 +3,7 @@ import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownReport } from "@/components/markdown-report";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
@@ -353,26 +354,26 @@ function AgentsPage() {
         description="Structured analyst workspace. Select cases, target watchlists, and analytical models to compile classified summaries, node links, and threat containment memos."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[340px_1fr] font-mono text-xs text-[#94A3B8]">
+      <div className="grid gap-4 lg:grid-cols-[340px_1fr] font-mono text-xs text-console-muted">
         {/* Left Column: Command Console (No Chatbot Interface!) */}
         <div className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-            <div className="absolute top-0 left-0 h-full w-0.5 bg-[#3B82F6]" />
-            <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
-                <Bot className="size-4 text-[#3B82F6]" /> Analytical Model parameters
+          <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+            <div className="absolute top-0 left-0 h-full w-0.5 bg-console-blue" />
+            <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted flex items-center gap-1.5">
+                <Bot className="size-4 text-console-blue" /> Analytical Model parameters
               </CardTitle>
             </CardHeader>
             <CardContent className="p-3 space-y-3">
               {/* Select Case */}
               <div className="space-y-1">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                <label className="text-[9px] uppercase tracking-wider text-console-muted/60">
                   1. Target Investigation
                 </label>
                 <select
                   value={selectedCaseId}
                   onChange={(e) => setSelectedCaseId(e.target.value)}
-                  className="w-full h-8 px-2 border border-[#263548] bg-[#0B1220] rounded text-[10px] text-white font-mono outline-none"
+                  className="w-full h-8 px-2 border border-console-border bg-console-deep rounded text-[10px] text-console-text font-mono outline-none"
                 >
                   <option value="">-- Global Query Context --</option>
                   {cases.map((c) => (
@@ -385,13 +386,13 @@ function AgentsPage() {
 
               {/* Select Watchlist */}
               <div className="space-y-1">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                <label className="text-[9px] uppercase tracking-wider text-console-muted/60">
                   2. Correlated Watchlist
                 </label>
                 <select
                   value={selectedWatchlistId}
                   onChange={(e) => setSelectedWatchlistId(e.target.value)}
-                  className="w-full h-8 px-2 border border-[#263548] bg-[#0B1220] rounded text-[10px] text-white font-mono outline-none"
+                  className="w-full h-8 px-2 border border-console-border bg-console-deep rounded text-[10px] text-console-text font-mono outline-none"
                 >
                   <option value="">-- No Watchlist Link --</option>
                   {watchlists.map((w) => (
@@ -405,11 +406,11 @@ function AgentsPage() {
               {/* Entity Inputs (for Compare/Explain) */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div className="space-y-1">
-                  <label className="text-[8px] uppercase text-[#94A3B8]/60">Primary Entity</label>
+                  <label className="text-[8px] uppercase text-console-muted/60">Primary Entity</label>
                   <select
                     value={selectedEntityA}
                     onChange={(e) => setSelectedEntityA(e.target.value)}
-                    className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#06B6D4] font-mono outline-none"
+                    className="w-full h-7 px-1.5 border border-console-border bg-console-deep rounded text-[9px] text-console-cyan font-mono outline-none"
                   >
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
@@ -419,11 +420,11 @@ function AgentsPage() {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[8px] uppercase text-[#94A3B8]/60">Secondary Entity</label>
+                  <label className="text-[8px] uppercase text-console-muted/60">Secondary Entity</label>
                   <select
                     value={selectedEntityB}
                     onChange={(e) => setSelectedEntityB(e.target.value)}
-                    className="w-full h-7 px-1.5 border border-[#263548] bg-[#0B1220] rounded text-[9px] text-[#F59E0B] font-mono outline-none"
+                    className="w-full h-7 px-1.5 border border-console-border bg-console-deep rounded text-[9px] text-console-amber font-mono outline-none"
                   >
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
@@ -435,8 +436,8 @@ function AgentsPage() {
               </div>
 
               {/* Select Capability Task */}
-              <div className="space-y-1 pt-1.5 border-t border-[#263548]/30">
-                <label className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+              <div className="space-y-1 pt-1.5 border-t border-console-border/30">
+                <label className="text-[9px] uppercase tracking-wider text-console-muted/60">
                   3. Target Task Capability
                 </label>
                 <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
@@ -444,10 +445,10 @@ function AgentsPage() {
                     <button
                       key={cap.id}
                       onClick={() => setSelectedCapability(cap.id)}
-                      className={`w-full text-left px-2 py-1.5 border rounded text-[10px] transition-all flex flex-col ${selectedCapability === cap.id ? "border-[#3B82F6] bg-[#3B82F6]/5 text-white" : "border-[#263548]/40 bg-[#0B1220]/60 hover:bg-[#1A2332]"}`}
+                      className={`w-full text-left px-2 py-1.5 border rounded text-[10px] transition-all flex flex-col ${selectedCapability === cap.id ? "border-console-blue bg-console-blue/5 text-console-text" : "border-console-border/40 bg-console-deep/60 hover:bg-console-elevated"}`}
                     >
                       <span className="font-bold uppercase text-[9px]">{cap.name}</span>
-                      <span className="text-[8px] text-[#94A3B8]/50 mt-0.5 leading-normal">
+                      <span className="text-[8px] text-console-muted/50 mt-0.5 leading-normal">
                         {cap.desc}
                       </span>
                     </button>
@@ -460,7 +461,7 @@ function AgentsPage() {
                 <Button
                   onClick={handleExecuteTask}
                   disabled={loading}
-                  className="w-full h-8 bg-[#3B82F6] hover:bg-[#3B82F6]/90 disabled:bg-[#1E293B] text-white font-mono text-[9px] uppercase tracking-wider gap-1.5 rounded"
+                  className="w-full h-8 bg-console-blue hover:bg-console-blue/90 disabled:bg-[#1E293B] text-console-text font-mono text-[9px] uppercase tracking-wider gap-1.5 rounded"
                 >
                   {loading ? (
                     <RefreshCw className="size-3.5 animate-spin" />
@@ -474,8 +475,8 @@ function AgentsPage() {
           </Card>
 
           {/* Terminal telemetry panel */}
-          <Card className="bg-[#0B1220] border-[#263548] p-3 text-[9px] text-green-400 font-mono space-y-1.5 h-36 overflow-y-auto rounded">
-            <div className="flex items-center gap-1 text-[#94A3B8] border-b border-[#263548]/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest">
+          <Card className="bg-console-deep border-console-border p-3 text-[9px] text-green-400 font-mono space-y-1.5 h-36 overflow-y-auto rounded">
+            <div className="flex items-center gap-1 text-console-muted border-b border-console-border/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest">
               <Terminal className="size-3" /> Console Logs
             </div>
             {terminalLog.length === 0 ? (
@@ -494,12 +495,12 @@ function AgentsPage() {
 
         {/* Right Column: Intelligence Output Workspace (No Chatbot Interface!) */}
         <div className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] rounded min-h-[480px] flex flex-col relative overflow-hidden">
-            <div className="absolute top-0 left-0 h-full w-0.5 bg-[#EF4444]" />
+          <Card className="bg-console-surface border-console-border rounded min-h-[480px] flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 left-0 h-full w-0.5 bg-console-red" />
 
-            <CardHeader className="p-4 border-b border-[#263548] bg-[#0B1220]/20 flex flex-wrap justify-between items-center gap-3">
-              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
-                <ShieldCheck className="size-4 text-[#EF4444]" /> Analytical Intelligence Briefing
+            <CardHeader className="p-4 border-b border-console-border bg-console-deep/20 flex flex-wrap justify-between items-center gap-3">
+              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted flex items-center gap-1.5">
+                <ShieldCheck className="size-4 text-console-red" /> Analytical Intelligence Briefing
                 Card
               </CardTitle>
               {outputResult && (
@@ -517,17 +518,17 @@ function AgentsPage() {
                 <div className="space-y-5 flex-1 flex flex-col justify-between">
                   <div className="space-y-5">
                     {/* Header Details */}
-                    <div className="border-b border-[#263548]/40 pb-3 flex justify-between items-start flex-wrap gap-4">
+                    <div className="border-b border-console-border/40 pb-3 flex justify-between items-start flex-wrap gap-4">
                       <div>
-                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                        <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
                           REPORT TITLE
                         </span>
-                        <h2 className="text-sm font-bold text-white uppercase tracking-wide mt-0.5">
+                        <h2 className="text-sm font-bold text-console-text uppercase tracking-wide mt-0.5">
                           {outputResult.title}
                         </h2>
                       </div>
                       <div className="text-right">
-                        <span className="text-[9px] uppercase tracking-wider text-[#94A3B8]/60">
+                        <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
                           THREAT INDEX
                         </span>
                       </div>
@@ -537,17 +538,17 @@ function AgentsPage() {
                     <div className="space-y-4">
                       {outputResult.blocks.map((b: any, idx: number) => (
                         <div key={idx} className="space-y-1.5">
-                          <h3 className="text-white uppercase font-bold text-[10px] tracking-wide flex items-center gap-1.5">
-                            <Activity className="size-3.5 text-[#3B82F6]" /> {b.heading}
+                          <h3 className="text-console-text uppercase font-bold text-[10px] tracking-wide flex items-center gap-1.5">
+                            <Activity className="size-3.5 text-console-blue" /> {b.heading}
                           </h3>
                           {b.monospace ? (
-                            <pre className="p-3 border border-[#263548]/40 bg-[#0B1220] text-[#06B6D4] text-[9.5px] rounded font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap">
+                            <pre className="p-3 border border-console-border/40 bg-console-deep text-console-cyan text-[9.5px] rounded font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap">
                               {b.text}
                             </pre>
                           ) : (
-                            <p className="text-[#94A3B8] text-[11px] leading-relaxed pl-5 whitespace-pre-wrap">
-                              {b.text}
-                            </p>
+                            <div className="pl-5">
+                              <MarkdownReport text={b.text} className="text-[11px] text-console-muted" />
+                            </div>
                           )}
                         </div>
                       ))}
@@ -555,28 +556,34 @@ function AgentsPage() {
                   </div>
 
                   {/* Actions footer */}
-                  <div className="pt-4 border-t border-[#263548]/40 flex justify-between items-center flex-wrap gap-3 mt-auto">
-                    <span className="text-[8px] text-[#94A3B8]/40 uppercase tracking-widest font-mono">
+                  <div className="pt-4 border-t border-console-border/40 flex justify-between items-center flex-wrap gap-3 mt-auto">
+                    <span className="text-[8px] text-console-muted/40 uppercase tracking-widest font-mono">
                       AI-generated · not signed, not verified · Sentinel AI
                     </span>
                     <div className="flex gap-2">
                       <Button
                         onClick={handlePinReport}
+                        disabled={!outputResult || !selectedCaseId}
+                        title={
+                          !selectedCaseId
+                            ? "Select a target investigation above — pinning needs a case to pin to. \"Global Query Context\" has none."
+                            : undefined
+                        }
                         variant="outline"
-                        className="h-7 px-3 bg-[#0B1220] border-[#263548] text-white hover:bg-[#1A2332] text-[9px] uppercase font-mono gap-1.5 rounded-none"
+                        className="h-7 px-3 bg-console-deep border-console-border text-console-text hover:bg-console-elevated text-[9px] uppercase font-mono gap-1.5 rounded-none"
                       >
-                        <Pin className="size-3.5 text-[#3B82F6]" /> Pin Briefing to Case
+                        <Pin className="size-3.5 text-console-blue" /> Pin Briefing to Case
                       </Button>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8]/40 py-24">
-                  <Bot className="size-10 text-[#263548] mb-3 animate-pulse" />
-                  <h3 className="text-white text-xs font-bold uppercase tracking-wider">
+                <div className="flex-1 flex flex-col items-center justify-center text-center text-console-muted/40 py-24">
+                  <Bot className="size-10 text-console-border mb-3 animate-pulse" />
+                  <h3 className="text-console-text text-xs font-bold uppercase tracking-wider">
                     Analyst Briefing Card Empty
                   </h3>
-                  <p className="text-[10px] text-[#94A3B8]/60 mt-1 max-w-sm leading-normal">
+                  <p className="text-[10px] text-console-muted/60 mt-1 max-w-sm leading-normal">
                     Configure target investigation case parameters and select capability model on
                     the left to generate classified reports.
                   </p>

@@ -65,24 +65,30 @@ export const Route = createFileRoute("/sources")({
   component: SourcesPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
-const DIM = "text-[#64748B]";
-const MUTED = "text-[#94A3B8]";
+const CARD = "bg-console-surface border-console-border";
+const DIM = "text-console-label";
+const MUTED = "text-console-muted";
 
 const TONE: Record<string, string> = {
-  high: "border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]",
-  medium: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
-  low: "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]",
-  unknown: "border-[#64748B]/30 bg-[#64748B]/10 text-[#94A3B8]",
+  high: "border-console-green/30 bg-console-green/10 text-console-green",
+  medium: "border-console-amber/30 bg-console-amber/10 text-console-amber",
+  low: "border-console-red/30 bg-console-red/10 text-console-red",
+  unknown: "border-console-label/30 bg-console-label/10 text-console-muted",
 };
 const BAR: Record<string, string> = {
-  high: "bg-[#10B981]",
-  medium: "bg-[#F59E0B]",
-  low: "bg-[#EF4444]",
-  unknown: "bg-[#64748B]",
+  high: "bg-console-green",
+  medium: "bg-console-amber",
+  low: "bg-console-red",
+  unknown: "bg-console-label",
 };
 
 function SourcesPage() {
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. The mount+listener effect below
+  // sets the real value client-side and keeps it in sync with the top-nav
+  // search bar, matching the pattern used on the other routes that share
+  // this global target.
+  const [target, setTarget] = useState("");
   const [corpus, setCorpus] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -170,14 +176,30 @@ function SourcesPage() {
     });
   }, [factors, activeProfileId, keywordsRaise, keywordsLower]);
 
+  useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) setTarget(e.detail);
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
   // Ingest the live corpus. No seed data — an empty feed shows as empty.
   useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setLoadError("");
       try {
-        const res: any = await fetchNews({ data: { query: getActiveTarget() } });
+        const res: any = await fetchNews({ data: { query: target } });
         if (cancelled) return;
         const mapped: Article[] = (res?.stories ?? [])
           .map((s: any, i: number) => ({
@@ -213,7 +235,7 @@ function SourcesPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [target]);
 
   // Live recompute with custom keywords & language assessments
   const scored = useMemo(
@@ -347,8 +369,8 @@ function SourcesPage() {
         <div className="space-y-3">
           <Card className={`${CARD} space-y-3 p-4`}>
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-                <Gauge className="size-4 text-[#06B6D4]" /> Factors
+              <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+                <Gauge className="size-4 text-console-cyan" /> Factors
               </span>
               <span className={`font-mono text-[10px] ${DIM}`}>
                 {factors.filter((f) => f.enabled).length}/{factors.length} on
@@ -360,14 +382,14 @@ function SourcesPage() {
             </p>
 
             {factors.map((f) => (
-              <div key={f.id} className="space-y-1 border-t border-[#263548] pt-2">
+              <div key={f.id} className="space-y-1 border-t border-console-border pt-2">
                 <div className="flex items-center justify-between gap-2">
                   <span
-                    className={`font-mono text-[10px] ${f.enabled ? "text-[#F3F4F6]" : DIM}`}
+                    className={`font-mono text-[10px] ${f.enabled ? "text-console-text" : DIM}`}
                     title={f.description}
                   >
                     {f.name}
-                    {f.requiresLlm && <Sparkles className="ml-1 inline size-2.5 text-[#8B5CF6]" />}
+                    {f.requiresLlm && <Sparkles className="ml-1 inline size-2.5 text-console-purple" />}
                     <Info className="ml-1 inline size-2.5 opacity-40" />
                   </span>
                   <div className="flex items-center gap-2">
@@ -395,7 +417,7 @@ function SourcesPage() {
                       size="sm"
                       onClick={handleRunToneAssessment}
                       disabled={assessingTone}
-                      className="h-7 w-full rounded bg-[#8B5CF6] font-mono text-[9px] font-bold text-white hover:bg-[#8B5CF6]/90 disabled:opacity-50"
+                      className="h-7 w-full rounded bg-console-purple font-mono text-[9px] font-bold text-console-text hover:bg-console-purple/90 disabled:opacity-50"
                     >
                       {assessingTone ? (
                         <>
@@ -424,14 +446,14 @@ function SourcesPage() {
                   setFactors(defaultFactors());
                   setActiveProfileId("default");
                 }}
-                className="h-7 flex-1 rounded bg-[#1A2332] font-mono text-[9px] text-[#94A3B8] hover:bg-[#263548]"
+                className="h-7 flex-1 rounded bg-console-elevated font-mono text-[9px] text-console-muted hover:bg-console-border"
               >
                 <RotateCcw className="mr-1 size-3" /> Reset
               </Button>
               <Button
                 size="sm"
                 onClick={saveAsProfile}
-                className="h-7 flex-1 rounded bg-[#06B6D4] font-mono text-[9px] font-bold text-[#0B1220] hover:bg-[#06B6D4]/90"
+                className="h-7 flex-1 rounded bg-console-cyan font-mono text-[9px] font-bold text-console-accent-foreground hover:bg-console-cyan/90"
               >
                 <Save className="mr-1 size-3" /> Save as profile
               </Button>
@@ -440,8 +462,8 @@ function SourcesPage() {
 
           {/* Domain Reputation Overrides */}
           <Card className={`${CARD} space-y-3 p-4`}>
-            <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-              <Globe className="size-4 text-[#06B6D4]" /> Custom Domain Ratings
+            <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+              <Globe className="size-4 text-console-cyan" /> Custom Domain Ratings
             </span>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
               Override editorial tiers for specific news domains or add regional sources to the
@@ -453,12 +475,12 @@ function SourcesPage() {
                   value={newDomain}
                   onChange={(e) => setNewDomain(e.target.value)}
                   placeholder="domain.com (e.g. defensenews.in)"
-                  className="h-7 border-[#263548] bg-[#0B1220] font-mono text-[10px] text-[#F3F4F6]"
+                  className="h-7 border-console-border bg-console-deep font-mono text-[10px] text-console-text"
                 />
                 <select
                   value={newDomainTier}
                   onChange={(e) => setNewDomainTier(e.target.value as SourceTier)}
-                  className="h-7 rounded border border-[#263548] bg-[#0B1220] px-1 font-mono text-[9px] text-[#F3F4F6]"
+                  className="h-7 rounded border border-console-border bg-console-deep px-1 font-mono text-[9px] text-console-text"
                 >
                   <option value="TIER_1">Tier 1 (0.90)</option>
                   <option value="SPECIALIST">Specialist (0.85)</option>
@@ -469,7 +491,7 @@ function SourcesPage() {
                 <Button
                   size="sm"
                   onClick={handleAddDomainOverride}
-                  className="h-7 rounded bg-[#06B6D4] px-2 font-mono text-[9px] font-bold text-[#0B1220]"
+                  className="h-7 rounded bg-console-cyan px-2 font-mono text-[9px] font-bold text-console-accent-foreground"
                 >
                   <Plus className="size-3" />
                 </Button>
@@ -477,13 +499,13 @@ function SourcesPage() {
             </div>
 
             {Object.keys(domainOverrides).length > 0 && (
-              <div className="space-y-1 border-t border-[#263548] pt-2">
+              <div className="space-y-1 border-t border-console-border pt-2">
                 {Object.entries(domainOverrides).map(([domainKey, entry]) => (
                   <div
                     key={domainKey}
-                    className="flex items-center justify-between gap-1 rounded bg-[#0B1220] p-1.5"
+                    className="flex items-center justify-between gap-1 rounded bg-console-deep p-1.5"
                   >
-                    <div className="font-mono text-[9px] text-[#F3F4F6]">
+                    <div className="font-mono text-[9px] text-console-text">
                       <span className="font-bold">{domainKey}</span>{" "}
                       <span className={DIM}>
                         · {entry.tier} ({TIER_SCORES[entry.tier].toFixed(2)})
@@ -492,7 +514,7 @@ function SourcesPage() {
                     <Button
                       size="sm"
                       onClick={() => handleDeleteDomainOverride(domainKey)}
-                      className="h-5 w-5 rounded p-0 text-[#EF4444] hover:bg-[#263548]"
+                      className="h-5 w-5 rounded p-0 text-console-red hover:bg-console-border"
                       aria-label={`Remove override for ${domainKey}`}
                     >
                       <X className="size-3" />
@@ -505,15 +527,15 @@ function SourcesPage() {
 
           {/* Profiles */}
           <Card className={`${CARD} space-y-2 p-4`}>
-            <span className="font-mono text-xs font-bold text-[#F3F4F6]">Weight profiles</span>
+            <span className="font-mono text-xs font-bold text-console-text">Weight profiles</span>
             {profiles.map((p) => (
               <div key={p.id} className="flex items-center gap-1">
                 <button
                   onClick={() => selectProfile(p.id)}
                   className={`flex-1 rounded border p-2 text-left font-mono text-[10px] transition-colors ${
                     activeProfileId === p.id
-                      ? "border-[#06B6D4] bg-[#06B6D4]/5 text-[#06B6D4]"
-                      : "border-[#263548] bg-[#0B1220] text-[#F3F4F6] hover:border-[#06B6D4]/50"
+                      ? "border-console-cyan bg-console-cyan/5 text-console-cyan"
+                      : "border-console-border bg-console-deep text-console-text hover:border-console-cyan/50"
                   }`}
                 >
                   {p.name}
@@ -523,7 +545,7 @@ function SourcesPage() {
                   <Button
                     size="sm"
                     onClick={() => deleteProfile(p.id)}
-                    className="h-7 w-7 rounded bg-[#1A2332] p-0 text-[#EF4444] hover:bg-[#263548]"
+                    className="h-7 w-7 rounded bg-console-elevated p-0 text-console-red hover:bg-console-border"
                     aria-label={`Delete ${p.name}`}
                   >
                     <Trash2 className="size-3" />
@@ -535,7 +557,7 @@ function SourcesPage() {
 
           {/* Custom criterion */}
           <Card className={`${CARD} space-y-2 p-4`}>
-            <span className="font-mono text-xs font-bold text-[#F3F4F6]">Custom criterion</span>
+            <span className="font-mono text-xs font-bold text-console-text">Custom criterion</span>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
               PS-18 asks for user-defined criteria. Define keywords that raise or lower the score.
               The factor stays skipped until at least one keyword exists.
@@ -544,7 +566,7 @@ function SourcesPage() {
               <select
                 value={kwSide}
                 onChange={(e) => setKwSide(e.target.value as "raise" | "lower")}
-                className="h-7 rounded border border-[#263548] bg-[#0B1220] px-1 font-mono text-[10px] text-[#F3F4F6]"
+                className="h-7 rounded border border-console-border bg-console-deep px-1 font-mono text-[10px] text-console-text"
               >
                 <option value="lower">Lower</option>
                 <option value="raise">Raise</option>
@@ -554,12 +576,12 @@ function SourcesPage() {
                 onChange={(e) => setKwDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addKeyword()}
                 placeholder="e.g. unconfirmed"
-                className="h-7 border-[#263548] bg-[#0B1220] font-mono text-[10px] text-[#F3F4F6]"
+                className="h-7 border-console-border bg-console-deep font-mono text-[10px] text-console-text"
               />
               <Button
                 size="sm"
                 onClick={addKeyword}
-                className="h-7 rounded bg-[#06B6D4] px-2 font-mono text-[9px] font-bold text-[#0B1220]"
+                className="h-7 rounded bg-console-cyan px-2 font-mono text-[9px] font-bold text-console-accent-foreground"
               >
                 Add
               </Button>
@@ -598,8 +620,8 @@ function SourcesPage() {
         <div className="space-y-3">
           {disabled.length > 0 && (
             <Card className={`${CARD} flex items-start gap-2 p-3`}>
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#F59E0B]" />
-              <span className="font-mono text-[10px] leading-relaxed text-[#F59E0B]">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-console-amber" />
+              <span className="font-mono text-[10px] leading-relaxed text-console-amber">
                 <span className="font-bold">Partial scoring.</span> {disabled.length} factor
                 {disabled.length === 1 ? " is" : "s are"} disabled (
                 {disabled.map((f) => f.name).join(", ")}). Scores below are computed from the
@@ -617,8 +639,8 @@ function SourcesPage() {
           {loadError && (
             <Card className={`${CARD} p-4`}>
               <div className="flex items-start gap-2">
-                <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-                <div className="font-mono text-[11px] text-[#EF4444]">
+                <AlertTriangle className="size-4 shrink-0 text-console-red" />
+                <div className="font-mono text-[11px] text-console-red">
                   Collection failed — no articles to score.
                   <div className={`pt-1 ${DIM}`}>{loadError}</div>
                 </div>
@@ -628,7 +650,7 @@ function SourcesPage() {
 
           {!loading && !loadError && scored.length === 0 && (
             <Card className={`${CARD} space-y-1 p-6 text-center`}>
-              <div className="font-mono text-xs text-[#F3F4F6]">No articles ingested</div>
+              <div className="font-mono text-xs text-console-text">No articles ingested</div>
               <div className={`font-mono text-[10px] ${MUTED}`}>
                 The collectors returned nothing for the active target, so there is nothing to score.
                 This is an empty corpus, not a failure.
@@ -658,7 +680,7 @@ function SourcesPage() {
                     <ChevronRight className={`mt-0.5 size-4 shrink-0 ${DIM}`} />
                   )}
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div className="font-mono text-[11px] text-[#F3F4F6]">{s.article.title}</div>
+                    <div className="font-mono text-[11px] text-console-text">{s.article.title}</div>
                     <div className={`font-mono text-[9px] ${DIM}`}>{domain}</div>
                     <p className={`font-mono text-[9px] leading-relaxed ${MUTED}`}>
                       {s.explanation}
@@ -668,7 +690,7 @@ function SourcesPage() {
                     <Badge className={`text-[10px] ${TONE[band.tone]}`}>
                       {s.score === null ? "—" : s.score.toFixed(2)} {band.label}
                     </Badge>
-                    <div className="h-1 w-20 overflow-hidden rounded bg-[#0B1220]">
+                    <div className="h-1 w-20 overflow-hidden rounded bg-console-deep">
                       <div
                         className={`h-full ${BAR[band.tone]}`}
                         style={{ width: `${Math.round((s.score ?? 0) * 100)}%` }}
@@ -681,19 +703,19 @@ function SourcesPage() {
                 </button>
 
                 {open && (
-                  <div className="mt-3 space-y-2 border-t border-[#263548] pt-3">
+                  <div className="mt-3 space-y-2 border-t border-console-border pt-3">
                     <div
                       className={`font-mono text-[9px] font-bold uppercase tracking-wider ${DIM}`}
                     >
                       Contributing factors
                     </div>
                     {s.breakdown.map((b) => (
-                      <div key={b.id} className="space-y-0.5 rounded bg-[#0B1220] p-2">
+                      <div key={b.id} className="space-y-0.5 rounded bg-console-deep p-2">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-[10px] text-[#F3F4F6]">{b.name}</span>
+                          <span className="font-mono text-[10px] text-console-text">{b.name}</span>
                           <span className={`font-mono text-[9px] ${MUTED}`}>
                             raw {b.rawScore.toFixed(2)} × weight {b.weight.toFixed(2)} ={" "}
-                            <span className="font-bold text-[#06B6D4]">
+                            <span className="font-bold text-console-cyan">
                               {b.contribution.toFixed(3)}
                             </span>
                           </span>
@@ -725,7 +747,7 @@ function SourcesPage() {
                         href={s.article.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-block pt-1 font-mono text-[9px] text-[#3B82F6] hover:underline"
+                        className="inline-block pt-1 font-mono text-[9px] text-console-blue hover:underline"
                       >
                         Open source article →
                       </a>

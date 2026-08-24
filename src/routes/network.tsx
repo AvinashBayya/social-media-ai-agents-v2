@@ -44,7 +44,7 @@ export const Route = createFileRoute("/network")({
   component: Page,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 interface Subject {
   profile: BlueskyProfile;
@@ -162,7 +162,7 @@ function Page() {
         <CardContent className="p-4">
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[240px] flex-1">
-              <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+              <label className="text-[10px] uppercase tracking-wider text-console-label">
                 Bluesky handle or DID
               </label>
               <Input
@@ -170,7 +170,7 @@ function Page() {
                 onChange={(e) => setHandle(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && add()}
                 placeholder="e.g. bsky.app"
-                className="mt-1 h-8 border-[#263548] bg-[#0B1220] text-[12px] text-white"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[12px] text-console-text"
               />
             </div>
             <Button size="sm" disabled={busy || !handle.trim()} onClick={add} className="h-8 gap-1">
@@ -191,9 +191,9 @@ function Page() {
           </div>
 
           {error && (
-            <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-              <span className="font-mono text-[10px] leading-relaxed text-[#EF4444]">{error}</span>
+            <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+              <span className="font-mono text-[10px] leading-relaxed text-console-red">{error}</span>
             </div>
           )}
         </CardContent>
@@ -202,9 +202,9 @@ function Page() {
       {subjects.length === 0 ? (
         <Card className={`${CARD} mt-4`}>
           <CardContent className="p-10 text-center">
-            <Users className="mx-auto size-8 text-[#263548]" />
-            <p className="mt-3 text-sm text-[#94A3B8]">No accounts loaded.</p>
-            <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-[#64748B]">
+            <Users className="mx-auto size-8 text-console-border" />
+            <p className="mt-3 text-sm text-console-muted">No accounts loaded.</p>
+            <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-console-label">
               This page holds no data of its own. Add a Bluesky handle above and its profile and
               recent posts are fetched from the public AppView. Follower counts, account age and
               post volume come from the platform; nothing here is estimated or modelled.
@@ -228,73 +228,73 @@ function Page() {
                         href={`https://bsky.app/profile/${s.profile.handle || s.profile.did}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 truncate text-sm font-semibold text-white hover:underline"
+                        className="flex items-center gap-1 truncate text-sm font-semibold text-console-text hover:underline"
                       >
                         {s.profile.displayName || s.profile.handle}
-                        <ExternalLink className="size-3 shrink-0 text-[#64748B]" />
+                        <ExternalLink className="size-3 shrink-0 text-console-label" />
                       </a>
-                      <div className="truncate font-mono text-[10px] text-[#64748B]">
+                      <div className="truncate font-mono text-[10px] text-console-label">
                         @{s.profile.handle}
                       </div>
                     </div>
                     <button
                       onClick={() => remove(s.profile.did)}
-                      className="shrink-0 text-[#64748B] hover:text-[#EF4444]"
+                      className="shrink-0 text-console-label hover:text-console-red"
                       aria-label={`Remove ${s.profile.handle}`}
                     >
                       <X className="size-3.5" />
                     </button>
                   </div>
 
-                  <dl className="mt-3 space-y-1 border-t border-[#263548] pt-2 font-mono text-[10px]">
+                  <dl className="mt-3 space-y-1 border-t border-console-border pt-2 font-mono text-[10px]">
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Followers</dt>
-                      <dd className="tabular-nums text-white">{fmt(s.profile.followersCount)}</dd>
+                      <dt className="text-console-label">Followers</dt>
+                      <dd className="tabular-nums text-console-text">{fmt(s.profile.followersCount)}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Following</dt>
-                      <dd className="tabular-nums text-white">{fmt(s.profile.followsCount)}</dd>
+                      <dt className="text-console-label">Following</dt>
+                      <dd className="tabular-nums text-console-text">{fmt(s.profile.followsCount)}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Posts</dt>
-                      <dd className="tabular-nums text-white">{fmt(s.profile.postsCount)}</dd>
+                      <dt className="text-console-label">Posts</dt>
+                      <dd className="tabular-nums text-console-text">{fmt(s.profile.postsCount)}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Account age</dt>
-                      <dd className="text-white">{age ? age.label : "—"}</dd>
+                      <dt className="text-console-label">Account age</dt>
+                      <dd className="text-console-text">{age ? age.label : "—"}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Posts / day</dt>
-                      <dd className="tabular-nums text-white">
+                      <dt className="text-console-label">Posts / day</dt>
+                      <dd className="tabular-nums text-console-text">
                         {perDay === null ? "—" : perDay.toFixed(1)}
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-[#64748B]">Feed fetched</dt>
-                      <dd className="tabular-nums text-white">{s.posts.length}</dd>
+                      <dt className="text-console-label">Feed fetched</dt>
+                      <dd className="tabular-nums text-console-text">{s.posts.length}</dd>
                     </div>
                   </dl>
 
-                  <div className="mt-2 border-t border-[#263548] pt-2">
+                  <div className="mt-2 border-t border-console-border pt-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                      <span className="text-[10px] uppercase tracking-wider text-console-label">
                         Maturity concern
                       </span>
                       <span
                         className={`ml-auto font-mono text-[10px] ${
                           s.maturityScore === null
-                            ? "text-[#64748B]"
+                            ? "text-console-label"
                             : s.maturityScore >= 0.6
-                              ? "text-[#EF4444]"
+                              ? "text-console-red"
                               : s.maturityScore >= 0.3
-                                ? "text-[#F59E0B]"
-                                : "text-[#10B981]"
+                                ? "text-console-amber"
+                                : "text-console-green"
                         }`}
                       >
                         {s.maturityScore === null ? "not computed" : s.maturityScore.toFixed(2)}
                       </span>
                     </div>
-                    <p className="mt-1 text-[9px] leading-relaxed text-[#94A3B8]">
+                    <p className="mt-1 text-[9px] leading-relaxed text-console-muted">
                       {s.maturityEvidence}
                     </p>
                   </div>
@@ -308,15 +308,15 @@ function Page() {
       {clusters !== null && (
         <Card className={`${CARD} mt-4`}>
           <CardContent className="p-4">
-            <h3 className="text-xs font-bold uppercase text-white">
+            <h3 className="text-xs font-bold uppercase text-console-text">
               Cross-account coordination signals
             </h3>
-            <p className="mt-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#F59E0B]">
+            <p className="mt-2 rounded border border-console-amber/30 bg-console-amber/5 p-2 text-[10px] leading-relaxed text-console-amber">
               {CIB_CAVEAT}
             </p>
 
             {clusters.length === 0 ? (
-              <p className="mt-3 text-[11px] text-[#64748B]">
+              <p className="mt-3 text-[11px] text-console-label">
                 No two posts across these {subjects.length} account(s) are similar enough to form a
                 cluster. That is an absence of overlap, not a finding that the accounts are
                 unrelated.
@@ -328,29 +328,29 @@ function Page() {
                     key={c.id}
                     className={`rounded border p-2.5 ${
                       c.flagged
-                        ? "border-[#EF4444]/50 bg-[#EF4444]/5"
-                        : "border-[#263548] bg-[#0B1220]/60"
+                        ? "border-console-red/50 bg-console-red/5"
+                        : "border-console-border bg-console-deep/60"
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-white">
+                      <span className="text-[11px] font-semibold text-console-text">
                         {c.accounts.length} account(s), {c.posts.length} posts
                       </span>
-                      <span className="ml-auto font-mono text-[10px] text-[#94A3B8]">
+                      <span className="ml-auto font-mono text-[10px] text-console-muted">
                         {c.compositeScore === null
                           ? "unscored"
                           : `${c.compositeScore.toFixed(2)} · ${c.signalsComputed}/5 signals`}
                       </span>
                       {c.flagged && (
-                        <Badge className="border-[#EF4444]/40 bg-[#EF4444]/10 text-[9px] font-normal text-[#EF4444]">
+                        <Badge className="border-console-red/40 bg-console-red/10 text-[9px] font-normal text-console-red">
                           review
                         </Badge>
                       )}
                     </div>
                     <ul className="mt-1.5 space-y-0.5">
                       {c.signals.map((sig) => (
-                        <li key={sig.id} className="text-[10px] leading-relaxed text-[#94A3B8]">
-                          <span className="font-semibold text-white">{sig.label}</span>{" "}
+                        <li key={sig.id} className="text-[10px] leading-relaxed text-console-muted">
+                          <span className="font-semibold text-console-text">{sig.label}</span>{" "}
                           <span className="font-mono">
                             {sig.score === null ? "not computed" : sig.score.toFixed(2)}
                           </span>{" "}
@@ -368,8 +368,8 @@ function Page() {
 
       <Card className={`${CARD} mt-4`}>
         <CardContent className="flex items-start gap-2 p-3">
-          <Info className="size-3.5 shrink-0 text-[#64748B]" />
-          <p className="text-[10px] leading-relaxed text-[#94A3B8]">
+          <Info className="size-3.5 shrink-0 text-console-label" />
+          <p className="text-[10px] leading-relaxed text-console-muted">
             Bluesky's follow graph is public and could be walked to build a genuine community
             structure, which is what a modularity figure would need. That is not built, so no
             modularity, node count or "reach" score is shown — an invented one would be

@@ -45,19 +45,19 @@ export const Route = createFileRoute("/entities")({
 });
 
 const TYPE_COLOURS: Record<string, string> = {
-  PERSON: "border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[#3B82F6]",
-  ORGANISATION: "border-[#8B5CF6]/30 bg-[#8B5CF6]/10 text-[#8B5CF6]",
-  LOCATION: "border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]",
-  EQUIPMENT: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
-  EVENT: "border-[#06B6D4]/30 bg-[#06B6D4]/10 text-[#06B6D4]",
-  OTHER: "border-[#64748B]/30 bg-[#64748B]/10 text-[#94A3B8]",
+  PERSON: "border-console-blue/30 bg-console-blue/10 text-console-blue",
+  ORGANISATION: "border-console-purple/30 bg-console-purple/10 text-console-purple",
+  LOCATION: "border-console-green/30 bg-console-green/10 text-console-green",
+  EQUIPMENT: "border-console-amber/30 bg-console-amber/10 text-console-amber",
+  EVENT: "border-console-cyan/30 bg-console-cyan/10 text-console-cyan",
+  OTHER: "border-console-label/30 bg-console-label/10 text-console-muted",
 };
 
 const BAND_COLOURS: Record<string, string> = {
-  high: "text-[#10B981]",
-  medium: "text-[#F59E0B]",
-  low: "text-[#EF4444]",
-  unknown: "text-[#64748B]",
+  high: "text-console-green",
+  medium: "text-console-amber",
+  low: "text-console-red",
+  unknown: "text-console-label",
 };
 
 interface Occurrence {
@@ -99,8 +99,13 @@ function entityKey(name: string): string {
 }
 
 function Page() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [searchVal, setSearchVal] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); the effect below now sets the real
+  // value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [searchVal, setSearchVal] = useState("");
 
   const [corpus, setCorpus] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +119,10 @@ function Page() {
   const [openEntity, setOpenEntity] = useState<string | null>(null);
 
   useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setSearchVal(initial);
+
     const handler = (e: any) => {
       if (e.detail) {
         setTarget(e.detail);
@@ -127,6 +136,9 @@ function Page() {
   // Collect a live corpus for the target. Extraction never runs automatically —
   // one model call per article on page load would empty a free tier immediately.
   useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -280,10 +292,10 @@ function Page() {
       </Card>
 
       {loadError && (
-        <Card className="mb-4 border-[#EF4444]/30">
+        <Card className="mb-4 border-console-red/30">
           <CardContent className="flex items-start gap-2 p-3">
-            <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-            <div className="font-mono text-[11px] text-[#EF4444]">
+            <AlertTriangle className="size-4 shrink-0 text-console-red" />
+            <div className="font-mono text-[11px] text-console-red">
               <span className="font-bold">Collection failed.</span> No corpus was retrieved for this
               subject.
               <div className="pt-0.5 opacity-80">{loadError}</div>
@@ -298,7 +310,7 @@ function Page() {
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Tags className="size-4 text-[#8B5CF6]" />
+                <Tags className="size-4 text-console-purple" />
                 <h3 className="text-sm font-semibold">
                   Entities across {analysed} analysed article{analysed === 1 ? "" : "s"}
                 </h3>
@@ -415,7 +427,7 @@ function Page() {
                                     href={o.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[#3B82F6] hover:underline"
+                                    className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-console-blue hover:underline"
                                   >
                                     Open source <ExternalLink className="size-2.5" />
                                   </a>
@@ -458,9 +470,9 @@ function Page() {
               </p>
 
               {extractError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <div className="font-mono text-[10px] leading-relaxed text-console-red">
                     <span className="font-bold">AI unavailable.</span> No entities were extracted.
                     <div className="pt-0.5 opacity-80">{extractError}</div>
                   </div>

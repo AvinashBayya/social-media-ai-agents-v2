@@ -27,7 +27,7 @@ export function LanguageSwitcher() {
 
   return (
     <SidebarGroup className="py-1">
-      <SidebarGroupLabel className="px-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]/60">
+      <SidebarGroupLabel className="px-2 font-mono text-[10px] font-bold uppercase tracking-widest text-console-muted/60">
         {t("Language")}
       </SidebarGroupLabel>
       <SidebarMenu>
@@ -36,9 +36,9 @@ export function LanguageSwitcher() {
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 tooltip={`${t("Interface Language")} — ${meta.native}`}
-                className="h-8 rounded border border-[#263548] bg-[#111827] text-[#94A3B8] transition-colors hover:bg-[#1A2332] hover:text-[#F3F4F6] data-[state=open]:border-[#3B82F6] data-[state=open]:text-[#F3F4F6]"
+                className="h-8 rounded border border-console-border bg-console-surface text-console-muted transition-colors hover:bg-console-elevated hover:text-console-text data-[state=open]:border-console-blue data-[state=open]:text-console-text"
               >
-                <Globe className="size-4 text-[#06B6D4]" />
+                <Globe className="size-4 text-console-cyan" />
                 <span
                   data-no-translate
                   dir={meta.rtl ? "rtl" : "ltr"}
@@ -48,11 +48,11 @@ export function LanguageSwitcher() {
                 </span>
                 <span
                   data-no-translate
-                  className="font-mono text-[9px] font-bold tracking-widest text-[#3B82F6] group-data-[collapsible=icon]:hidden"
+                  className="font-mono text-[9px] font-bold tracking-widest text-console-blue group-data-[collapsible=icon]:hidden"
                 >
                   {meta.short}
                 </span>
-                <ChevronsUpDown className="size-3 shrink-0 text-[#94A3B8] group-data-[collapsible=icon]:hidden" />
+                <ChevronsUpDown className="size-3 shrink-0 text-console-muted group-data-[collapsible=icon]:hidden" />
               </SidebarMenuButton>
             </DropdownMenuTrigger>
 
@@ -60,12 +60,12 @@ export function LanguageSwitcher() {
               side="right"
               align="end"
               sideOffset={8}
-              className="max-h-[min(70vh,28rem)] w-60 overflow-y-auto rounded border-[#263548] bg-[#111827] text-[#F3F4F6]"
+              className="max-h-[min(70vh,28rem)] w-60 overflow-y-auto rounded border-console-border bg-console-surface text-console-text"
             >
-              <DropdownMenuLabel className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">
+              <DropdownMenuLabel className="font-mono text-[10px] font-bold uppercase tracking-widest text-console-muted">
                 {t("Select Language")}
               </DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-[#263548]" />
+              <DropdownMenuSeparator className="bg-console-border" />
 
               {LANGUAGES.map((option) => {
                 const selected = option.code === lang;
@@ -73,13 +73,13 @@ export function LanguageSwitcher() {
                   <DropdownMenuItem
                     key={option.code}
                     onSelect={() => setLang(option.code)}
-                    className={`gap-2 text-xs hover:bg-[#1A2332] focus:bg-[#1A2332] ${
-                      selected ? "text-[#06B6D4]" : "text-[#F3F4F6]"
+                    className={`gap-2 text-xs hover:bg-console-elevated focus:bg-console-elevated ${
+                      selected ? "text-console-cyan" : "text-console-text"
                     }`}
                   >
                     <span
                       data-no-translate
-                      className="grid size-5 shrink-0 place-items-center rounded border border-[#263548] bg-[#0F172A] font-mono text-[9px] font-bold text-[#3B82F6]"
+                      className="grid size-5 shrink-0 place-items-center rounded border border-console-border bg-[#0F172A] font-mono text-[9px] font-bold text-console-blue"
                     >
                       {option.short}
                     </span>
@@ -91,10 +91,10 @@ export function LanguageSwitcher() {
                     >
                       {option.native}
                     </span>
-                    <span data-no-translate className="font-mono text-[10px] text-[#64748B]">
+                    <span data-no-translate className="font-mono text-[10px] text-console-label">
                       {option.label}
                     </span>
-                    {selected && <Check className="size-3.5 shrink-0 text-[#06B6D4]" />}
+                    {selected && <Check className="size-3.5 shrink-0 text-console-cyan" />}
                   </DropdownMenuItem>
                 );
               })}

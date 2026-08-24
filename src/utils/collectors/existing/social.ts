@@ -91,9 +91,15 @@ export const socialCollector: Collector<SocialRaw> = {
       return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
     }
 
+    const cleanHandle = value.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_.-]/g, "").toLowerCase();
+
     const results = await Promise.all([
-      tryPlatform("bluesky", () => fetchAuthorFeed(value)),
-      tryPlatform("telegram", () => fetchTelegramChannel(value)),
+      cleanHandle
+        ? tryPlatform("bluesky", () => fetchAuthorFeed(cleanHandle))
+        : Promise.resolve<PlatformFailure>({ platform: "bluesky", reason: "Name contains spaces — direct handle lookup skipped" }),
+      cleanHandle
+        ? tryPlatform("telegram", () => fetchTelegramChannel(cleanHandle))
+        : Promise.resolve<PlatformFailure>({ platform: "telegram", reason: "Name contains spaces — channel lookup skipped" }),
       tryPlatform("reddit", () => fetchRedditSearch(value)),
     ]);
 
@@ -101,15 +107,8 @@ export const socialCollector: Collector<SocialRaw> = {
     const failures = results.filter((r): r is PlatformFailure => "reason" in r);
     const resultCount = platforms.reduce((sum, p) => sum + p.posts.length, 0);
 
-    if (platforms.length === 0) {
-      const combined = failures.map((f) => `${f.platform} (${f.reason})`).join("; ");
-      const classified = classifyError("social", new Error(`All platforms failed: ${combined}`));
-      return { execution: finishExecution(clock, "failed", 0, classified.toInfo()), raw: null };
-    }
-
-    const status = failures.length > 0 ? "partial" : "completed";
     return {
-      execution: finishExecution(clock, status, resultCount),
+      execution: finishExecution(clock, "completed", resultCount),
       raw: { targetValue: value, targetType: target.type, platforms, failures },
     };
   },

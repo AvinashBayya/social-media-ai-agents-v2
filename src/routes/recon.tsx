@@ -47,16 +47,16 @@ export const Route = createFileRoute("/recon")({
   component: ReconPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
-const MUTED = "text-[#94A3B8]";
-const DIM = "text-[#64748B]";
+const CARD = "bg-console-surface border-console-border";
+const MUTED = "text-console-muted";
+const DIM = "text-console-label";
 
 /** Explicit failure surface. Never replaced by placeholder results. */
 function ErrorNote({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
-      <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-      <span className="font-mono text-[11px] leading-relaxed text-[#EF4444]">{message}</span>
+    <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-3">
+      <AlertTriangle className="size-4 shrink-0 text-console-red" />
+      <span className="font-mono text-[11px] leading-relaxed text-console-red">{message}</span>
     </div>
   );
 }
@@ -82,15 +82,15 @@ function AttackSurfacePanel({ target }: { target: string }) {
   return (
     <Card className={`${CARD} p-4 space-y-3`}>
       <div className="flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-          <Server className="size-4 text-[#10B981]" />
+        <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+          <Server className="size-4 text-console-green" />
           Attack Surface — Shodan InternetDB
         </span>
         <Button
           size="sm"
           onClick={run}
           disabled={loading || !target.trim()}
-          className="h-7 rounded bg-[#10B981] px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#10B981]/90"
+          className="h-7 rounded bg-console-green px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-green/90"
         >
           {loading ? <Loader2 className="size-3 animate-spin" /> : "Probe"}
         </Button>
@@ -111,15 +111,15 @@ function AttackSurfacePanel({ target }: { target: string }) {
           </div>
 
           {result.hosts.map((h) => (
-            <div key={h.ip} className="rounded border border-[#263548] bg-[#0B1220] p-3 space-y-2">
+            <div key={h.ip} className="rounded border border-console-border bg-console-deep p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs font-bold text-[#F3F4F6]">{h.ip}</span>
+                <span className="font-mono text-xs font-bold text-console-text">{h.ip}</span>
                 {h.scanned ? (
-                  <Badge className="border-[#10B981]/30 bg-[#10B981]/10 text-[10px] text-[#10B981]">
+                  <Badge className="border-console-green/30 bg-console-green/10 text-[10px] text-console-green">
                     {h.ports.length} port{h.ports.length === 1 ? "" : "s"}
                   </Badge>
                 ) : (
-                  <Badge className="border-[#64748B]/30 bg-[#64748B]/10 text-[10px] text-[#94A3B8]">
+                  <Badge className="border-console-label/30 bg-console-label/10 text-[10px] text-console-muted">
                     No Shodan record
                   </Badge>
                 )}
@@ -156,7 +156,7 @@ function AttackSurfacePanel({ target }: { target: string }) {
                       {h.tags.map((t) => (
                         <Badge
                           key={t}
-                          className="border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[9px] text-[#3B82F6]"
+                          className="border-console-blue/30 bg-console-blue/10 text-[9px] text-console-blue"
                         >
                           {t}
                         </Badge>
@@ -165,8 +165,8 @@ function AttackSurfacePanel({ target }: { target: string }) {
                   )}
                   {h.vulns.length > 0 && (
                     <div className="flex items-start gap-1.5 pt-1">
-                      <ShieldAlert className="size-3 shrink-0 text-[#EF4444]" />
-                      <span className="text-[#EF4444]">
+                      <ShieldAlert className="size-3 shrink-0 text-console-red" />
+                      <span className="text-console-red">
                         {h.vulns.length} known CVE{h.vulns.length === 1 ? "" : "s"}:{" "}
                         {h.vulns.slice(0, 12).join(", ")}
                         {h.vulns.length > 12 && ` +${h.vulns.length - 12} more`}
@@ -214,15 +214,15 @@ function SubdomainPanel({ target }: { target: string }) {
   return (
     <Card className={`${CARD} p-4 space-y-3`}>
       <div className="flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-          <ShieldCheck className="size-4 text-[#06B6D4]" />
+        <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+          <ShieldCheck className="size-4 text-console-cyan" />
           Subdomains — Certificate Transparency (crt.sh)
         </span>
         <Button
           size="sm"
           onClick={run}
           disabled={loading || !domain}
-          className="h-7 rounded bg-[#06B6D4] px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+          className="h-7 rounded bg-console-cyan px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90"
         >
           {loading ? <Loader2 className="size-3 animate-spin" /> : "Enumerate"}
         </Button>
@@ -230,7 +230,7 @@ function SubdomainPanel({ target }: { target: string }) {
 
       <p className={`font-mono text-[10px] leading-relaxed ${DIM}`}>
         Reads public Certificate Transparency logs for hostnames under{" "}
-        <span className="text-[#06B6D4]">{domain || "—"}</span>. Passive — nothing is sent to the
+        <span className="text-console-cyan">{domain || "—"}</span>. Passive — nothing is sent to the
         target. Only certificates a public CA logged appear here; internal or self-signed hosts will
         not.
       </p>
@@ -240,7 +240,7 @@ function SubdomainPanel({ target }: { target: string }) {
       {/* An empty result is a finding, and must not read like a failed lookup. */}
       {findings?.length === 0 && (
         <div
-          className={`rounded border border-[#263548] bg-[#0B1220] p-3 font-mono text-[10px] leading-relaxed ${MUTED}`}
+          className={`rounded border border-console-border bg-console-deep p-3 font-mono text-[10px] leading-relaxed ${MUTED}`}
         >
           No certificates for {domain} in the public CT logs. That is a result, not a failure — the
           domain may use no publicly logged certificate.
@@ -252,13 +252,13 @@ function SubdomainPanel({ target }: { target: string }) {
           <div className={`font-mono text-[10px] ${DIM}`}>
             {findings.length} hostname{findings.length === 1 ? "" : "s"} found
           </div>
-          <div className="max-h-80 overflow-y-auto rounded border border-[#263548] bg-[#0B1220]">
+          <div className="max-h-80 overflow-y-auto rounded border border-console-border bg-console-deep">
             {findings.map((f) => (
               <div
                 key={f.hostname}
-                className="flex items-baseline justify-between gap-3 border-b border-[#263548]/50 px-3 py-1.5 last:border-0"
+                className="flex items-baseline justify-between gap-3 border-b border-console-border/50 px-3 py-1.5 last:border-0"
               >
-                <span className="font-mono text-[11px] font-bold text-[#F3F4F6]">{f.hostname}</span>
+                <span className="font-mono text-[11px] font-bold text-console-text">{f.hostname}</span>
                 <span className={`shrink-0 font-mono text-[9px] ${DIM}`}>
                   {/* null is rendered as "not reported", never as a guessed CA or today's date. */}
                   {f.issuer ?? "issuer not reported"} · {f.firstSeen ?? "date not reported"}
@@ -283,8 +283,8 @@ function SubdomainPanel({ target }: { target: string }) {
 function ReconGaps() {
   return (
     <Card className={`${CARD} p-4 space-y-3`}>
-      <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-        <Info className="size-4 text-[#94A3B8]" />
+      <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+        <Info className="size-4 text-console-muted" />
         What external recon does not do, and why
       </span>
 
@@ -292,9 +292,9 @@ function ReconGaps() {
         {RECON_NOTES.map((gap) => (
           <div
             key={gap.capability}
-            className="rounded border border-[#263548] bg-[#0B1220] p-3 space-y-1"
+            className="rounded border border-console-border bg-console-deep p-3 space-y-1"
           >
-            <div className="font-mono text-[11px] font-bold text-[#F3F4F6]">{gap.capability}</div>
+            <div className="font-mono text-[11px] font-bold text-console-text">{gap.capability}</div>
             <div className={`font-mono text-[10px] leading-relaxed ${MUTED}`}>
               <span className={DIM}>Requires: </span>
               {gap.requires}
@@ -379,19 +379,19 @@ function DorkPanel({ target }: { target: string }) {
       onClick={() => select(t)}
       className={`w-full rounded border p-2.5 text-left transition-colors ${
         active?.id === t.id
-          ? "border-[#06B6D4] bg-[#06B6D4]/5"
-          : "border-[#263548] bg-[#0B1220] hover:border-[#06B6D4]/50"
+          ? "border-console-cyan bg-console-cyan/5"
+          : "border-console-border bg-console-deep hover:border-console-cyan/50"
       }`}
     >
-      <div className="font-mono text-[11px] font-bold text-[#F3F4F6]">{t.label}</div>
+      <div className="font-mono text-[11px] font-bold text-console-text">{t.label}</div>
       <div className={`font-mono text-[9px] leading-relaxed ${DIM}`}>{t.purpose}</div>
     </button>
   );
 
   return (
     <Card className={`${CARD} p-4 space-y-3`}>
-      <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-        <Search className="size-4 text-[#06B6D4]" />
+      <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+        <Search className="size-4 text-console-cyan" />
         Google Dork Builder
       </span>
 
@@ -408,7 +408,7 @@ function DorkPanel({ target }: { target: string }) {
               value={outlet}
               onChange={(e) => setOutlet(e.target.value)}
               placeholder="reuters.com"
-              className="h-7 border-[#263548] bg-[#0B1220] font-mono text-[10px] text-[#F3F4F6]"
+              className="h-7 border-console-border bg-console-deep font-mono text-[10px] text-console-text"
             />
           </div>
         </div>
@@ -422,14 +422,14 @@ function DorkPanel({ target }: { target: string }) {
       </div>
 
       {query && (
-        <div className="space-y-2 rounded border border-[#263548] bg-[#0B1220] p-3">
+        <div className="space-y-2 rounded border border-console-border bg-console-deep p-3">
           <div className="flex items-start justify-between gap-2">
-            <code className="break-all font-mono text-[11px] text-[#06B6D4]">{query}</code>
+            <code className="break-all font-mono text-[11px] text-console-cyan">{query}</code>
             <div className="flex shrink-0 gap-1">
               <Button
                 size="sm"
                 onClick={copy}
-                className="h-6 rounded bg-[#1A2332] px-2 font-mono text-[9px] text-[#94A3B8] hover:bg-[#263548]"
+                className="h-6 rounded bg-console-elevated px-2 font-mono text-[9px] text-console-muted hover:bg-console-border"
               >
                 <Copy className="mr-1 size-3" />
                 {copied ? "Copied" : "Copy"}
@@ -438,7 +438,7 @@ function DorkPanel({ target }: { target: string }) {
                 <a href={manualUrl} target="_blank" rel="noopener noreferrer">
                   <Button
                     size="sm"
-                    className="h-6 rounded bg-[#3B82F6] px-2 font-mono text-[9px] text-[#F3F4F6] hover:bg-[#3B82F6]/90"
+                    className="h-6 rounded bg-console-blue px-2 font-mono text-[9px] text-console-text hover:bg-console-blue/90"
                   >
                     <ExternalLink className="mr-1 size-3" />
                     Open
@@ -481,9 +481,9 @@ function DorkPanel({ target }: { target: string }) {
               href={h.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded border border-[#263548] bg-[#0B1220] p-2.5 hover:border-[#06B6D4]/50"
+              className="block rounded border border-console-border bg-console-deep p-2.5 hover:border-console-cyan/50"
             >
-              <div className="font-mono text-[11px] text-[#F3F4F6]">{h.title}</div>
+              <div className="font-mono text-[11px] text-console-text">{h.title}</div>
               <div className={`font-mono text-[9px] ${DIM}`}>
                 {h.source}
                 {h.pubDate && ` · ${new Date(h.pubDate).toLocaleString()}`}
@@ -497,12 +497,12 @@ function DorkPanel({ target }: { target: string }) {
 }
 
 const EXECUTION_STATUS_STYLE: Record<string, string> = {
-  completed: "border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]",
-  partial: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
-  failed: "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]",
-  cancelled: "border-[#64748B]/30 bg-[#64748B]/10 text-[#94A3B8]",
-  queued: "border-[#64748B]/30 bg-[#64748B]/10 text-[#94A3B8]",
-  running: "border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[#3B82F6]",
+  completed: "border-console-green/30 bg-console-green/10 text-console-green",
+  partial: "border-console-amber/30 bg-console-amber/10 text-console-amber",
+  failed: "border-console-red/30 bg-console-red/10 text-console-red",
+  cancelled: "border-console-label/30 bg-console-label/10 text-console-muted",
+  queued: "border-console-label/30 bg-console-label/10 text-console-muted",
+  running: "border-console-blue/30 bg-console-blue/10 text-console-blue",
 };
 
 const POLL_INTERVAL_MS = 1200;
@@ -654,15 +654,15 @@ function InvestigationPanel({ target }: { target: string }) {
   return (
     <Card className={`${CARD} p-4 space-y-3`}>
       <div className="flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2 font-mono text-xs font-bold text-[#F3F4F6]">
-          <Network className="size-4 text-[#8B5CF6]" />
+        <span className="flex items-center gap-2 font-mono text-xs font-bold text-console-text">
+          <Network className="size-4 text-console-purple" />
           OSINT Investigation — multi-collector
         </span>
         <Button
           size="sm"
           onClick={run}
           disabled={running || !target.trim() || selected.size === 0}
-          className="h-7 rounded bg-[#8B5CF6] px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#8B5CF6]/90"
+          className="h-7 rounded bg-console-purple px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-purple/90"
         >
           {running ? <Loader2 className="size-3 animate-spin" /> : "Run Investigation"}
         </Button>
@@ -686,8 +686,8 @@ function InvestigationPanel({ target }: { target: string }) {
                 key={c.collectorId}
                 className={`flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] transition-colors ${
                   selected.has(c.collectorId)
-                    ? "border-[#8B5CF6]/40 bg-[#8B5CF6]/10 text-[#F3F4F6]"
-                    : "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                    ? "border-console-purple/40 bg-console-purple/10 text-console-text"
+                    : "border-console-border bg-console-deep text-console-label"
                 }`}
                 title={c.reason}
               >
@@ -717,7 +717,7 @@ function InvestigationPanel({ target }: { target: string }) {
           <div className="flex items-center justify-between gap-3">
             <div className={`font-mono text-[10px] ${DIM}`}>
               Detected type:{" "}
-              <span className="text-[#8B5CF6]">{started.plan.detected.primaryType}</span>
+              <span className="text-console-purple">{started.plan.detected.primaryType}</span>
               {started.plan.detected.alternateTypes.length > 0 &&
                 ` (also considered: ${started.plan.detected.alternateTypes.join(", ")})`}
               {running && !poll?.done && " · polling…"}
@@ -727,7 +727,7 @@ function InvestigationPanel({ target }: { target: string }) {
                 size="sm"
                 variant="outline"
                 onClick={viewInGraph}
-                className="h-6 shrink-0 gap-1.5 rounded border-[#8B5CF6]/40 bg-transparent px-2 font-mono text-[9px] font-bold uppercase tracking-wider text-[#8B5CF6] hover:bg-[#8B5CF6]/10"
+                className="h-6 shrink-0 gap-1.5 rounded border-console-purple/40 bg-transparent px-2 font-mono text-[9px] font-bold uppercase tracking-wider text-console-purple hover:bg-console-purple/10"
               >
                 <Share2 className="size-2.5" />
                 View in Graph
@@ -747,9 +747,9 @@ function InvestigationPanel({ target }: { target: string }) {
             {jobs.map((job) => (
               <div
                 key={job.id}
-                className="flex items-center justify-between gap-2 rounded border border-[#263548] bg-[#0B1220] px-3 py-1.5"
+                className="flex items-center justify-between gap-2 rounded border border-console-border bg-console-deep px-3 py-1.5"
               >
-                <span className="font-mono text-[11px] text-[#F3F4F6]">{job.collector}</span>
+                <span className="font-mono text-[11px] text-console-text">{job.collector}</span>
                 <Badge
                   className={`text-[9px] ${
                     EXECUTION_STATUS_STYLE[job.status] ?? EXECUTION_STATUS_STYLE.cancelled
@@ -772,17 +772,17 @@ function InvestigationPanel({ target }: { target: string }) {
                 {poll.entities.length > MAX_RENDERED_ITEMS &&
                   ` — showing first ${MAX_RENDERED_ITEMS}`}
               </div>
-              <div className="max-h-80 overflow-y-auto rounded border border-[#263548] bg-[#0B1220]">
+              <div className="max-h-80 overflow-y-auto rounded border border-console-border bg-console-deep">
                 {poll.entities.slice(0, MAX_RENDERED_ITEMS).map((e) => (
                   <div
                     key={e.id}
-                    className="flex items-center justify-between gap-3 border-b border-[#263548]/50 px-3 py-1.5 last:border-0"
+                    className="flex items-center justify-between gap-3 border-b border-console-border/50 px-3 py-1.5 last:border-0"
                   >
                     <div className="flex items-center gap-2 overflow-hidden">
-                      <Badge className="shrink-0 border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[9px] text-[#3B82F6]">
+                      <Badge className="shrink-0 border-console-blue/30 bg-console-blue/10 text-[9px] text-console-blue">
                         {e.type}
                       </Badge>
-                      <span className="truncate font-mono text-[11px] text-[#F3F4F6]">
+                      <span className="truncate font-mono text-[11px] text-console-text">
                         {e.displayName}
                       </span>
                     </div>
@@ -801,7 +801,7 @@ function InvestigationPanel({ target }: { target: string }) {
             <div className="space-y-1.5">
               <button
                 onClick={() => setShowEvidence((s) => !s)}
-                className={`flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider ${DIM} hover:text-[#8B5CF6]`}
+                className={`flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider ${DIM} hover:text-console-purple`}
               >
                 {showEvidence ? (
                   <ChevronDown className="size-3" />
@@ -813,14 +813,14 @@ function InvestigationPanel({ target }: { target: string }) {
                   ` (showing first ${MAX_RENDERED_ITEMS})`}
               </button>
               {showEvidence && (
-                <div className="max-h-96 overflow-y-auto rounded border border-[#263548] bg-[#0B1220]">
+                <div className="max-h-96 overflow-y-auto rounded border border-console-border bg-console-deep">
                   {poll.evidence.slice(0, MAX_RENDERED_ITEMS).map((ev, i) => (
                     <div
                       key={i}
-                      className="space-y-1 border-b border-[#263548]/50 px-3 py-2 last:border-0"
+                      className="space-y-1 border-b border-console-border/50 px-3 py-2 last:border-0"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <Badge className="shrink-0 border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[9px] text-[#3B82F6]">
+                        <Badge className="shrink-0 border-console-blue/30 bg-console-blue/10 text-[9px] text-console-blue">
                           {ev.collector}
                         </Badge>
                         <span className={`shrink-0 font-mono text-[9px] ${DIM}`}>
@@ -840,7 +840,7 @@ function InvestigationPanel({ target }: { target: string }) {
                           href={ev.sourceUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-mono text-[9px] text-[#3B82F6] hover:underline"
+                          className="inline-flex items-center gap-1 font-mono text-[9px] text-console-blue hover:underline"
                         >
                           <ExternalLink className="size-2.5" /> {ev.sourceUrl}
                         </a>
@@ -876,8 +876,30 @@ function InvestigationPanel({ target }: { target: string }) {
 }
 
 function ReconPage() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [input, setInput] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); the mount effect below now sets the
+  // real value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setInput(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setInput(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
 
   const commit = () => {
     const next = input.trim();
@@ -896,24 +918,24 @@ function ReconPage() {
       <div className="space-y-4 p-6">
         <Card className={`${CARD} p-4`}>
           <div className="flex items-center gap-2">
-            <Radar className="size-4 shrink-0 text-[#06B6D4]" />
+            <Radar className="size-4 shrink-0 text-console-cyan" />
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && commit()}
               placeholder="Target domain, IP, organisation or person…"
-              className="h-9 border-[#263548] bg-[#0B1220] font-mono text-xs text-[#F3F4F6]"
+              className="h-9 border-console-border bg-console-deep font-mono text-xs text-console-text"
             />
             <Button
               size="sm"
               onClick={commit}
-              className="h-9 shrink-0 rounded bg-[#06B6D4] px-4 font-mono text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+              className="h-9 shrink-0 rounded bg-console-cyan px-4 font-mono text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90"
             >
               Set Target
             </Button>
           </div>
           <div className={`pt-2 font-mono text-[10px] ${DIM}`}>
-            Active target: <span className="text-[#06B6D4]">{target || "none"}</span>
+            Active target: <span className="text-console-cyan">{target || "none"}</span>
           </div>
         </Card>
 

@@ -51,13 +51,13 @@ export const Route = createFileRoute("/sentiment")({
   component: Page,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 const SENTIMENT_COLOURS: Record<string, string> = {
-  positive: "#10B981",
-  neutral: "#3B82F6",
-  negative: "#F59E0B",
-  critical: "#EF4444",
+  positive: "var(--console-green)",
+  neutral: "var(--console-blue)",
+  negative: "var(--console-amber)",
+  critical: "var(--console-red)",
 };
 
 interface Story {
@@ -78,8 +78,13 @@ interface Assessed {
 }
 
 function Page() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [draft, setDraft] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); the mount effect below now sets the
+  // real value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [draft, setDraft] = useState("");
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -89,6 +94,26 @@ function Page() {
   const [aiError, setAiError] = useState("");
 
   useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setDraft(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setDraft(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
+  useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -192,24 +217,24 @@ function Page() {
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[220px] flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748B]" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
               <Input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && search()}
                 placeholder="Subject to analyse…"
-                className="h-8 border-[#263548] bg-[#0B1220] pl-8 text-[11px] text-white"
+                className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
               />
             </div>
             <Button size="sm" onClick={search} disabled={loading} className="h-8">
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : "Collect"}
             </Button>
-            <span className="font-mono text-[10px] text-[#64748B]">
+            <span className="font-mono text-[10px] text-console-label">
               {stories.length} article(s) · {assessedCount} assessed
             </span>
           </div>
 
-          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-label">
             <Info className="mt-px size-3 shrink-0" />
             No multi-day sentiment history, week-on-week delta, emotion wheel or per-country
             breakdown is shown. Nothing persists a previous collection to compare against, no model
@@ -218,9 +243,9 @@ function Page() {
           </p>
 
           {error && (
-            <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-              <span className="font-mono text-[10px] leading-relaxed text-[#EF4444]">{error}</span>
+            <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+              <span className="font-mono text-[10px] leading-relaxed text-console-red">{error}</span>
             </div>
           )}
         </CardContent>
@@ -230,12 +255,12 @@ function Page() {
         <div className="space-y-4">
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-                <BarChart3 className="size-3.5 text-[#3B82F6]" />
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                <BarChart3 className="size-3.5 text-console-blue" />
                 Publication volume
               </h3>
               {volume.length < 2 ? (
-                <p className="mt-2 text-[11px] leading-relaxed text-[#64748B]">
+                <p className="mt-2 text-[11px] leading-relaxed text-console-label">
                   {loading
                     ? "Collecting…"
                     : `Collected items span ${volume.length} day(s) — too few to plot a trend. This ` +
@@ -247,40 +272,40 @@ function Page() {
                   <div className="mt-3 h-56">
                     <ResponsiveContainer>
                       <AreaChart data={volume} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#263548" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--console-border)" vertical={false} />
                         <XAxis
                           dataKey="day"
-                          tick={{ fontSize: 10, fill: "#94A3B8" }}
+                          tick={{ fontSize: 10, fill: "var(--console-muted)" }}
                           axisLine={false}
                           tickLine={false}
                         />
                         <YAxis
                           allowDecimals={false}
-                          tick={{ fontSize: 10, fill: "#94A3B8" }}
+                          tick={{ fontSize: 10, fill: "var(--console-muted)" }}
                           axisLine={false}
                           tickLine={false}
                         />
                         <Tooltip
                           contentStyle={{
-                            background: "#0B1220",
-                            border: "1px solid #263548",
+                            background: "var(--console-deep)",
+                            border: "1px solid var(--console-border)",
                             borderRadius: 6,
                             fontSize: 11,
                           }}
-                          labelStyle={{ color: "#94A3B8" }}
+                          labelStyle={{ color: "var(--console-muted)" }}
                         />
                         <Area
                           type="monotone"
                           dataKey="count"
-                          stroke="#3B82F6"
-                          fill="#3B82F6"
+                          stroke="var(--console-blue)"
+                          fill="var(--console-blue)"
                           fillOpacity={0.25}
                           name="articles"
                         />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
-                  <p className="mt-1 text-[10px] leading-relaxed text-[#64748B]">
+                  <p className="mt-1 text-[10px] leading-relaxed text-console-label">
                     Articles collected per publication day, from each feed's own timestamp. The
                     window is whatever the upstream feeds currently return, not a fixed 30 days.
                   </p>
@@ -292,9 +317,9 @@ function Page() {
           <Card className={CARD}>
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Sparkles className="size-3.5 text-[#8B5CF6]" />
-                <h3 className="text-xs font-bold uppercase text-white">Per-article sentiment</h3>
-                <span className="ml-auto font-mono text-[10px] text-[#64748B]">
+                <Sparkles className="size-3.5 text-console-purple" />
+                <h3 className="text-xs font-bold uppercase text-console-text">Per-article sentiment</h3>
+                <span className="ml-auto font-mono text-[10px] text-console-label">
                   {assessedCount}/{stories.length} assessed
                 </span>
               </div>
@@ -306,9 +331,9 @@ function Page() {
                       key={s}
                       className="text-[10px] font-normal"
                       style={{
-                        borderColor: `${SENTIMENT_COLOURS[s] ?? "#64748B"}66`,
-                        background: `${SENTIMENT_COLOURS[s] ?? "#64748B"}1a`,
-                        color: SENTIMENT_COLOURS[s] ?? "#94A3B8",
+                        borderColor: `color-mix(in srgb, ${SENTIMENT_COLOURS[s] ?? "var(--console-label)"} 40%, transparent)`,
+                        background: `color-mix(in srgb, ${SENTIMENT_COLOURS[s] ?? "var(--console-label)"} 10%, transparent)`,
+                        color: SENTIMENT_COLOURS[s] ?? "var(--console-muted)",
                       }}
                     >
                       {s} {n}/{assessedCount}
@@ -318,9 +343,9 @@ function Page() {
               )}
 
               {aiError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <div className="font-mono text-[10px] leading-relaxed text-console-red">
                     <span className="font-bold">AI unavailable.</span> No assessment was produced.
                     <div className="pt-0.5 opacity-80">{aiError}</div>
                   </div>
@@ -329,37 +354,37 @@ function Page() {
 
               <div className="mt-3 space-y-2">
                 {loading && (
-                  <div className="flex items-center gap-2 text-[11px] text-[#94A3B8]">
+                  <div className="flex items-center gap-2 text-[11px] text-console-muted">
                     <Loader2 className="size-3.5 animate-spin" /> Collecting…
                   </div>
                 )}
                 {!loading && stories.length === 0 && !error && (
-                  <p className="text-[11px] text-[#64748B]">Nothing collected for this subject.</p>
+                  <p className="text-[11px] text-console-label">Nothing collected for this subject.</p>
                 )}
                 {stories.map((s) => {
                   const a = assessed[s.id];
                   return (
                     <div
                       key={s.id}
-                      className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5"
+                      className="rounded border border-console-border bg-console-deep/60 p-2.5"
                     >
-                      <div className="flex items-center gap-2 font-mono text-[10px] text-[#64748B]">
+                      <div className="flex items-center gap-2 font-mono text-[10px] text-console-label">
                         <span className="truncate">{s.source}</span>
                         {a && (
                           <span
                             className="ml-auto shrink-0 font-semibold"
-                            style={{ color: SENTIMENT_COLOURS[a.sentiment] ?? "#94A3B8" }}
+                            style={{ color: SENTIMENT_COLOURS[a.sentiment] ?? "var(--console-muted)" }}
                           >
                             {a.sentiment} · {a.topic} · threat {a.threatLevel}
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[#F3F4F6]">
+                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-console-text">
                         {s.title}
                       </p>
                       {a ? (
-                        <p className="mt-1 text-[10px] leading-relaxed text-[#94A3B8]">
-                          {a.summary} <span className="text-[#64748B]">— {a.model}</span>
+                        <p className="mt-1 text-[10px] leading-relaxed text-console-muted">
+                          {a.summary} <span className="text-console-label">— {a.model}</span>
                         </p>
                       ) : (
                         <Button
@@ -382,7 +407,7 @@ function Page() {
                 })}
               </div>
 
-              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                 One model call per article, on request — assessing a whole feed automatically would
                 exhaust a request-limited free tier on a single page load. Aggregate counts above
                 are over assessed articles only, and the denominator is shown for that reason.
@@ -396,30 +421,30 @@ function Page() {
 
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="text-xs font-bold uppercase text-white">Category mix</h3>
+              <h3 className="text-xs font-bold uppercase text-console-text">Category mix</h3>
               {categories.length === 0 ? (
-                <p className="mt-2 text-[11px] text-[#64748B]">Nothing collected yet.</p>
+                <p className="mt-2 text-[11px] text-console-label">Nothing collected yet.</p>
               ) : (
                 <div className="mt-2 space-y-1.5">
                   {categories.map(([name, count]) => (
                     <div key={name} className="flex items-center gap-2">
-                      <span className="w-24 shrink-0 truncate font-mono text-[10px] text-[#94A3B8]">
+                      <span className="w-24 shrink-0 truncate font-mono text-[10px] text-console-muted">
                         {name}
                       </span>
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#0B1220]">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-console-deep">
                         <div
-                          className="h-full rounded-full bg-[#3B82F6]"
+                          className="h-full rounded-full bg-console-blue"
                           style={{ width: `${(count / stories.length) * 100}%` }}
                         />
                       </div>
-                      <span className="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-white">
+                      <span className="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-console-text">
                         {count}
                       </span>
                     </div>
                   ))}
                 </div>
               )}
-              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                 Deterministic keyword classifier, matched on word boundaries. Coarse by design and
                 no model is involved — an article can only fall in the first bucket that matches.
               </p>

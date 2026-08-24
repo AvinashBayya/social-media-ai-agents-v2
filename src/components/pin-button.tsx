@@ -60,8 +60,8 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
         }}
         className={`flex items-center gap-1 rounded border px-1.5 py-1 transition-colors ${
           pinned
-            ? "border-[#10B981]/50 bg-[#10B981]/10 text-[#10B981]"
-            : "border-[#263548] bg-[#111827] text-[#94A3B8] hover:border-[#3B82F6] hover:text-[#3B82F6]"
+            ? "border-console-green/50 bg-console-green/10 text-console-green"
+            : "border-console-border bg-console-surface text-console-muted hover:border-console-blue hover:text-console-blue"
         }`}
         title={pinned ? "Pinned to a case" : "Pin to investigation"}
       >
@@ -79,14 +79,14 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
               setCreating(false);
             }}
           />
-          <div className="absolute right-0 z-50 mt-1 w-64 overflow-hidden rounded border border-[#263548] bg-[#111827] text-[10px] text-[#94A3B8] shadow-xl">
-            <div className="border-b border-[#263548] bg-[#0B1220]/60 p-2 text-[9px] font-bold uppercase tracking-wider text-white">
+          <div className="absolute right-0 z-50 mt-1 w-64 overflow-hidden rounded border border-console-border bg-console-surface text-[10px] text-console-muted shadow-xl">
+            <div className="border-b border-console-border bg-console-deep/60 p-2 text-[9px] font-bold uppercase tracking-wider text-console-text">
               Pin to case
             </div>
 
             <div className="max-h-40 space-y-0.5 overflow-y-auto p-1">
               {cases.length === 0 ? (
-                <div className="p-2 text-center text-[#64748B]">
+                <div className="p-2 text-center text-console-label">
                   No cases yet. Create one below — cases start empty; there is no seeded data.
                 </div>
               ) : (
@@ -97,10 +97,10 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                       e.stopPropagation();
                       pin(c.id, c.title);
                     }}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-[#1A2332] hover:text-white"
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-console-elevated hover:text-console-text"
                   >
                     <span className="max-w-[140px] truncate">{c.title}</span>
-                    <span className="font-mono text-[8px] font-bold text-[#06B6D4]">
+                    <span className="font-mono text-[8px] font-bold text-console-cyan">
                       {c.evidence.length} ev
                     </span>
                   </button>
@@ -108,7 +108,7 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
               )}
             </div>
 
-            <div className="border-t border-[#263548] p-1.5">
+            <div className="border-t border-console-border p-1.5">
               {creating ? (
                 <div className="flex gap-1">
                   <input
@@ -122,7 +122,7 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                     }}
                     onClick={(e) => e.stopPropagation()}
                     placeholder="Subject…"
-                    className="min-w-0 flex-1 rounded border border-[#263548] bg-[#0B1220] px-1.5 py-1 text-[10px] text-white outline-none focus:border-[#3B82F6]"
+                    className="min-w-0 flex-1 rounded border border-console-border bg-console-deep px-1.5 py-1 text-[10px] text-console-text outline-none focus:border-console-blue"
                   />
                   <button
                     onClick={(e) => {
@@ -130,7 +130,7 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                       createAndPin();
                     }}
                     disabled={!newTarget.trim()}
-                    className="rounded bg-[#10B981] px-2 py-1 text-[9px] font-bold text-black disabled:opacity-40"
+                    className="rounded bg-console-green px-2 py-1 text-[9px] font-bold text-console-accent-foreground disabled:opacity-40"
                   >
                     Pin
                   </button>
@@ -141,7 +141,7 @@ export function PinButton({ payload, label }: { payload: PinInput; label?: strin
                     e.stopPropagation();
                     setCreating(true);
                   }}
-                  className="flex w-full items-center gap-1 rounded px-2 py-1.5 hover:bg-[#1A2332] hover:text-white"
+                  className="flex w-full items-center gap-1 rounded px-2 py-1.5 hover:bg-console-elevated hover:text-console-text"
                 >
                   <Plus className="size-3" /> New case from this item
                 </button>

@@ -1562,6 +1562,120 @@ exports unchanged, `fabrication-check` unchanged at 81, lint clean.
 
 ------------------------------------------------------------------------
 
+## 21j. Full-app QA sweep — SSR hydration-mismatch bug found and fixed across `/recon`, `/osint`, `/reports` and 6 other routes (2026-08-17)
+
+User-requested full QA pass across every page, tested with person/company/
+domain example targets. Full writeup lives in `PROJECT_MEMORY.md`'s
+Completed Milestones (same date) — summarized here because three of the
+nine affected routes (`/recon`, `/osint`, `/reports`) are this plan's own
+UI surfaces.
+
+**Bug**: `active-target.ts`'s `getActiveTarget()` returns the literal
+`"google.com"` during SSR (no `localStorage` server-side) but the real
+stored target client-side. Nine routes read it via a synchronous
+`useState(() => getActiveTarget())` initializer, so the server-rendered
+text differed from the client's first paint the instant an analyst's
+stored target was anything but the literal default — a React hydration
+mismatch, self-healing but real, on `/live`, `/entities`, `/sentiment`,
+`/gis`, `/trends`, `/osint`, `/reports`, `/recon`, `/threats`. `index.tsx`
+already had the correct fix (fixed literal default + mount-effect
+population); extended the same pattern to the other 9. Guarded every
+downstream fetch effect keyed on the now-briefly-empty target state
+against firing on the placeholder — `/osint`'s own `loadAllOsintData`
+effect fires 7 parallel calls (including GDELT, rate-limited 1 req/5s),
+and firing that twice on every mount would have wasted real quota for no
+reason.
+
+Also found, same pass: `credibility-profiles.ts` (backs `/sources`,
+outside this plan's scope but touches the same client-bundle-leak bug
+class as §21h's `bun:sqlite` regression) had a static top-level
+`node:fs/promises` and `node:path` import, crashing `/sources` to a full
+error boundary. Fixed with the same dynamic-import/plain-string-literal
+convention `credential-vault.ts` already established.
+
+**Verified**: `tsc --noEmit` clean, `bun test` 895/895 (unchanged — this
+bug class is invisible to both; see §21h's identical lesson), three full
+live-browser target sweeps (person/company/domain) across all 11 affected
+routes, 0 console/page errors each.
+
+------------------------------------------------------------------------
+
+## 21k. Person Investigation — a new investigation type, reusing this plan's own stack, behind a flag (2026-08-19)
+
+A separate, user-directed task, not part of this plan's original P0-P3
+breakdown: add a `person`-shaped investigation flow — a lawful-basis gate
+with a mandatory audit log, 8 person-focused collectors, and a report view
+grouped by branch — explicitly required to reuse this document's own
+collector registry/orchestrator/entity-resolution/graph stack rather than
+build a parallel one. Full writeup, including the analysis phase and every
+correction to the original task's own assumptions (the failure-envelope
+shape, Cytoscape.js not existing in this codebase, "shells to a tool"
+meaning the theHarvester/SpiderFoot worker pattern not a subprocess, and
+`presence.image`'s assumed face-matching capability not existing at all),
+lives in `PROJECT_MEMORY.md`'s Completed Milestones (same date) and
+`docs/PERSON-INVESTIGATION-ANALYSIS.md` — summarized here because this is
+this plan's own architecture being extended, not a separate system.
+
+**What this adds to the architecture already described in §2/§7-9**:
+`src/utils/collectors/person/` — 7 new `Collector` objects
+(`identity.websearch`, `contact.email`, `contact.hibp`, `contact.phone`,
+`contact.domain`, `presence.username`, `presence.image`), registered via
+`registerPersonCollectors()` alongside the existing `registerExistingCollectors()`/
+`registerExternalCollectors()` calls in `orchestrator.ts`'s
+`runOsintInvestigation` and all three of `jobs.ts`'s `createServerFn`s —
+the *same* registry, the *same* orchestrator, gated by a new
+`PERSON_INVESTIGATION_ENABLED` flag (default off; this is the one
+collector category in the whole system that defaults off, since it
+collects personal data). The 8th requested collector, `presence.news`, is
+**not** a new registration — the existing `news` collector already
+declares `person` support and does the job; adding a second one would have
+double-counted every article. `src/utils/osint/person-investigation.ts`
+adds the lawful-basis gate, mandatory audit log, seed-entity construction
+(turns form fields into the same `CollectorEntity` shape every collector
+already produces), and Confirmed/Possible/Unknown fact classification —
+built directly on `entity-resolution.ts`'s existing confidence math, no new
+scoring logic. The new "Person Investigation" tab on `/osint` reuses
+`/recon`'s `InvestigationPanel` polling pattern and `/graph`'s
+`saveGraphSnapshot()` hand-off verbatim; no new graph code, no new
+Cytoscape.js dependency (this plan's `/graph` has never used one — it's a
+dependency-free SVG+BFS-ring layout, `graph-layout.ts`).
+
+**Two real client-bundle crashes caught before shipping, both the same bug
+class §21h already named once (`bun:sqlite` reaching the browser bundle),
+now found a third time** — and fixing the first one surfaced a genuinely
+new, deeper finding: this project's *current* Vite/Nitro dev server runs
+`createServerFn` handlers through a module loader where `require()` is not
+a real global (`typeof require === "undefined"`, verified live) and the
+`bun:` protocol is rejected outright. This means §21g/§21h's own
+`require()`-based fix for `SqliteJobStore` is a **latent, unexercised bug**
+today — it would throw the identical `ReferenceError` the moment
+`JOB_STORE_PATH` was ever actually set, something no live verification in
+this plan's history (including this entry's own) has ever actually done.
+Flagged here for whoever next touches `job-store-sqlite.ts`, not fixed —
+outside this task's scope. This feature's own audit log was rewritten
+around the same discovery: no longer SQLite at all, but plain `node:fs`
+JSON-Lines append (`person-audit-store.ts`), loaded via a dynamic `await
+import(...)` rather than `require()` — verified live to avoid both
+failure modes.
+
+**Verified live, repeatedly**: `/recon`'s existing generic target field
+planned the new person collectors correctly the moment the flag was set,
+before any new UI existed — proof the registry/orchestrator reuse works
+with zero new UI code. The full `/osint` panel then verified end to end:
+gate blocks start until all required fields are filled; a real run
+produced real, honest per-collector states including a live GDELT 429 and
+each new collector's own written `no-credential`/`unavailable` message;
+the report correctly rendered the collector-produced and analyst-seed
+`person` entities as two separate, unmerged nodes — live proof
+`entity-resolution.ts`'s `NOT_MERGEABLE_BY_VALUE` guarantee holds for this
+feature without new code; "View in Graph" landed on a populated `/graph`,
+not the empty-state fallback; the audit file held the real entry
+afterward. Zero console errors throughout. `tsc --noEmit` clean, 151 core
+exports unchanged, `bun test tests/*.test.ts` 985/985 (90 new),
+`fabrication-check` unchanged at the pre-existing 84.
+
+------------------------------------------------------------------------
+
 # 22. Unified Investigation UI
 
 Add a small extension to the existing UI.

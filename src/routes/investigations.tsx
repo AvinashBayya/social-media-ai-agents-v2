@@ -70,7 +70,7 @@ export const Route = createFileRoute("/investigations")({
   component: InvestigationsPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 const KIND_ICON: Record<EvidenceKind, any> = {
   news: Newspaper,
@@ -80,11 +80,11 @@ const KIND_ICON: Record<EvidenceKind, any> = {
   note: FileText,
 };
 const KIND_COLOUR: Record<EvidenceKind, string> = {
-  news: "#3B82F6",
-  social: "#8B5CF6",
-  image: "#10B981",
-  geo: "#F59E0B",
-  note: "#64748B",
+  news: "var(--console-blue)",
+  social: "var(--console-purple)",
+  image: "var(--console-green)",
+  geo: "var(--console-amber)",
+  note: "var(--console-label)",
 };
 
 function InvestigationsPage() {
@@ -210,67 +210,67 @@ function InvestigationsPage() {
       {showCreate && (
         <Card className={`${CARD} mb-4`}>
           <CardContent className="p-4">
-            <h3 className="text-xs font-bold uppercase text-white">Initialise case</h3>
+            <h3 className="text-xs font-bold uppercase text-console-text">Initialise case</h3>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
                   Target subject *
                 </label>
                 <Input
                   value={newTarget}
                   onChange={(e) => setNewTarget(e.target.value)}
                   placeholder="Subject under investigation"
-                  className="mt-1 h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                  className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
                   Case title
                 </label>
                 <Input
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="Defaults to the subject name"
-                  className="mt-1 h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                  className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
                   Keywords (comma separated)
                 </label>
                 <Input
                   value={newKeywords}
                   onChange={(e) => setNewKeywords(e.target.value)}
-                  className="mt-1 h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                  className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
                   Owner (optional)
                 </label>
                 <Input
                   value={newOwner}
                   onChange={(e) => setNewOwner(e.target.value)}
                   placeholder="Left blank — there is no signed-in identity"
-                  className="mt-1 h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                  className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                <label className="text-[10px] uppercase tracking-wider text-console-label">
                   Description
                 </label>
                 <Textarea
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   rows={2}
-                  className="mt-1 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                  className="mt-1 border-console-border bg-console-deep text-[11px] text-console-text"
                 />
               </div>
             </div>
             <Button
               size="sm"
               onClick={create}
-              className="mt-3 h-8 bg-[#10B981] font-bold text-black hover:bg-[#059669]"
+              className="mt-3 h-8 bg-console-green font-bold text-console-accent-foreground hover:bg-console-green-hover"
             >
               Create case
             </Button>
@@ -282,13 +282,13 @@ function InvestigationsPage() {
         {/* ── Case list ──────────────────────────────────────────────────── */}
         <Card className={CARD}>
           <CardContent className="p-4">
-            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-              <FolderOpen className="size-3.5 text-[#3B82F6]" />
+            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+              <FolderOpen className="size-3.5 text-console-blue" />
               Open cases ({cases.length})
             </h3>
 
             {cases.length === 0 ? (
-              <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
+              <p className="mt-3 text-[11px] leading-relaxed text-console-label">
                 No cases. This page ships with none — it previously seeded two demonstration
                 dossiers with invented risk scores and evidence describing analysis that had never
                 run.
@@ -303,25 +303,25 @@ function InvestigationsPage() {
                       onClick={() => setSelectedId(c.id)}
                       className={`w-full rounded border p-2 text-left ${
                         selectedId === c.id
-                          ? "border-[#3B82F6]/60 bg-[#3B82F6]/10"
-                          : "border-[#263548] bg-[#0B1220]/60"
+                          ? "border-console-blue/60 bg-console-blue/10"
+                          : "border-console-border bg-console-deep/60"
                       }`}
                     >
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[9px] font-bold text-[#06B6D4]">
+                        <span className="font-mono text-[9px] font-bold text-console-cyan">
                           {c.id}
                         </span>
                         <Badge
                           variant="outline"
-                          className="border-[#263548] text-[8px] font-normal text-[#94A3B8]"
+                          className="border-console-border text-[8px] font-normal text-console-muted"
                         >
                           {c.status}
                         </Badge>
                       </div>
-                      <div className="mt-0.5 truncate text-[11px] font-semibold text-white">
+                      <div className="mt-0.5 truncate text-[11px] font-semibold text-console-text">
                         {c.title}
                       </div>
-                      <div className="font-mono text-[9px] text-[#64748B]">
+                      <div className="font-mono text-[9px] text-console-label">
                         {m.evidenceCount} evidence · {m.distinctSources} source(s)
                         {m.meanCredibility !== null &&
                           ` · cred ${(m.meanCredibility * 100).toFixed(0)}%`}
@@ -339,9 +339,9 @@ function InvestigationsPage() {
           {!active || !metrics ? (
             <Card className={CARD}>
               <CardContent className="p-10 text-center">
-                <FolderOpen className="mx-auto size-8 text-[#263548]" />
-                <p className="mt-3 text-sm text-[#94A3B8]">No case selected.</p>
-                <p className="mx-auto mt-1 max-w-lg text-[11px] leading-relaxed text-[#64748B]">
+                <FolderOpen className="mx-auto size-8 text-console-border" />
+                <p className="mt-3 text-sm text-console-muted">No case selected.</p>
+                <p className="mx-auto mt-1 max-w-lg text-[11px] leading-relaxed text-console-label">
                   Create a case, then pin evidence to it from News Intelligence, Social Intelligence
                   or Image Intelligence using the bookmark control on each item. The pinned set
                   becomes the citation list for any product this case generates.
@@ -355,26 +355,26 @@ function InvestigationsPage() {
                   <div className="flex flex-wrap items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] font-bold text-[#06B6D4]">
+                        <span className="font-mono text-[10px] font-bold text-console-cyan">
                           {active.id}
                         </span>
                         <Badge
                           variant="outline"
-                          className="border-[#263548] text-[9px] font-normal text-[#94A3B8]"
+                          className="border-console-border text-[9px] font-normal text-console-muted"
                         >
                           {active.status}
                         </Badge>
                         {active.owner && (
-                          <span className="font-mono text-[9px] text-[#64748B]">
+                          <span className="font-mono text-[9px] text-console-label">
                             owner: {active.owner}
                           </span>
                         )}
                       </div>
-                      <h2 className="mt-1 text-lg font-bold uppercase text-white">
+                      <h2 className="mt-1 text-lg font-bold uppercase text-console-text">
                         {active.title}
                       </h2>
                       {active.description && (
-                        <p className="mt-1 text-[11px] leading-relaxed text-[#94A3B8]">
+                        <p className="mt-1 text-[11px] leading-relaxed text-console-muted">
                           {active.description}
                         </p>
                       )}
@@ -392,7 +392,7 @@ function InvestigationsPage() {
                         refresh();
                         toast.success(`${active.id} deleted.`);
                       }}
-                      className="shrink-0 text-[#64748B] hover:text-[#EF4444]"
+                      className="shrink-0 text-console-label hover:text-console-red"
                       title="Delete case"
                     >
                       <Trash2 className="size-3.5" />
@@ -400,7 +400,7 @@ function InvestigationsPage() {
                   </div>
 
                   {/* Derived metrics. No risk score, no threat score. */}
-                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#263548] pt-3 sm:grid-cols-4">
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-console-border pt-3 sm:grid-cols-4">
                     <Metric label="Evidence" value={String(metrics.evidenceCount)} />
                     <Metric label="Distinct sources" value={String(metrics.distinctSources)} />
                     <Metric
@@ -426,11 +426,11 @@ function InvestigationsPage() {
                     />
                   </div>
 
-                  <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                  <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-muted">
                     <Info className="mt-px size-3 shrink-0" />
                     {metrics.summary}
                   </p>
-                  <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">
+                  <p className="mt-1 text-[9px] leading-relaxed text-console-label">
                     No risk or threat score is shown. Nothing in this system computes one, and this
                     page previously rendered both as percentages with progress bars — which reads as
                     a measurement.
@@ -442,7 +442,7 @@ function InvestigationsPage() {
               <Card className={CARD}>
                 <CardContent className="p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-xs font-bold uppercase text-white">Pinned evidence</h3>
+                    <h3 className="text-xs font-bold uppercase text-console-text">Pinned evidence</h3>
                     <span className="ml-auto flex flex-wrap gap-1">
                       {(Object.keys(metrics.byKind) as EvidenceKind[])
                         .filter((k) => metrics.byKind[k] > 0)
@@ -452,8 +452,8 @@ function InvestigationsPage() {
                             variant="outline"
                             className="text-[9px] font-normal"
                             style={{
-                              borderColor: `${KIND_COLOUR[k]}66`,
-                              background: `${KIND_COLOUR[k]}1a`,
+                              borderColor: `color-mix(in srgb, ${KIND_COLOUR[k]} 40%, transparent)`,
+                              background: `color-mix(in srgb, ${KIND_COLOUR[k]} 10%, transparent)`,
                               color: KIND_COLOUR[k],
                             }}
                           >
@@ -464,17 +464,17 @@ function InvestigationsPage() {
                   </div>
 
                   {active.evidence.length === 0 ? (
-                    <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
+                    <p className="mt-3 text-[11px] leading-relaxed text-console-label">
                       Nothing pinned yet. Use the bookmark control on any item in{" "}
-                      <a href="/news" className="text-[#3B82F6] hover:underline">
+                      <a href="/news" className="text-console-blue hover:underline">
                         News
                       </a>
                       ,{" "}
-                      <a href="/social" className="text-[#3B82F6] hover:underline">
+                      <a href="/social" className="text-console-blue hover:underline">
                         Social
                       </a>{" "}
                       or{" "}
-                      <a href="/images" className="text-[#3B82F6] hover:underline">
+                      <a href="/images" className="text-console-blue hover:underline">
                         Images
                       </a>
                       . Provenance travels with the pin, so the case can generate a cited product.
@@ -486,7 +486,7 @@ function InvestigationsPage() {
                         return (
                           <div
                             key={e.id}
-                            className="rounded border border-[#263548] bg-[#0B1220]/60 p-2.5"
+                            className="rounded border border-console-border bg-console-deep/60 p-2.5"
                           >
                             <div className="flex items-start gap-2">
                               <Icon
@@ -494,8 +494,8 @@ function InvestigationsPage() {
                                 style={{ color: KIND_COLOUR[e.kind] }}
                               />
                               <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2 font-mono text-[9px] text-[#64748B]">
-                                  <span className="text-[#3B82F6]">[{i + 1}]</span>
+                                <div className="flex flex-wrap items-center gap-2 font-mono text-[9px] text-console-label">
+                                  <span className="text-console-blue">[{i + 1}]</span>
                                   <span>{e.source}</span>
                                   {e.publishedAt && (
                                     <span>{e.publishedAt.slice(0, 16).replace("T", " ")}</span>
@@ -506,11 +506,11 @@ function InvestigationsPage() {
                                       : `cred ${(e.credibility * 100).toFixed(0)}%`}
                                   </span>
                                 </div>
-                                <p className="mt-0.5 text-[11px] leading-snug text-[#F3F4F6]">
+                                <p className="mt-0.5 text-[11px] leading-snug text-console-text">
                                   {e.title}
                                 </p>
                                 {e.note && (
-                                  <p className="mt-0.5 text-[10px] italic text-[#94A3B8]">
+                                  <p className="mt-0.5 text-[10px] italic text-console-muted">
                                     Analyst note: {e.note}
                                   </p>
                                 )}
@@ -519,7 +519,7 @@ function InvestigationsPage() {
                                     href={e.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="mt-0.5 inline-flex items-center gap-1 font-mono text-[9px] text-[#3B82F6] hover:underline"
+                                    className="mt-0.5 inline-flex items-center gap-1 font-mono text-[9px] text-console-blue hover:underline"
                                   >
                                     open <ExternalLink className="size-2.5" />
                                   </a>
@@ -530,7 +530,7 @@ function InvestigationsPage() {
                                   removeEvidence(active.id, e.id);
                                   refresh();
                                 }}
-                                className="shrink-0 text-[#64748B] hover:text-[#EF4444]"
+                                className="shrink-0 text-console-label hover:text-console-red"
                                 title="Remove from case"
                               >
                                 <Trash2 className="size-3" />
@@ -548,8 +548,8 @@ function InvestigationsPage() {
               <Card className={CARD}>
                 <CardContent className="p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Sparkles className="size-3.5 text-[#10B981]" />
-                    <h3 className="text-xs font-bold uppercase text-white">
+                    <Sparkles className="size-3.5 text-console-green" />
+                    <h3 className="text-xs font-bold uppercase text-console-text">
                       Generate intelligence product
                     </h3>
                   </div>
@@ -561,8 +561,8 @@ function InvestigationsPage() {
                         onClick={() => setProductType(p.id)}
                         className={`rounded border px-2 py-1 text-[10px] ${
                           productType === p.id
-                            ? "border-[#3B82F6]/60 bg-[#3B82F6]/10 text-[#3B82F6]"
-                            : "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                            ? "border-console-blue/60 bg-console-blue/10 text-console-blue"
+                            : "border-console-border bg-console-deep text-console-label"
                         }`}
                       >
                         {p.label}
@@ -573,7 +573,7 @@ function InvestigationsPage() {
                   <Button
                     onClick={generate}
                     disabled={generating || active.evidence.length === 0}
-                    className="mt-3 h-8 w-full gap-1.5 bg-[#10B981] font-bold text-black hover:bg-[#059669]"
+                    className="mt-3 h-8 w-full gap-1.5 bg-console-green font-bold text-console-accent-foreground hover:bg-console-green-hover"
                   >
                     {generating ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -585,16 +585,16 @@ function InvestigationsPage() {
                       : `Generate from ${active.evidence.length} pinned item(s)`}
                   </Button>
 
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-[#64748B]">
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-console-label">
                     The model sees only the pinned evidence above, numbered. Every claim it makes is
                     validated to cite one of those numbers; a product that fails validation is
                     retried once and then rejected rather than returned partial.
                   </p>
 
                   {genError && (
-                    <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                      <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                      <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                    <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                      <div className="font-mono text-[10px] leading-relaxed text-console-red">
                         <span className="font-bold">No product was produced.</span>
                         <div className="pt-0.5 opacity-80">{genError}</div>
                       </div>
@@ -602,20 +602,20 @@ function InvestigationsPage() {
                   )}
 
                   {product && (
-                    <div className="mt-3 space-y-2 rounded border border-[#3B82F6]/40 bg-[#0B1220]/60 p-3">
+                    <div className="mt-3 space-y-2 rounded border border-console-blue/40 bg-console-deep/60 p-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[11px] font-bold text-white">
+                        <span className="text-[11px] font-bold text-console-text">
                           {product.typeLabel}
                         </span>
                         <Badge
                           variant="outline"
-                          className="border-[#F59E0B]/40 bg-[#F59E0B]/10 font-mono text-[9px] font-normal text-[#F59E0B]"
+                          className="border-console-amber/40 bg-console-amber/10 font-mono text-[9px] font-normal text-console-amber"
                         >
                           {product.classification}
                         </Badge>
                         <Badge
                           variant="outline"
-                          className="border-[#8B5CF6]/40 bg-[#8B5CF6]/10 font-mono text-[9px] font-normal text-[#8B5CF6]"
+                          className="border-console-purple/40 bg-console-purple/10 font-mono text-[9px] font-normal text-console-purple"
                         >
                           {product.provenance.model}
                         </Badge>
@@ -652,19 +652,19 @@ function InvestigationsPage() {
                         </div>
                       </div>
 
-                      <p className="text-[11px] leading-relaxed text-[#F3F4F6]">
+                      <p className="text-[11px] leading-relaxed text-console-text">
                         {product.bottomLine}
                       </p>
 
                       <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#3B82F6]">
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-console-blue">
                           Key judgements
                         </div>
                         {product.keyJudgements.map((kj, i) => (
-                          <p key={i} className="mt-1 text-[10px] leading-relaxed text-[#94A3B8]">
-                            <span className="font-mono font-bold text-white">KJ-{i + 1}</span>{" "}
-                            <span className="text-[#F59E0B]">({kj.confidence})</span> {kj.judgement}{" "}
-                            <span className="font-mono text-[#3B82F6]">
+                          <p key={i} className="mt-1 text-[10px] leading-relaxed text-console-muted">
+                            <span className="font-mono font-bold text-console-text">KJ-{i + 1}</span>{" "}
+                            <span className="text-console-amber">({kj.confidence})</span> {kj.judgement}{" "}
+                            <span className="font-mono text-console-blue">
                               {kj.sources.map((n) => `[${n}]`).join("")}
                             </span>
                           </p>
@@ -672,17 +672,17 @@ function InvestigationsPage() {
                       </div>
 
                       <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#F59E0B]">
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-console-amber">
                           Intelligence gaps
                         </div>
                         {product.gaps.map((g, i) => (
-                          <p key={i} className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
-                            • <span className="text-[#F3F4F6]">{g.gap}</span> — {g.why}
+                          <p key={i} className="mt-0.5 text-[10px] leading-relaxed text-console-muted">
+                            • <span className="text-console-text">{g.gap}</span> — {g.why}
                           </p>
                         ))}
                       </div>
 
-                      <p className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[9px] leading-relaxed text-[#F59E0B]">
+                      <p className="rounded border border-console-amber/30 bg-console-amber/5 p-2 text-[9px] leading-relaxed text-console-amber">
                         {product.provenance.notice}
                       </p>
                     </div>
@@ -693,13 +693,13 @@ function InvestigationsPage() {
               {/* ── Analyst notes ────────────────────────────────────────── */}
               <Card className={CARD}>
                 <CardContent className="p-4">
-                  <h3 className="text-xs font-bold uppercase text-white">Analyst notes</h3>
+                  <h3 className="text-xs font-bold uppercase text-console-text">Analyst notes</h3>
                   <Textarea
                     value={noteDraft}
                     onChange={(e) => setNoteDraft(e.target.value)}
                     rows={4}
                     placeholder="Your own working notes. Never auto-generated."
-                    className="mt-2 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                    className="mt-2 border-console-border bg-console-deep text-[11px] text-console-text"
                   />
                   <Button
                     size="sm"
@@ -724,10 +724,10 @@ function InvestigationsPage() {
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
-      <div className="text-[9px] uppercase tracking-wider text-[#64748B]">{label}</div>
-      <div className="mt-0.5 font-mono text-sm font-bold text-white">{value}</div>
-      {sub && <div className="mt-0.5 text-[9px] leading-tight text-[#94A3B8]">{sub}</div>}
+    <div className="rounded border border-console-border bg-console-deep/60 p-2">
+      <div className="text-[9px] uppercase tracking-wider text-console-label">{label}</div>
+      <div className="mt-0.5 font-mono text-sm font-bold text-console-text">{value}</div>
+      {sub && <div className="mt-0.5 text-[9px] leading-tight text-console-muted">{sub}</div>}
     </div>
   );
 }

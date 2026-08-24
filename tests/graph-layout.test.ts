@@ -121,6 +121,65 @@ describe("layoutRadial", () => {
     const positions = new Set(ring1.map((n) => `${n.x.toFixed(1)},${n.y.toFixed(1)}`));
     expect(positions.size).toBe(ring1.length); // every position distinct
   });
+
+  test("a busy ring gets a wider radius so members stay well-separated — real label overlap fix", () => {
+    // 25 entities all one hop from root, mirroring a real target with many
+    // "MENTIONED_IN" article entities — the shape that produced visibly
+    // overlapping labels before the ring radius accounted for member count.
+    const children = Array.from({ length: 25 }, (_, i) => entity(`c${i}`));
+    const entities = [entity("root"), ...children];
+    const relationships = children.map((c) => rel("root", c.id));
+    const result = layoutRadial(entities, relationships, "root", { minArcSpacing: 92, ringGap: 85 });
+    const ring1 = result.nodes.filter((n) => n.ring === 1);
+    expect(ring1).toHaveLength(25);
+    const centerX = 400;
+    const centerY = 280;
+    const radius = Math.hypot(ring1[0]!.x - centerX, ring1[0]!.y - centerY);
+    // The old formula (ring * ringGap) would have placed this ring at a
+    // fixed 85px regardless of its 25 members. The fix must produce a
+    // materially larger radius, matching the circumference-for-spacing math.
+    expect(radius).toBeGreaterThan(85);
+    expect(radius).toBeCloseTo((25 * 92) / (2 * Math.PI), 0);
+    // Center-to-center chord between angularly-adjacent members must be
+    // close to minArcSpacing (chord is slightly less than the arc length
+    // the radius was sized for — sin(pi/n)/(pi/n) approaches 1 as n grows).
+    const byAngle = [...ring1].sort(
+      (a, b) => Math.atan2(a.y - centerY, a.x - centerX) - Math.atan2(b.y - centerY, b.x - centerX),
+    );
+    const chord = Math.hypot(byAngle[0]!.x - byAngle[1]!.x, byAngle[0]!.y - byAngle[1]!.y);
+    expect(chord).toBeGreaterThan(90); // well above the old fixed 85px ring radius entirely
+  });
+
+  test("a sparse ring is NOT pushed out further than a plain ring*ringGap radius would place it", () => {
+    // Only 2 members on ring 1 — spacing requirement is trivially satisfied
+    // by the default ringGap radius; the busy-ring fix must not needlessly
+    // balloon a ring that was never crowded.
+    const entities = [entity("root"), entity("c1"), entity("c2")];
+    const relationships = [rel("root", "c1"), rel("root", "c2")];
+    const result = layoutRadial(entities, relationships, "root", { ringGap: 85 });
+    const c1 = result.nodes.find((n) => n.id === "c1")!;
+    const radius = Math.hypot(c1.x - 400, c1.y - 280);
+    expect(radius).toBeCloseTo(85, 1);
+  });
+
+  test("ring radii still strictly increase with BFS distance even when an inner ring is busier than an outer one", () => {
+    // Ring 1 has many members (needs a large radius for spacing); ring 2
+    // has only one. Ring 2 must still end up further out than ring 1, or
+    // "further ring = more hops away" stops being visually true.
+    const ring1 = Array.from({ length: 20 }, (_, i) => entity(`r1_${i}`));
+    const entities = [entity("root"), ...ring1, entity("r2")];
+    const relationships = [
+      ...ring1.map((c) => rel("root", c.id)),
+      rel(ring1[0]!.id, "r2"),
+    ];
+    const result = layoutRadial(entities, relationships, "root");
+    const byId = Object.fromEntries(result.nodes.map((n) => [n.id, n]));
+    const centerX = 400;
+    const centerY = 280;
+    const radiusOf = (id: string) => Math.hypot(byId[id]!.x - centerX, byId[id]!.y - centerY);
+    const maxRing1Radius = Math.max(...ring1.map((c) => radiusOf(c.id)));
+    expect(radiusOf("r2")).toBeGreaterThan(maxRing1Radius);
+  });
 });
 
 describe("shortestPath", () => {

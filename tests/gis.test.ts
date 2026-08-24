@@ -6,6 +6,8 @@ import {
   filterByTime,
   fromExifImage,
   fromGdeltArticle,
+  fromKplerBalance,
+  fromLocationMention,
   fromUcdpEvent,
   fromUsgsFeature,
   graticuleStepDegrees,
@@ -70,6 +72,26 @@ const EXIF_IMAGE = {
   camera: "Canon EOS R5",
 };
 
+// Shaped exactly like a row from Kpler's grains balances response, per
+// docs/OpenApiSpec-Supply & Demand-v2.json's own example.
+const KPLER_GRAINS_ROW = {
+  domain: "grains" as const,
+  product: "Corn",
+  zone: "Argentina",
+  startDate: "2018-03-01",
+  endDate: "2019-03-01",
+  metrics: {
+    beginningStocks: 2547,
+    exports: 22471,
+    imports: 18,
+    production: 34000,
+    supplyTotal: 36565,
+    totalUse: 35444,
+    stockToUse: 0.032,
+  },
+  units: { beginningStocks: "kt", exports: "kt", imports: "kt", production: "kt", supplyTotal: "kt", totalUse: "kt", stockToUse: "ratio" },
+};
+
 // ─── The central guarantee ─────────────────────────────────────────────────
 
 describe("no coordinate is ever synthesised", () => {
@@ -84,6 +106,7 @@ describe("no coordinate is ever synthesised", () => {
     expect(fromUcdpEvent({ ...UCDP_EVENT, latitude: undefined, longitude: undefined })).toBeNull();
     expect(fromGdeltArticle({ ...GDELT_ARTICLE, sourcecountry: "" })).toBeNull();
     expect(fromExifImage({ ...EXIF_IMAGE, gps: null })).toBeNull();
+    expect(fromKplerBalance({ ...KPLER_GRAINS_ROW, zone: "Neverland" })).toBeNull();
   });
 
   test("every produced marker traces back to a real coordinate on its source record", () => {
@@ -190,6 +213,110 @@ describe("magnitude", () => {
     })!;
     expect(r.magnitude).toBeNull();
     expect(r.magnitudeLabel).toContain("not reported");
+  });
+});
+
+// ─── Target mentions (real LLM extraction -> real geocode) ─────────────────
+
+describe("fromLocationMention", () => {
+  const VALID = {
+    placeName: "Delhi",
+    lat: 28.6139,
+    lon: 77.209,
+    mentionCount: 3,
+    sampleTitle: "Real headline mentioning Delhi",
+    sampleSource: "Real News Wire",
+    sampleUrl: "https://example.com/real-article",
+    sampleTimestamp: "2026-08-20T00:00:00.000Z",
+  };
+
+  test("a real geocoded place produces a real, city-precision record", () => {
+    const r = fromLocationMention(VALID)!;
+    expect(r).not.toBeNull();
+    expect(r.layer).toBe("mentions");
+    expect(r.lat).toBe(28.6139);
+    expect(r.lon).toBe(77.209);
+    expect(r.precision).toBe("city"); // never "exact" — a geocoded place name is a representative point, not a device fix
+    expect(r.magnitude).toBe(3);
+    expect(r.detail.place).toBe("Delhi");
+  });
+
+  test("locates makes clear this is the place, not the event or person", () => {
+    const r = fromLocationMention(VALID)!;
+    expect(r.locates).toContain("Delhi");
+    expect(r.locates.toLowerCase()).toContain("not the event");
+  });
+
+  test("a null-island or otherwise invalid coordinate is rejected, never plotted", () => {
+    expect(fromLocationMention({ ...VALID, lat: 0, lon: 0 })).toBeNull();
+    expect(fromLocationMention({ ...VALID, lat: 999, lon: 999 })).toBeNull();
+    expect(fromLocationMention({ ...VALID, lat: NaN, lon: NaN })).toBeNull();
+  });
+
+  test("mention count of 1 uses singular phrasing, not '1 mentions'", () => {
+    const r = fromLocationMention({ ...VALID, mentionCount: 1 })!;
+    expect(r.magnitudeLabel).toBe("1 mention");
+    expect(r.title).toContain("1 real mention");
+    expect(r.title).not.toContain("1 real mentions");
+  });
+
+  test("the id is a stable slug of the place name, not a random/collision-prone value", () => {
+    const r1 = fromLocationMention(VALID)!;
+    const r2 = fromLocationMention(VALID)!;
+    expect(r1.id).toBe(r2.id);
+    expect(r1.id).toContain("delhi");
+  });
+});
+
+// ─── Kpler Supply & Demand ──────────────────────────────────────────────────
+
+describe("fromKplerBalance", () => {
+  test("plots at the zone's country centroid, at country precision", () => {
+    const r = fromKplerBalance(KPLER_GRAINS_ROW)!;
+    expect([r.lat, r.lon]).toEqual(COUNTRY_CENTROIDS["Argentina"]);
+    expect(r.precision).toBe("country");
+    expect(r.layer).toBe("supplyDemand");
+  });
+
+  test("locates states plainly that this is a country-level aggregate, not a specific site", () => {
+    const r = fromKplerBalance(KPLER_GRAINS_ROW)!;
+    expect(r.locates).toContain("country-level");
+    expect(r.locates).toContain("not a specific farm");
+  });
+
+  test("magnitude is the domain's headline supply figure, with its real unit in the label", () => {
+    const r = fromKplerBalance(KPLER_GRAINS_ROW)!;
+    expect(r.magnitude).toBe(36565);
+    expect(r.magnitudeLabel).toContain("36,565");
+    expect(r.magnitudeLabel).toContain("kt");
+  });
+
+  test("a missing headline metric reports as unmeasured, not zero", () => {
+    const { supplyTotal, ...rest } = KPLER_GRAINS_ROW.metrics;
+    const r = fromKplerBalance({ ...KPLER_GRAINS_ROW, metrics: rest })!;
+    expect(r.magnitude).toBeNull();
+    expect(r.magnitudeLabel).toContain("not reported");
+  });
+
+  test("every reported numeric metric reaches detail with its real unit, not a curated subset", () => {
+    const r = fromKplerBalance(KPLER_GRAINS_ROW)!;
+    expect(r.detail.production).toBe("34000 kt");
+    expect(r.detail.stockToUse).toBe("0.032 ratio");
+    expect(r.detail.zone).toBe("Argentina");
+  });
+
+  test("LNG/gas rows use 'supply' as the headline metric, not grains' 'supplyTotal'", () => {
+    const r = fromKplerBalance({
+      domain: "lng",
+      product: "LNG",
+      zone: "Qatar",
+      startDate: "2024-01-01",
+      endDate: "2024-02-01",
+      metrics: { supply: 8.5, demand: 0.4 },
+      units: { supply: "Mt", demand: "Mt" },
+    })!;
+    expect(r.magnitude).toBe(8.5);
+    expect(r.magnitudeLabel).toContain("Mt");
   });
 });
 

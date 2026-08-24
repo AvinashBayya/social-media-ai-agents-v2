@@ -17,8 +17,8 @@ export function ReportBlock({
   subtitle,
   children,
   badge,
-  borderColor = "border-[#263548]",
-  accentColor = "bg-[#3B82F6]",
+  borderColor = "border-console-border",
+  accentColor = "bg-console-blue",
 }: {
   title: string;
   subtitle?: string;
@@ -28,16 +28,16 @@ export function ReportBlock({
   accentColor?: string;
 }) {
   return (
-    <div className={`relative border ${borderColor} bg-[#111827] p-4 rounded overflow-hidden`}>
+    <div className={`relative border ${borderColor} bg-console-surface p-4 rounded overflow-hidden`}>
       <div className={`absolute top-0 left-0 h-full w-0.5 ${accentColor}`} />
-      <div className="flex items-center justify-between border-b border-[#263548]/30 pb-2 mb-3">
+      <div className="flex items-center justify-between border-b border-console-border/30 pb-2 mb-3">
         <div className="font-mono">
-          <h3 className="text-xs font-bold text-white uppercase tracking-wider">{title}</h3>
-          {subtitle && <p className="text-[9px] text-[#94A3B8]">{subtitle}</p>}
+          <h3 className="text-xs font-bold text-console-text uppercase tracking-wider">{title}</h3>
+          {subtitle && <p className="text-[9px] text-console-muted">{subtitle}</p>}
         </div>
         {badge}
       </div>
-      <div className="text-xs text-[#94A3B8] leading-relaxed space-y-2">{children}</div>
+      <div className="text-xs text-console-muted leading-relaxed space-y-2">{children}</div>
     </div>
   );
 }
@@ -45,13 +45,13 @@ export function ReportBlock({
 // Tactical section headers
 export function ReportSectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className="flex items-center gap-2 border-b border-[#263548] pb-1 my-4 font-mono">
-      <span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6] animate-pulse" />
-      <span className="text-[10px] font-bold uppercase tracking-widest text-[#06B6D4]">
+    <div className="flex items-center gap-2 border-b border-console-border pb-1 my-4 font-mono">
+      <span className="h-1.5 w-1.5 rounded-full bg-console-blue animate-pulse" />
+      <span className="text-[10px] font-bold uppercase tracking-widest text-console-cyan">
         {title}
       </span>
       {subtitle && (
-        <span className="text-[8px] text-[#94A3B8]/60 uppercase ml-auto">({subtitle})</span>
+        <span className="text-[8px] text-console-muted/60 uppercase ml-auto">({subtitle})</span>
       )}
     </div>
   );
@@ -62,9 +62,9 @@ export function ReportMetaGrid({ items }: { items: { label: string; value: React
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 font-mono text-[10px]">
       {items.map((item, idx) => (
-        <div key={idx} className="border border-[#263548]/30 p-2 bg-[#0B1220] rounded">
-          <div className="text-[#94A3B8]/50 uppercase text-[8px]">{item.label}</div>
-          <div className="text-white font-semibold truncate mt-0.5">{item.value}</div>
+        <div key={idx} className="border border-console-border/30 p-2 bg-console-deep rounded">
+          <div className="text-console-muted/50 uppercase text-[8px]">{item.label}</div>
+          <div className="text-console-text font-semibold truncate mt-0.5">{item.value}</div>
         </div>
       ))}
     </div>
@@ -78,10 +78,10 @@ export function ThreatLevelBadge({
   level: "low" | "medium" | "high" | "critical" | string;
 }) {
   const styles: Record<string, string> = {
-    low: "bg-[#22C55E]/10 border-[#22C55E]/20 text-[#22C55E]",
-    medium: "bg-[#3B82F6]/10 border-[#3B82F6]/20 text-[#3B82F6]",
-    high: "bg-[#F59E0B]/10 border-[#F59E0B]/20 text-[#F59E0B]",
-    critical: "bg-[#EF4444]/10 border-[#EF4444]/20 text-[#EF4444]",
+    low: "bg-console-live/10 border-console-live/20 text-console-live",
+    medium: "bg-console-blue/10 border-console-blue/20 text-console-blue",
+    high: "bg-console-amber/10 border-console-amber/20 text-console-amber",
+    critical: "bg-console-red/10 border-console-red/20 text-console-red",
   };
   const label = (level || "low").toUpperCase();
   return (

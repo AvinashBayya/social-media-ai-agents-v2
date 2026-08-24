@@ -35,9 +35,24 @@
 
 import { graticuleStepDegrees } from "@/utils/geo";
 
-/** Sea colour behind the vector basemap. Leaflet's own CSS paints #ddd. */
-export const MAP_BACKGROUND = "#0B1220";
+/**
+ * Sea colour behind the vector basemap. Leaflet's own CSS paints #ddd.
+ * Theme-reactive (a plain DOM `style={{ background }}`, not canvas) —
+ * without this, the map would render a literal dark rectangle in light
+ * mode while everything around it went light, an obvious visible "hole".
+ */
+export const MAP_BACKGROUND = "var(--console-deep)";
 
+/**
+ * LAND_FILL/COAST_STROKE/GRATICULE_STROKE paint via Leaflet's Canvas2D
+ * renderer (`ctx.fillStyle`/`ctx.strokeStyle` in addOfflineBasemap/
+ * addGraticule below) — Canvas2D does not resolve `var(...)`, unlike DOM/SVG
+ * inline styles, so these stay literal hex and are deliberately excluded
+ * from the light/dark migration (matching a chart palette or basemap tile
+ * set, which conventionally doesn't invert with the app's own theme either).
+ * Making these theme-reactive would need a `getComputedStyle` read at draw
+ * time plus a redraw-on-theme-change listener, not a simple value swap.
+ */
 const LAND_FILL = "#16213A";
 const COAST_STROKE = "#31435F";
 const GRATICULE_STROKE = "#1C2A3E";
@@ -71,6 +86,36 @@ export const CARTO_DARK: TileProvider = {
   attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
   maxZoom: 19,
 };
+
+/**
+ * The networked tile provider is config-driven, not hardcoded to CARTO. No
+ * provider is wired into this codebase beyond CARTO today — earlier planning
+ * assumed Mappls had already been chosen and integrated; it has not (verified
+ * live: zero references anywhere in src/ or .env.example). Rather than block
+ * on obtaining a Mappls account/key, CARTO stays the tested, working default
+ * and a self-hosted or alternative provider (Mappls included) can be dropped
+ * in via env vars with no code change — the same "config, never code"
+ * discipline llm.ts uses for its provider swap.
+ *
+ * VITE_ prefix: these are read in the browser (the tile request itself is a
+ * client-side fetch, same as CARTO_DARK always was), so Vite must inline them
+ * at build time.
+ */
+export function resolveTileProvider(): TileProvider {
+  const env = (import.meta as any).env ?? {};
+  const urlTemplate = env.VITE_GIS_TILE_URL_TEMPLATE;
+  if (typeof urlTemplate !== "string" || !urlTemplate.trim()) return CARTO_DARK;
+
+  return {
+    id: env.VITE_GIS_TILE_ID || "custom",
+    host: env.VITE_GIS_TILE_HOST || "unspecified host",
+    operator: env.VITE_GIS_TILE_OPERATOR || "unspecified operator",
+    urlTemplate,
+    pathTemplate: env.VITE_GIS_TILE_PATH_TEMPLATE || CARTO_DARK.pathTemplate,
+    attribution: env.VITE_GIS_TILE_ATTRIBUTION || "attribution not configured (VITE_GIS_TILE_ATTRIBUTION unset)",
+    maxZoom: Number(env.VITE_GIS_TILE_MAX_ZOOM) || 19,
+  };
+}
 
 // ─── Leaflet itself ────────────────────────────────────────────────────────
 

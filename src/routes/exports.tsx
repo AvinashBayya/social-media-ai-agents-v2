@@ -38,7 +38,7 @@ export const Route = createFileRoute("/exports")({
   component: ExportsPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 const STORE_KEY = "sentinel_products";
 
 function loadProducts(): IntelligenceProduct[] {
@@ -186,15 +186,15 @@ function ExportsPage() {
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         <Card className={CARD}>
           <CardContent className="p-4">
-            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-              <Archive className="size-3.5 text-[#3B82F6]" />
+            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+              <Archive className="size-3.5 text-console-blue" />
               Products ({products.length})
             </h3>
 
             {products.length === 0 ? (
-              <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
+              <p className="mt-3 text-[11px] leading-relaxed text-console-label">
                 No products yet. Generate one on the{" "}
-                <a href="/reports" className="text-[#3B82F6] hover:underline">
+                <a href="/reports" className="text-console-blue hover:underline">
                   Report Generator
                 </a>{" "}
                 page. This page deliberately does not generate anything of its own — a second
@@ -209,15 +209,15 @@ function ExportsPage() {
                     onClick={() => setSelectedId(p.id)}
                     className={`w-full rounded border p-2 text-left ${
                       selectedId === p.id
-                        ? "border-[#3B82F6]/60 bg-[#3B82F6]/10"
-                        : "border-[#263548] bg-[#0B1220]/60"
+                        ? "border-console-blue/60 bg-console-blue/10"
+                        : "border-console-border bg-console-deep/60"
                     }`}
                   >
-                    <span className="block truncate text-[11px] font-semibold text-white">
+                    <span className="block truncate text-[11px] font-semibold text-console-text">
                       {p.typeLabel}
                     </span>
-                    <span className="block truncate text-[10px] text-[#94A3B8]">{p.subject}</span>
-                    <span className="block font-mono text-[9px] text-[#64748B]">
+                    <span className="block truncate text-[10px] text-console-muted">{p.subject}</span>
+                    <span className="block font-mono text-[9px] text-console-label">
                       {p.provenance.generatedAt.slice(0, 16).replace("T", " ")} · {p.sources.length}{" "}
                       sources · {p.provenance.model}
                     </span>
@@ -234,16 +234,16 @@ function ExportsPage() {
               <Card className={CARD}>
                 <CardContent className="p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-white">{product.typeLabel}</span>
+                    <span className="text-sm font-bold text-console-text">{product.typeLabel}</span>
                     <Badge
                       variant="outline"
-                      className="border-[#F59E0B]/40 bg-[#F59E0B]/10 font-mono text-[9px] font-normal text-[#F59E0B]"
+                      className="border-console-amber/40 bg-console-amber/10 font-mono text-[9px] font-normal text-console-amber"
                     >
                       {product.classification}
                     </Badge>
                     <Badge
                       variant="outline"
-                      className="border-[#8B5CF6]/40 bg-[#8B5CF6]/10 font-mono text-[9px] font-normal text-[#8B5CF6]"
+                      className="border-console-purple/40 bg-console-purple/10 font-mono text-[9px] font-normal text-console-purple"
                       title="Open-source model — PS-18 §6.5 names this requirement explicitly"
                     >
                       {product.provenance.model}
@@ -252,36 +252,36 @@ function ExportsPage() {
 
                   <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px] sm:grid-cols-3">
                     <div>
-                      <dt className="text-[#64748B]">Subject</dt>
-                      <dd className="truncate text-white">{product.subject}</dd>
+                      <dt className="text-console-label">Subject</dt>
+                      <dd className="truncate text-console-text">{product.subject}</dd>
                     </div>
                     <div>
-                      <dt className="text-[#64748B]">Sources cited</dt>
-                      <dd className="text-white">{product.sources.length}</dd>
+                      <dt className="text-console-label">Sources cited</dt>
+                      <dd className="text-console-text">{product.sources.length}</dd>
                     </div>
                     <div>
-                      <dt className="text-[#64748B]">Mean credibility</dt>
-                      <dd className="text-white">
+                      <dt className="text-console-label">Mean credibility</dt>
+                      <dd className="text-console-text">
                         {meanCredibility === null
                           ? "not scorable"
                           : `${(meanCredibility * 100).toFixed(0)}% (${bandFor(meanCredibility).label})`}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-[#64748B]">Key judgements</dt>
-                      <dd className="text-white">{product.keyJudgements.length}</dd>
+                      <dt className="text-console-label">Key judgements</dt>
+                      <dd className="text-console-text">{product.keyJudgements.length}</dd>
                     </div>
                     <div>
-                      <dt className="text-[#64748B]">Intelligence gaps</dt>
-                      <dd className="text-white">{product.gaps.length}</dd>
+                      <dt className="text-console-label">Intelligence gaps</dt>
+                      <dd className="text-console-text">{product.gaps.length}</dd>
                     </div>
                     <div>
-                      <dt className="text-[#64748B]">Modules</dt>
-                      <dd className="truncate text-white">{product.provenance.modules.length}</dd>
+                      <dt className="text-console-label">Modules</dt>
+                      <dd className="truncate text-console-text">{product.provenance.modules.length}</dd>
                     </div>
                   </dl>
 
-                  <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+                  <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-label">
                     <Info className="mt-px size-3 shrink-0" />
                     No subject risk score is exported. Nothing in this system computes one, and a
                     number printed under a classification header reads as a measurement — which is
@@ -292,19 +292,19 @@ function ExportsPage() {
 
               <Card className={CARD}>
                 <CardContent className="p-4">
-                  <h3 className="text-xs font-bold uppercase text-white">Export format</h3>
+                  <h3 className="text-xs font-bold uppercase text-console-text">Export format</h3>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {FORMATS.map((f) => {
                       const Icon = f.icon;
                       return (
                         <Card
                           key={f.id}
-                          className="flex flex-col justify-between border-[#263548] bg-[#0B1220] p-3"
+                          className="flex flex-col justify-between border-console-border bg-console-deep p-3"
                         >
                           <div>
-                            <Icon className="size-5 text-[#10B981]" />
-                            <div className="mt-1.5 text-xs font-bold text-white">{f.name}</div>
-                            <div className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                            <Icon className="size-5 text-console-green" />
+                            <div className="mt-1.5 text-xs font-bold text-console-text">{f.name}</div>
+                            <div className="mt-0.5 text-[10px] leading-relaxed text-console-muted">
                               {f.desc}
                             </div>
                           </div>
@@ -312,7 +312,7 @@ function ExportsPage() {
                             size="sm"
                             disabled={busy !== null}
                             onClick={() => doExport(f.id)}
-                            className="mt-2 h-7 w-full gap-1.5 bg-[#10B981] text-[10px] font-bold text-black hover:bg-[#059669]"
+                            className="mt-2 h-7 w-full gap-1.5 bg-console-green text-[10px] font-bold text-console-accent-foreground hover:bg-console-green-hover"
                           >
                             {busy === f.id ? (
                               <Loader2 className="size-3 animate-spin" />
@@ -327,9 +327,9 @@ function ExportsPage() {
                   </div>
 
                   {error && (
-                    <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                      <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                      <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                    <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                      <div className="font-mono text-[10px] leading-relaxed text-console-red">
                         <span className="font-bold">Export failed. No file was written.</span>
                         <div className="pt-0.5 opacity-80">{error}</div>
                       </div>
@@ -340,15 +340,15 @@ function ExportsPage() {
 
               <Card className={CARD}>
                 <CardContent className="p-4">
-                  <h3 className="text-xs font-bold uppercase text-white">
+                  <h3 className="text-xs font-bold uppercase text-console-text">
                     Sources carried into the export
                   </h3>
                   <ol className="mt-2 space-y-1.5">
                     {product.sources.map((s) => (
                       <li key={s.n} className="text-[10px] leading-relaxed">
-                        <span className="font-mono text-[#3B82F6]">[{s.n}]</span>{" "}
-                        <span className="text-[#F3F4F6]">{s.title}</span>
-                        <div className="pl-6 text-[9px] text-[#94A3B8]">
+                        <span className="font-mono text-console-blue">[{s.n}]</span>{" "}
+                        <span className="text-console-text">{s.title}</span>
+                        <div className="pl-6 text-[9px] text-console-muted">
                           {s.outlet} · {s.module} ·{" "}
                           {s.credibility === null
                             ? "credibility not scored"
@@ -363,7 +363,7 @@ function ExportsPage() {
           ) : (
             products.length > 0 && (
               <Card className={CARD}>
-                <CardContent className="p-10 text-center text-[11px] text-[#64748B]">
+                <CardContent className="p-10 text-center text-[11px] text-console-label">
                   Select a product to export.
                 </CardContent>
               </Card>

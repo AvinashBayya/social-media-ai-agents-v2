@@ -15,3 +15,4 @@ export * from "./merge";
 export * from "./orchestrator";
 export * from "./jobs";
 export * from "./entity-resolution";
+export * from "./gaps";

@@ -1,16 +1,35 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/workspace-ui";
-import { Search, ZoomIn, ZoomOut, X, Trash2, Network, Waypoints, Download } from "lucide-react";
-import { clearGraphSnapshot, readGraphSnapshot, type GraphSnapshot } from "@/utils/graph-store";
+import {
+  Search,
+  ZoomIn,
+  ZoomOut,
+  X,
+  Trash2,
+  Network,
+  Waypoints,
+  Download,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
+import { clearGraphSnapshot, readGraphSnapshot, saveGraphSnapshot, type GraphSnapshot } from "@/utils/graph-store";
 import { layoutRadial, shortestPath } from "@/utils/graph-layout";
 import { toMaltegoCsv } from "@/utils/maltego-export";
 import type { EntityType } from "@/utils/collectors/result";
+import { getActiveTarget } from "@/utils/active-target";
+import {
+  startOsintInvestigationJob,
+  pollOsintInvestigationJob,
+  type InvestigationPoll,
+} from "@/utils/osint/jobs";
+
+const POLL_INTERVAL_MS = 1200;
 
 export const Route = createFileRoute("/graph")({
   head: () => ({ meta: [{ title: "Knowledge Graph — Sentinel AI" }] }),
@@ -60,10 +79,84 @@ function Page() {
   const [zoom, setZoom] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // "Generate" — runs the SAME real OSINT investigation /recon's
+  // "OSINT Investigation" panel does (startOsintInvestigationJob +
+  // pollOsintInvestigationJob, the real collector job pipeline), just
+  // triggered directly from /graph instead of requiring a trip to /recon
+  // and a manual "View in Graph". Every entity/relationship this produces
+  // is real collector output — nothing here invents graph content; an
+  // earlier ask for an AI-generated graph was declined for exactly that
+  // reason (see the chat writeup).
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+  const [generatePoll, setGeneratePoll] = useState<InvestigationPoll | null>(null);
+  const [generateTarget, setGenerateTarget] = useState("");
+  const generateStoppedRef = useRef(false);
+
   // Client-only: the snapshot lives in localStorage, which does not exist during SSR.
   useEffect(() => {
     setSnapshot(readGraphSnapshot());
     setReady(true);
+  }, []);
+
+  const runGenerate = async () => {
+    const target = getActiveTarget().trim();
+    if (!target) {
+      setGenerateError("No active target set — set one from the search bar above first.");
+      return;
+    }
+    setGenerating(true);
+    setGenerateError("");
+    setGeneratePoll(null);
+    setGenerateTarget(target);
+    generateStoppedRef.current = false;
+    try {
+      const started = await startOsintInvestigationJob({ data: { target } });
+      const tick = async (): Promise<void> => {
+        let data: InvestigationPoll;
+        try {
+          data = await pollOsintInvestigationJob({ data: { investigationId: started.investigationId } });
+        } catch (err) {
+          if (generateStoppedRef.current) return;
+          setGenerateError(err instanceof Error ? err.message : String(err));
+          setGenerating(false);
+          return;
+        }
+        if (generateStoppedRef.current) return;
+        setGeneratePoll(data);
+        if (!data.done) {
+          setTimeout(tick, POLL_INTERVAL_MS);
+          return;
+        }
+        setGenerating(false);
+        if (data.entities.length === 0) {
+          setGenerateError(
+            `Investigation for "${target}" completed but returned 0 entities` +
+              (data.errors.length > 0 ? `: ${data.errors.join("; ")}` : " — nothing to graph."),
+          );
+          return;
+        }
+        saveGraphSnapshot({
+          investigationId: started.investigationId,
+          target,
+          savedAt: new Date().toISOString(),
+          entities: data.entities,
+          relationships: data.relationships,
+        });
+        setSnapshot(readGraphSnapshot());
+        setSelectedId(null);
+      };
+      void tick();
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : String(err));
+      setGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      generateStoppedRef.current = true;
+    };
   }, []);
 
   const entities = useMemo(() => snapshot?.entities ?? [], [snapshot]);
@@ -96,6 +189,13 @@ function Page() {
     () => relationships.filter((r) => shownIds.has(r.sourceEntity) && shownIds.has(r.targetEntity)),
     [relationships, shownIds],
   );
+
+  const generateJobsSummary = useMemo(() => {
+    const jobs = generatePoll?.jobs ?? [];
+    if (jobs.length === 0) return null;
+    const done = jobs.filter((j) => j.status !== "queued" && j.status !== "running").length;
+    return { done, total: jobs.length };
+  }, [generatePoll]);
 
   const matched = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -159,6 +259,34 @@ function Page() {
     URL.revokeObjectURL(url);
   };
 
+  const generateButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={runGenerate}
+      disabled={generating}
+      className="h-7 gap-1.5 px-3 font-mono text-[10px] font-bold uppercase tracking-wider"
+    >
+      {generating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+      {generating ? "Generating…" : "Generate"}
+    </Button>
+  );
+
+  // Real progress from the real job poll — `generateJobsSummary` counts
+  // actual terminal-status collector jobs, never a guessed fraction (see
+  // `InvestigationJob.progress`'s own null-while-running rule in job-store.ts).
+  const generateStatus = (generating || generateError) && (
+    <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+      {generating && (
+        <span>
+          Running a real OSINT investigation for <span className="font-bold">{generateTarget}</span>
+          {generateJobsSummary ? ` — ${generateJobsSummary.done}/${generateJobsSummary.total} collectors done` : "…"}
+        </span>
+      )}
+      {generateError && <span className="text-destructive">{generateError}</span>}
+    </div>
+  );
+
   if (!ready) return null;
 
   if (!snapshot || entities.length === 0) {
@@ -170,14 +298,16 @@ function Page() {
         />
         <div className="px-6 pt-4">
           <EmptyState
-            icon={<Network className="mx-auto mb-1.5 size-5 text-[#F59E0B]" />}
+            icon={<Network className="mx-auto mb-1.5 size-5 text-console-amber" />}
             title="No Investigation Loaded"
-            message='Run an investigation on Recon and click "View in Graph" — this page renders only what that investigation actually returned, nothing seeded.'
+            message='Run an investigation on Recon and click "View in Graph", or press Generate below to run one for the current target directly — this page renders only what a real investigation actually returned, nothing seeded.'
           />
-          <div className="mt-3 text-center">
+          <div className="mt-3 flex flex-col items-center gap-2">
+            {generateButton}
+            {generateStatus}
             <Link
               to="/recon"
-              className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#3B82F6] hover:underline"
+              className="font-mono text-[10px] font-bold uppercase tracking-wider text-console-blue hover:underline"
             >
               Go to Recon →
             </Link>
@@ -193,7 +323,8 @@ function Page() {
         title="Knowledge Graph"
         description="Explore relationships between people, organizations, places, and digital identifiers."
       />
-      <div className="mx-6 mt-4 flex items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
+      <div className="mx-6 mt-4">
+      <div className="flex items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
         <span>
           Investigation of <span className="font-bold text-foreground">{snapshot.target}</span> ·{" "}
           {entities.length} entities · {relationships.length} relationships
@@ -203,6 +334,7 @@ function Page() {
           {new Date(snapshot.savedAt).toLocaleString()}
         </span>
         <div className="flex items-center gap-1">
+          {generateButton}
           <Button
             variant="ghost"
             size="sm"
@@ -223,6 +355,8 @@ function Page() {
             Clear
           </Button>
         </div>
+      </div>
+      {generateStatus}
       </div>
       <div className="grid gap-4 px-0 lg:grid-cols-[1fr_320px]">
         <Card className="mx-6">
@@ -289,26 +423,22 @@ function Page() {
                   const a = nodeById.get(rel.sourceEntity);
                   const b = nodeById.get(rel.targetEntity);
                   if (!a || !b) return null;
+                  // The relationship-type label used to render at every edge's
+                  // midpoint — with several edges converging on one root, their
+                  // labels stacked on top of each other and the root's own
+                  // label right in the center. Dropped from the canvas; the
+                  // type is still real and still visible per-edge in the
+                  // selected node's shortest-path detail below.
                   return (
-                    <g key={i}>
-                      <line
-                        x1={a.x}
-                        y1={a.y}
-                        x2={b.x}
-                        y2={b.y}
-                        stroke="oklch(0.75 0.03 245)"
-                        strokeWidth="1.5"
-                      />
-                      <text
-                        x={(a.x + b.x) / 2}
-                        y={(a.y + b.y) / 2 - 4}
-                        textAnchor="middle"
-                        fontSize="8"
-                        fill="oklch(0.5 0.02 250)"
-                      >
-                        {rel.relationshipType}
-                      </text>
-                    </g>
+                    <line
+                      key={i}
+                      x1={a.x}
+                      y1={a.y}
+                      x2={b.x}
+                      y2={b.y}
+                      stroke="oklch(0.75 0.03 245)"
+                      strokeWidth="1.5"
+                    />
                   );
                 })}
                 {shownNodes.map((n) => {

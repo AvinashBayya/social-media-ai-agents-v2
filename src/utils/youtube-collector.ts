@@ -337,6 +337,26 @@ export function captionTracksToLangs(tracks: CaptionTrack[]): YoutubeSubLang[] {
   return tracks.map((t) => ({ code: t.languageCode, name: t.name, isAuto: t.isAuto }));
 }
 
+/**
+ * Picks the track for a language, optionally pinned to the manual/auto
+ * variant. Some videos carry both a manual and an auto-generated ("asr")
+ * track for the same languageCode; without `preferAuto`, the two are
+ * indistinguishable by language code alone and this always returns whichever
+ * one YouTube listed first (in practice, the manual track) — fine for a
+ * caller that only ever asked for "a language," wrong for a caller that
+ * specifically asked for the auto-generated one. When `preferAuto` is given,
+ * both the exact-code and language-family fallback each require an isAuto
+ * match too, so the wrong variant is never silently substituted.
+ */
+function findTrack(tracks: CaptionTrack[], lang: string, preferAuto?: boolean): CaptionTrack | null {
+  const isAutoOk = (t: CaptionTrack) => preferAuto === undefined || t.isAuto === preferAuto;
+  return (
+    tracks.find((t) => t.languageCode === lang && isAutoOk(t)) ??
+    tracks.find((t) => t.languageCode.split("-")[0] === lang.split("-")[0] && isAutoOk(t)) ??
+    null
+  );
+}
+
 // ─── Subtitle parsing ─────────────────────────────────────────────────────────
 
 const ENTITIES: Record<string, string> = {
@@ -508,6 +528,105 @@ async function fetchMicroformat(videoId: string): Promise<any | null> {
     return json?.microformat?.playerMicroformatRenderer ?? null;
   } catch {
     return null;
+  }
+}
+
+export interface YoutubeSearchResult {
+  videoId: string;
+  title: string;
+  channel: string | null;
+  /**
+   * YouTube's own relative phrasing from the search results page ("3 days
+   * ago"), not an absolute date — search results don't carry one (only
+   * per-video microformat data does, via fetchMicroformat above), so this is
+   * shown as-is rather than converted into a fabricated ISO timestamp.
+   */
+  publishedTimeText: string | null;
+  duration: string | null;
+  /** A real youtube.com/watch?v=... URL, built from the real videoId. */
+  url: string;
+}
+
+const INNERTUBE_SEARCH_URL = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false";
+
+/**
+ * Real YouTube video search via the same reverse-engineered InnerTube
+ * endpoint youtube.com's own search page calls internally — no API key, and
+ * not the same credential as YOUTUBE_API_KEY (that is only for the official
+ * Data API v3 comments endpoint below). Verified live 2026-08-18: a plain
+ * POST carrying just a WEB client context returns a full, real result page,
+ * fully unauthenticated.
+ *
+ * This exists because there is no other free way to discover a *specific*,
+ * *playable* video URL for a search term. A Google News search restricted to
+ * `site:youtube.com` does find real, relevant videos, but is unusable for
+ * this purpose: Google News' `<link>` is always its own redirect
+ * (`news.google.com/rss/articles/...`), and the item's `<source url>` is
+ * just the bare `"https://www.youtube.com"` domain — enough to rate the
+ * publisher (which is all `rss-source.ts`'s `publisherUrlsFromRss` was ever
+ * built for) but not enough to identify one video. The redirect itself
+ * resolves client-side via JavaScript, not a server-side 3xx a plain fetch
+ * can follow — confirmed live: it round-trips to the same news.google.com
+ * host. InnerTube search returns the real videoId directly, so this is a
+ * genuinely different, more capable path, not a variant of the news search.
+ */
+export async function searchYoutubeVideos(
+  query: string,
+): Promise<{ results: YoutubeSearchResult[]; error: string | null }> {
+  const q = query.trim();
+  if (!q) return { results: [], error: null };
+
+  try {
+    const res = await fetch(INNERTUBE_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+      },
+      body: JSON.stringify({
+        query: q,
+        context: {
+          client: { clientName: "WEB", clientVersion: "2.20250312.04.00", hl: "en", gl: "US" },
+        },
+      }),
+      signal: AbortSignal.timeout(INNERTUBE_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return { results: [], error: `YouTube search returned HTTP ${res.status}.` };
+    }
+
+    const json: any = await res.json();
+    const sections =
+      json?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
+        ?.contents ?? [];
+
+    const results: YoutubeSearchResult[] = [];
+    for (const section of sections) {
+      const items = section?.itemSectionRenderer?.contents ?? [];
+      for (const item of items) {
+        const v = item?.videoRenderer;
+        const videoId = v?.videoId;
+        if (typeof videoId !== "string" || !videoId) continue;
+
+        const title = Array.isArray(v.title?.runs)
+          ? v.title.runs.map((r: any) => r?.text ?? "").join("")
+          : "";
+
+        results.push({
+          videoId,
+          title: title || "(untitled)",
+          channel: v.ownerText?.runs?.[0]?.text ?? null,
+          publishedTimeText: v.publishedTimeText?.simpleText ?? null,
+          duration: v.lengthText?.simpleText ?? null,
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+        });
+      }
+    }
+
+    return { results, error: null };
+  } catch (err: any) {
+    return { results: [], error: err?.message ?? String(err) };
   }
 }
 
@@ -697,6 +816,7 @@ async function _getMetadata(url: string): Promise<ServerResponse<YoutubeMetadata
 async function _getSubtitles(
   url: string,
   lang = "en",
+  preferAuto?: boolean,
 ): Promise<ServerResponse<YoutubeSubtitlesResponse>> {
   if (!isYoutubeUrl(url)) {
     return { success: false, error: "SubsUnavailable", cause: "Invalid YouTube URL." };
@@ -731,17 +851,15 @@ async function _getSubtitles(
     };
   }
 
-  const track =
-    tracks.find((t) => t.languageCode === lang) ??
-    tracks.find((t) => t.languageCode.split("-")[0] === lang.split("-")[0]) ??
-    null;
+  const track = findTrack(tracks, lang, preferAuto);
 
   if (!track) {
-    const offered = tracks.map((t) => `${t.languageCode} (${t.name})`).join(", ");
+    const offered = tracks.map((t) => `${t.languageCode} (${t.isAuto ? "auto" : "manual"})`).join(", ");
+    const variant = preferAuto === undefined ? "" : preferAuto ? " (auto-generated)" : " (manual)";
     return {
       success: false,
       error: "SubsUnavailable",
-      cause: `Video '${videoId}' has captions, but not in '${lang}'. Available: ${offered}.`,
+      cause: `Video '${videoId}' has captions, but not in '${lang}'${variant}. Available: ${offered}.`,
     };
   }
 
@@ -1105,6 +1223,10 @@ export async function fetchYoutubeComments(
 
 // ─── TanStack Start Server Functions ─────────────────────────────────────────
 
+export const serverSearchYoutubeVideos = createServerFn({ method: "POST" })
+  .validator((data: { query: string }) => data)
+  .handler(async ({ data }) => searchYoutubeVideos(data.query));
+
 export const serverFetchYoutubeComments = createServerFn({ method: "POST" })
   .validator((data: { videoId: string; limit?: number; pageToken?: string }) => data)
   .handler(async ({ data }) => fetchYoutubeComments(data.videoId, data.limit, data.pageToken));
@@ -1114,8 +1236,8 @@ export const serverFetchYoutubeMetadata = createServerFn({ method: "POST" })
   .handler(async ({ data }) => _getMetadata(data.url));
 
 export const serverFetchYoutubeSubtitles = createServerFn({ method: "POST" })
-  .validator((data: { url: string; lang?: string }) => data)
-  .handler(async ({ data }) => _getSubtitles(data.url, data.lang ?? "en"));
+  .validator((data: { url: string; lang?: string; isAuto?: boolean }) => data)
+  .handler(async ({ data }) => _getSubtitles(data.url, data.lang ?? "en", data.isAuto));
 
 export const serverDownloadYoutubeVideo = createServerFn({ method: "POST" })
   .validator((data: { url: string; quality?: string }) => data)

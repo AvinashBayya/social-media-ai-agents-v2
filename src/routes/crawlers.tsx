@@ -28,19 +28,19 @@ export const Route = createFileRoute("/crawlers")({
   component: CrawlersPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 const TONE: Record<CollectorProbe["status"], { label: string; cls: string }> = {
-  reachable: { label: "Reachable", cls: "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30" },
-  refused: { label: "Refused us", cls: "bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30" },
-  unreachable: { label: "No response", cls: "bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30" },
+  reachable: { label: "Reachable", cls: "bg-console-green/10 text-console-green border-console-green/30" },
+  refused: { label: "Refused us", cls: "bg-console-amber/10 text-console-amber border-console-amber/30" },
+  unreachable: { label: "No response", cls: "bg-console-red/10 text-console-red border-console-red/30" },
   "no-credential": {
     label: "Needs credential",
-    cls: "bg-[#8B5CF6]/10 text-[#8B5CF6] border-[#8B5CF6]/30",
+    cls: "bg-console-purple/10 text-console-purple border-console-purple/30",
   },
   "not-probeable": {
     label: "Not probed",
-    cls: "bg-[#64748B]/10 text-[#94A3B8] border-[#64748B]/30",
+    cls: "bg-console-label/10 text-console-muted border-console-label/30",
   },
 };
 
@@ -79,7 +79,7 @@ function CrawlersPage() {
       <div className="space-y-4 p-6 font-mono text-xs">
         <Card className={`${CARD} p-4`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-[#94A3B8]">
+            <span className="text-console-muted">
               {probes
                 ? `${probes.length} collectors probed${ranAt ? ` at ${ranAt}` : ""}`
                 : busy
@@ -90,7 +90,7 @@ function CrawlersPage() {
               size="sm"
               onClick={run}
               disabled={busy}
-              className="h-7 rounded bg-[#06B6D4] px-3 text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+              className="h-7 rounded bg-console-cyan px-3 text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90"
             >
               {busy ? (
                 <Loader2 className="size-3 animate-spin" />
@@ -101,7 +101,7 @@ function CrawlersPage() {
               )}
             </Button>
           </div>
-          <p className="pt-2 text-[10px] leading-relaxed text-[#64748B]">
+          <p className="pt-2 text-[10px] leading-relaxed text-console-label">
             Each row is the result of a request made when you loaded this page. No throughput,
             uptime or polling cadence is shown because nothing measures them — this container scales
             to zero and holds no process between requests. A collector that refuses us is reported
@@ -110,9 +110,9 @@ function CrawlersPage() {
         </Card>
 
         {error && (
-          <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
-            <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-            <span className="text-[11px] leading-relaxed text-[#EF4444]">
+          <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-3">
+            <AlertTriangle className="size-4 shrink-0 text-console-red" />
+            <span className="text-[11px] leading-relaxed text-console-red">
               Probe run failed: {error}
             </span>
           </div>
@@ -122,8 +122,8 @@ function CrawlersPage() {
           {probes?.map((p) => (
             <Card key={p.id} className={`${CARD} space-y-2 p-4`}>
               <div className="flex items-start justify-between gap-2">
-                <span className="flex items-center gap-2 font-bold text-[#F3F4F6]">
-                  <Cpu className="size-4 shrink-0 text-[#06B6D4]" />
+                <span className="flex items-center gap-2 font-bold text-console-text">
+                  <Cpu className="size-4 shrink-0 text-console-cyan" />
                   {p.name}
                 </span>
                 <Badge className={`shrink-0 border text-[9px] uppercase ${TONE[p.status].cls}`}>
@@ -132,23 +132,23 @@ function CrawlersPage() {
               </div>
 
               <div className="space-y-1 text-[10px]">
-                <div className="text-[#94A3B8]">
-                  <span className="text-[#64748B]">Module: </span>
+                <div className="text-console-muted">
+                  <span className="text-console-label">Module: </span>
                   {p.module}
                 </div>
-                <div className="break-all text-[#94A3B8]">
-                  <span className="text-[#64748B]">Endpoint: </span>
+                <div className="break-all text-console-muted">
+                  <span className="text-console-label">Endpoint: </span>
                   {p.endpoint}
                 </div>
                 {/* null latency means no response arrived — not a fast zero. */}
-                <div className="text-[#94A3B8]">
-                  <span className="text-[#64748B]">Response: </span>
+                <div className="text-console-muted">
+                  <span className="text-console-label">Response: </span>
                   {p.httpStatus === null ? "none" : `HTTP ${p.httpStatus}`}
                   {p.latencyMs !== null && ` · ${p.latencyMs} ms`}
                 </div>
               </div>
 
-              <p className="border-t border-[#263548]/40 pt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="border-t border-console-border/40 pt-2 text-[10px] leading-relaxed text-console-label">
                 {p.detail}
               </p>
             </Card>
@@ -156,7 +156,7 @@ function CrawlersPage() {
         </div>
 
         {probes?.length === 0 && (
-          <Card className={`${CARD} p-10 text-center text-[#94A3B8]`}>
+          <Card className={`${CARD} p-10 text-center text-console-muted`}>
             No collectors registered.
           </Card>
         )}

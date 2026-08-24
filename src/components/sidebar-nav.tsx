@@ -150,7 +150,7 @@ export function SidebarNav({ groups, pathname }: { groups: NavGroup[]; pathname:
                 <button
                   type="button"
                   onFocus={() => handleEnter(group.label)}
-                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]/60 transition-colors hover:bg-[#111827]/60 hover:text-[#94A3B8] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#3B82F6] group-data-[collapsible=icon]:hidden"
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-console-muted/60 transition-colors hover:bg-console-surface/60 hover:text-console-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-console-blue group-data-[collapsible=icon]:hidden"
                 >
                   <ChevronRight
                     className={`size-3 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
@@ -158,7 +158,7 @@ export function SidebarNav({ groups, pathname }: { groups: NavGroup[]; pathname:
                   <span className="flex-1 text-left">{t(group.label)}</span>
                   {/* Marks the module you're currently inside when it's closed. */}
                   {holdsActive && !open && (
-                    <span className="size-1.5 shrink-0 rounded-full bg-[#06B6D4]" />
+                    <span className="size-1.5 shrink-0 rounded-full bg-console-cyan" />
                   )}
                 </button>
               </CollapsibleTrigger>
@@ -176,13 +176,13 @@ export function SidebarNav({ groups, pathname }: { groups: NavGroup[]; pathname:
                             tooltip={t(item.title)}
                             className={`h-8 rounded border transition-colors ${
                               active
-                                ? "border-[#3B82F6] bg-[#1A2332] font-medium text-[#F3F4F6]"
-                                : "border-transparent text-[#94A3B8] hover:bg-[#111827]/60 hover:text-[#F3F4F6]"
+                                ? "border-console-blue bg-console-elevated font-medium text-console-text"
+                                : "border-transparent text-console-muted hover:bg-console-surface/60 hover:text-console-text"
                             }`}
                           >
                             <Link to={item.to} className="flex items-center gap-2">
                               <item.icon
-                                className={`size-4 ${active ? "text-[#06B6D4]" : "text-[#94A3B8]"}`}
+                                className={`size-4 ${active ? "text-console-cyan" : "text-console-muted"}`}
                               />
                               <span className="text-xs tracking-tight">{t(item.title)}</span>
                             </Link>

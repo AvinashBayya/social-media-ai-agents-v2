@@ -22,11 +22,11 @@ export const Route = createFileRoute("/profile")({
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-b border-[#1A2332] py-2.5 last:border-b-0">
-      <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+    <div className="border-b border-console-elevated py-2.5 last:border-b-0">
+      <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-console-label">
         {label}
       </div>
-      <div className="mt-1 font-mono text-sm text-[#F3F4F6]" data-no-translate>
+      <div className="mt-1 font-mono text-sm text-console-text" data-no-translate>
         {value}
       </div>
     </div>
@@ -61,21 +61,21 @@ function ProfilePage() {
         </div>
 
         {!ready ? (
-          <div className="rounded border border-[#263548] bg-[#111827] p-5 font-mono text-xs text-[#64748B]">
+          <div className="rounded border border-console-border bg-console-surface p-5 font-mono text-xs text-console-label">
             Reading session…
           </div>
         ) : session ? (
           <>
-            <div className="rounded border border-[#263548] bg-[#111827] p-5">
-              <div className="flex items-center gap-3 border-b border-[#1A2332] pb-4">
-                <span className="grid size-11 place-items-center rounded border border-[#3B82F6]/20 bg-[#3B82F6]/10 text-[#3B82F6]">
+            <div className="rounded border border-console-border bg-console-surface p-5">
+              <div className="flex items-center gap-3 border-b border-console-elevated pb-4">
+                <span className="grid size-11 place-items-center rounded border border-console-blue/20 bg-console-blue/10 text-console-blue">
                   <CircleUser className="size-5" />
                 </span>
                 <div>
-                  <div className="text-base font-bold text-[#F3F4F6]" data-no-translate>
+                  <div className="text-base font-bold text-console-text" data-no-translate>
                     {session.displayName}
                   </div>
-                  <div className="font-mono text-[11px] text-[#94A3B8]" data-no-translate>
+                  <div className="font-mono text-[11px] text-console-muted" data-no-translate>
                     {session.email}
                   </div>
                 </div>
@@ -95,11 +95,11 @@ function ProfilePage() {
               </div>
             </div>
 
-            <div className="rounded border border-[#263548] bg-[#111827] p-5">
+            <div className="rounded border border-console-border bg-console-surface p-5">
               <div className="flex items-start gap-2.5">
-                <ShieldOff className="mt-0.5 size-4 shrink-0 text-[#64748B]" />
-                <div className="text-[12px] leading-relaxed text-[#94A3B8]">
-                  <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+                <ShieldOff className="mt-0.5 size-4 shrink-0 text-console-label" />
+                <div className="text-[12px] leading-relaxed text-console-muted">
+                  <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-console-label">
                     Not available in this build
                   </div>
                   <p className="mt-1.5">
@@ -114,7 +114,7 @@ function ProfilePage() {
             <div>
               <Button
                 onClick={handleSignOut}
-                className="gap-2 bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20 font-mono text-xs"
+                className="gap-2 bg-console-red/10 text-console-red border border-console-red/30 hover:bg-console-red/20 font-mono text-xs"
               >
                 <LogOut className="size-3.5" />
                 Sign out
@@ -122,11 +122,11 @@ function ProfilePage() {
             </div>
           </>
         ) : (
-          <div className="rounded border border-[#263548] bg-[#111827] p-5">
-            <p className="text-sm text-[#94A3B8]">No demo session is active.</p>
+          <div className="rounded border border-console-border bg-console-surface p-5">
+            <p className="text-sm text-console-muted">No demo session is active.</p>
             <Button
               onClick={() => navigate({ to: "/login" })}
-              className="mt-4 bg-[#10B981] font-mono text-xs font-bold text-black hover:bg-[#059669]"
+              className="mt-4 bg-console-green font-mono text-xs font-bold text-console-accent-foreground hover:bg-console-green-hover"
             >
               Go to sign-in
             </Button>

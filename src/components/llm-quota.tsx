@@ -50,8 +50,8 @@ export function LlmQuotaCard() {
     return (
       <Card>
         <CardContent className="flex items-start gap-2 p-3">
-          <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-          <span className="font-mono text-[10px] text-[#EF4444]">
+          <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+          <span className="font-mono text-[10px] text-console-red">
             LLM stats unavailable: {error}
           </span>
         </CardContent>
@@ -74,12 +74,12 @@ export function LlmQuotaCard() {
     <Card>
       <CardContent className="space-y-1.5 p-3 font-mono text-[10px]">
         <div className="flex items-center gap-1.5 pb-1">
-          <Activity className="size-3.5 text-[#10B981]" />
+          <Activity className="size-3.5 text-console-green" />
           <span className="text-[10px] font-bold uppercase tracking-wider">AI usage</span>
         </div>
 
         {!stats.configured ? (
-          <div className="text-[#F59E0B]">
+          <div className="text-console-amber">
             No LLM provider configured — AI features will report unavailable.
           </div>
         ) : (

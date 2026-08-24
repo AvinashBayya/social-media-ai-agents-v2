@@ -54,7 +54,8 @@ import type { CollectorRegistry } from "../collectors/registry";
 import { collectorRegistry } from "../collectors/registry";
 import { registerExistingCollectors } from "../collectors/existing";
 import { registerExternalCollectors } from "../collectors/external";
-import { dedupeEntitiesById, dedupeRelationships } from "./merge";
+import { registerPersonCollectors } from "../collectors/person";
+import { dedupeEntitiesById, dedupeRelationships, mergeTargetSelfEntities } from "./merge";
 import type { OsintPlan } from "./query-planner";
 import { planInvestigation } from "./query-planner";
 import type { InvestigationJob, JobResult, JobStatus, JobStore } from "./job-store";
@@ -264,12 +265,25 @@ export function pollInvestigation(
     .map((j) => store.getJobResult(j.id))
     .filter((r): r is JobResult => r !== undefined);
 
+  const dedupedEntities = dedupeEntitiesById(results.flatMap((r) => r.entities));
+  const dedupedRelationships = dedupeRelationships(results.flatMap((r) => r.relationships));
+
+  // Collapses each collector's own `<collector>:target:<value>` bookkeeping
+  // entity into one node — see mergeTargetSelfEntities()'s own doc for why
+  // this is safe where general person/organization value-merging is not.
+  // `jobs[0]`'s target value is used because every job in one investigation
+  // is created from the same `plan.input` (see startInvestigation() above).
+  const targetValue = jobs[0]?.target.value;
+  const { entities, relationships } = targetValue
+    ? mergeTargetSelfEntities(dedupedEntities, dedupedRelationships, targetValue)
+    : { entities: dedupedEntities, relationships: dedupedRelationships };
+
   return {
     investigationId,
     jobs,
     done,
-    entities: dedupeEntitiesById(results.flatMap((r) => r.entities)),
-    relationships: dedupeRelationships(results.flatMap((r) => r.relationships)),
+    entities,
+    relationships,
     evidence: results.flatMap((r) => r.evidence),
     warnings: results.flatMap((r) => r.warnings),
     errors: results.flatMap((r) => r.errors),
@@ -291,6 +305,7 @@ export const planOsintInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     registerExistingCollectors();
     registerExternalCollectors();
+    registerPersonCollectors(); // no-op unless PERSON_INVESTIGATION_ENABLED=true
     const plan = planInvestigation(data.target);
     return JSON.parse(JSON.stringify(plan));
   });
@@ -312,6 +327,7 @@ export const startOsintInvestigationJob = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     registerExistingCollectors();
     registerExternalCollectors();
+    registerPersonCollectors(); // no-op unless PERSON_INVESTIGATION_ENABLED=true
     const started = startInvestigation(
       data.target,
       collectorRegistry,

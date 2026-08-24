@@ -58,16 +58,16 @@ function AlertsPage() {
       />
 
       <div className="space-y-4 p-6">
-        <Card className="border-[#263548] bg-[#111827]">
+        <Card className="border-console-border bg-console-surface">
           <CardContent className="p-8 text-center">
             <BellOff className="mx-auto mb-3 size-7 text-[#334155]" />
-            <p className="font-mono text-sm text-[#F3F4F6]">No alerts</p>
-            <p className="mx-auto mt-2 max-w-lg text-[11px] leading-relaxed text-[#94A3B8]">
+            <p className="font-mono text-sm text-console-text">No alerts</p>
+            <p className="mx-auto mt-2 max-w-lg text-[11px] leading-relaxed text-console-muted">
               This is not an empty result from a working alert pipeline — there is no alert
               pipeline. Nothing computes volume spikes on a schedule, matches watchlists in the
               background, or diffs threat feeds against monitored assets.
             </p>
-            <p className="mx-auto mt-2 max-w-lg text-[11px] leading-relaxed text-[#64748B]">
+            <p className="mx-auto mt-2 max-w-lg text-[11px] leading-relaxed text-console-label">
               The container scales to zero, so there is no process between requests to run a
               schedule in. Alerting needs persistence and a worker; both are listed as outstanding
               infrastructure, not as features that exist and happen to be quiet.
@@ -75,24 +75,24 @@ function AlertsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-[#263548] bg-[#111827]">
+        <Card className="border-console-border bg-console-surface">
           <CardContent className="p-4">
-            <h2 className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#94A3B8]">
+            <h2 className="mb-3 font-mono text-[10px] uppercase tracking-widest text-console-muted">
               What each alert type would need, and where the signal is today
             </h2>
             <div className="space-y-3">
               {WOULD_REQUIRE.map((row) => (
                 <div
                   key={row.trigger}
-                  className="border-b border-[#263548]/40 pb-3 last:border-0 last:pb-0"
+                  className="border-b border-console-border/40 pb-3 last:border-0 last:pb-0"
                 >
-                  <div className="font-mono text-xs font-bold text-[#F3F4F6]">{row.trigger}</div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-[#94A3B8]">
-                    <span className="text-[#64748B]">Requires:</span> {row.needs}
+                  <div className="font-mono text-xs font-bold text-console-text">{row.trigger}</div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-console-muted">
+                    <span className="text-console-label">Requires:</span> {row.needs}
                   </div>
-                  <div className="mt-0.5 text-[11px] leading-relaxed text-[#94A3B8]">
-                    <span className="text-[#64748B]">Today:</span> {row.today}{" "}
-                    <Link to={row.to} className="text-[#3B82F6] hover:underline">
+                  <div className="mt-0.5 text-[11px] leading-relaxed text-console-muted">
+                    <span className="text-console-label">Today:</span> {row.today}{" "}
+                    <Link to={row.to} className="text-console-blue hover:underline">
                       Open {row.label}
                     </Link>
                   </div>
@@ -102,10 +102,10 @@ function AlertsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-[#263548] bg-[#0B1220]/60">
+        <Card className="border-console-border bg-console-deep/60">
           <CardContent className="flex gap-3 p-4">
-            <Info className="mt-0.5 size-4 shrink-0 text-[#3B82F6]" />
-            <p className="text-[11px] leading-relaxed text-[#94A3B8]">
+            <Info className="mt-0.5 size-4 shrink-0 text-console-blue" />
+            <p className="text-[11px] leading-relaxed text-console-muted">
               The notification bell in the top bar is inert for the same reason. It is not wired to
               anything, and it no longer displays an unread indicator.
             </p>

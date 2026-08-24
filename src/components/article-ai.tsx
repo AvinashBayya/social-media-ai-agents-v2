@@ -31,12 +31,12 @@ interface Entity {
 }
 
 const TYPE_COLOURS: Record<string, string> = {
-  PERSON: "border-[#3B82F6]/30 bg-[#3B82F6]/10 text-[#3B82F6]",
-  ORGANISATION: "border-[#8B5CF6]/30 bg-[#8B5CF6]/10 text-[#8B5CF6]",
-  LOCATION: "border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]",
-  EQUIPMENT: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
-  EVENT: "border-[#06B6D4]/30 bg-[#06B6D4]/10 text-[#06B6D4]",
-  OTHER: "border-[#64748B]/30 bg-[#64748B]/10 text-[#94A3B8]",
+  PERSON: "border-console-blue/30 bg-console-blue/10 text-console-blue",
+  ORGANISATION: "border-console-purple/30 bg-console-purple/10 text-console-purple",
+  LOCATION: "border-console-green/30 bg-console-green/10 text-console-green",
+  EQUIPMENT: "border-console-amber/30 bg-console-amber/10 text-console-amber",
+  EVENT: "border-console-cyan/30 bg-console-cyan/10 text-console-cyan",
+  OTHER: "border-console-label/30 bg-console-label/10 text-console-muted",
 };
 
 export function ArticleAiPanel({ title, body, source }: Props) {
@@ -121,9 +121,9 @@ export function ArticleAiPanel({ title, body, source }: Props) {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-          <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-          <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+        <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+          <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+          <div className="font-mono text-[10px] leading-relaxed text-console-red">
             <span className="font-bold">AI unavailable.</span> No summary was produced.
             <div className="pt-0.5 opacity-80">{error}</div>
           </div>
@@ -133,7 +133,7 @@ export function ArticleAiPanel({ title, body, source }: Props) {
       {summary && (
         <div className="rounded border bg-muted/30 p-2.5">
           <div className="mb-1 flex items-center gap-1.5">
-            <Sparkles className="size-3 text-[#8B5CF6]" />
+            <Sparkles className="size-3 text-console-purple" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               AI-generated · {model}
             </span>

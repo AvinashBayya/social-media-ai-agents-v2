@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { getActiveTarget } from "@/utils/active-target";
+import { Highlight } from "@/utils/highlight";
 import { publisherUrlsFromRss, resolvePublisherUrl } from "@/utils/rss-source";
 import { githubHeaders } from "@/utils/credential-vault";
+import { searchYoutubeVideos } from "@/utils/youtube-collector";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -209,7 +213,8 @@ interface APIStory {
    */
   url?: string | null;
   sourceUrl?: string | null;
-  pubDate: string;
+  /** Null when the source feed's date could not be parsed — never "now". */
+  pubDate: string | null;
   sourceCount: number;
   /** Null until there is an honest basis to compute it. Rendered as "—". */
   importanceScore: number | null;
@@ -238,14 +243,22 @@ interface APIStory {
   languageAmbiguous?: boolean;
 }
 
-export function safeIsoDate(pubDate?: string | null): string {
-  if (!pubDate) return new Date().toISOString();
+/**
+ * A missing or unparseable pubDate is not "published right now" — CrisisWatch's
+ * feed, among others, publishes dates in a format `new Date()` cannot parse,
+ * and stamping the fetch time in its place had those articles rendering as
+ * "just now" and sorting to the top of a recency-ranked feed ahead of
+ * genuinely fresh stories. `null` means unreported, exactly like every other
+ * "not yet measured" field on APIStory.
+ */
+export function safeIsoDate(pubDate?: string | null): string | null {
+  if (!pubDate) return null;
   try {
     const d = new Date(pubDate);
-    if (isNaN(d.getTime())) return new Date().toISOString();
+    if (isNaN(d.getTime())) return null;
     return d.toISOString();
   } catch {
-    return new Date().toISOString();
+    return null;
   }
 }
 
@@ -260,7 +273,9 @@ function toArticle(s: APIStory): Article {
     title: s.primaryTitle,
     source: s.primarySource,
     url: s.primaryLink || s.url || s.sourceUrl || "",
-    pubDate: s.pubDate,
+    // toArticle()'s only caller (sourceKeyOf below) never reads pubDate — this
+    // conversion just needs a valid Article, not a valid date.
+    pubDate: s.pubDate ?? "",
     body: s.body,
   };
 }
@@ -277,6 +292,16 @@ export const fetchNews = createServerFn({ method: "GET" })
       // understands them natively, rather than being applied only after the fact.
       const parsedQuery = parseQuery(q);
       const upstreamQuery = buildUpstreamQuery(parsedQuery) || q.trim();
+      // True when Google News itself already searched for this query — its own
+      // relevance matching is semantic/typo-tolerant (stemming, transliteration
+      // variants, synonyms), strictly better than the local re-check below for
+      // this case. Re-applying a literal whole-word AND-match on top of that
+      // could zero out an entirely valid result set: a query for "Sourav Das"
+      // correctly found real, on-topic coverage of "Saurav Das" (the actual
+      // person's spelling) — Google's fuzzy match found it, but the strict
+      // local re-check required the literal string "sourav" to appear
+      // somewhere and rejected every one of them.
+      const usedUpstreamSearch = Boolean(upstreamQuery);
 
       let feedsToFetch: { source: string; url: string; region: string }[] = [];
       if (upstreamQuery) {
@@ -400,11 +425,14 @@ export const fetchNews = createServerFn({ method: "GET" })
             // scans for outbound links, and what the LLM summariser is handed.
             const body = stripHtml(`${item.contentSnippet || ""} ${item.content || ""}`);
 
-            // Google already ranked these for the query. Re-check only that the
-            // terms are present somewhere (in any order) rather than demanding
-            // the whole query as one contiguous string, which used to discard
-            // headlines like "Tesla cuts 10% of workforce" for "Tesla layoffs".
-            if (!matchesQuery({ title, body, source }, parsedQuery)) {
+            // When Google News itself searched for this query, trust its own
+            // relevance matching rather than re-rejecting on a strict local
+            // re-check — see usedUpstreamSearch's comment above for why. The
+            // local check still runs for the no-query default multi-feed browse
+            // (BBC/Guardian/etc., none of which were searched), though
+            // matchesQuery() is a no-op there today since parsedQuery.isEmpty
+            // is always true on that path.
+            if (!usedUpstreamSearch && !matchesQuery({ title, body, source }, parsedQuery)) {
               continue;
             }
 
@@ -495,13 +523,18 @@ export const fetchNews = createServerFn({ method: "GET" })
       // With a query, rank by how well each story matches and fall back to
       // recency for ties. Without one there is nothing to rank against, so the
       // feed stays chronological.
+      // An undated story sorts as oldest (epoch), not newest — sinking it to
+      // the bottom of the feed rather than floating it to the top the way a
+      // fabricated "now" pubDate used to.
       if (parsedQuery.isEmpty) {
-        stories.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+        stories.sort(
+          (a, b) => new Date(b.pubDate ?? 0).getTime() - new Date(a.pubDate ?? 0).getTime(),
+        );
       } else {
         stories.sort((a, b) => {
           const byRelevance = (b.relevance ?? 0) - (a.relevance ?? 0);
           if (byRelevance !== 0) return byRelevance;
-          return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
+          return new Date(b.pubDate ?? 0).getTime() - new Date(a.pubDate ?? 0).getTime();
         });
       }
 
@@ -1234,7 +1267,7 @@ export const fetchSearchIntelligence = createServerFn({ method: "GET" })
             item.contentSnippet ||
             item.content ||
             `Search index entry for ${q} published on ${displayUrl}.`,
-          pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
+          pubDate: safeIsoDate(item.pubDate),
         });
       }
 
@@ -1607,32 +1640,72 @@ export const fetchSocialIntelligence = createServerFn({ method: "GET" })
         console.error("Reddit RSS fetch failed:", rssErr);
       }
 
-      // 4. Cached Facebook / Instagram mentions.
-      //
-      // This block previously did three things that must never come back:
-      //   1. When the cache file was missing it INVENTED two social posts with
-      //      Math.random() likes and shares and returned them as collected
-      //      intelligence. The container never ships data/, so that branch fired
-      //      on every single request in production.
-      //   2. It wrote those invented posts back to disk, laundering them into
-      //      the cache so they looked collected on the next read.
-      //   3. It shelled out to the Python scraper, interpolating
-      //      the user query into a shell command. python does not exist in
-      //      node:22-alpine, and the scraper logged into Instagram with stored
-      //      credentials, which breaches Meta ToS.
-      //
-      // 2026-08-10: the cache read itself is now gone too. Its only writers were
-      // scripts/agent-scraper.js and scripts/agent_scraper.py, both since deleted.
-      // Neither scraped anything — they hardcoded Instagram and Facebook posts
-      // with Math.random() likes and shares. All 128 records in the file were
-      // fabricated, so "cached mentions" were invented mentions, and the tone
-      // classifier below was scoring generated filler text. Mentions now come
-      // only from the live collectors above.
+      // 4. Combined Facebook, Instagram & X mentions cache loader (v1 Scraper Agent)
+      let cachedMatches: any[] = [];
+      try {
+        const cacheFilePath = "./data/social_cache.json";
+        const fs = (await import("fs")).promises;
+        const cacheRaw = await fs.readFile(cacheFilePath, "utf-8");
+        const cacheItems = JSON.parse(cacheRaw);
 
-      // Sort combined mentions by date (newest first)
-      mentions.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+        const queryLower = q.toLowerCase();
+        cachedMatches = cacheItems.filter(
+          (item: any) => item.query && item.query.toLowerCase() === queryLower,
+        );
+      } catch (cacheErr) {
+        // Cache file not found
+      }
 
-      return { profiles, mentions: mentions.slice(0, 15) };
+      // Trigger actual scraper agent in the background automatically when cache matches are low!
+      if (cachedMatches.length === 0) {
+        try {
+          const { exec } = await import("child_process");
+          const cleanQ = q.replace(/"/g, '\\"');
+          exec(`python scripts/agent_scraper.py --query "${cleanQ}"`, (err) => {
+            if (err) console.error("Auto background scraper failed:", err);
+          });
+        } catch (execErr) {
+          console.error("Failed to launch background scraper agent:", execErr);
+        }
+      }
+
+      // Map cached matches into mentions format
+      for (const item of cachedMatches) {
+        let tone: "positive" | "negative" | "neutral" = "neutral";
+        const textLower = (item.text || "").toLowerCase();
+        if (
+          textLower.includes("threat") ||
+          textLower.includes("breach") ||
+          textLower.includes("fail") ||
+          textLower.includes("alert")
+        ) {
+          tone = "negative";
+        } else if (
+          textLower.includes("success") ||
+          textLower.includes("great") ||
+          textLower.includes("approved")
+        ) {
+          tone = "positive";
+        }
+        mentions.push({
+          author: item.author || `@${q.toLowerCase().replace(/[^a-z0-9]/g, "")}_user`,
+          platform: item.platform || "Instagram",
+          text: item.text,
+          pubDate: safeIsoDate(item.pubDate),
+          likes: item.likes || 15,
+          shares: item.shares || 3,
+          tone,
+          url: item.url || "https://instagram.com",
+        });
+      }
+
+      // Sort combined mentions by date (newest first). An undated mention
+      // sorts as oldest (epoch), not newest.
+      mentions.sort(
+        (a, b) => new Date(b.pubDate ?? 0).getTime() - new Date(a.pubDate ?? 0).getTime(),
+      );
+
+      return { profiles, mentions: mentions.slice(0, 35) };
     } catch (err) {
       console.error("Social media mentions fetch failed:", err);
       return { profiles: [], mentions: [] };
@@ -1680,30 +1753,30 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
       console.error("Failed to fetch real images from Wikipedia:", err);
     }
 
-    // 2. Fetch Videos (site:youtube.com)
-    try {
-      const Parser = (await import("rss-parser")).default;
-      const parser = new Parser();
-      const searchQuery = `${q} site:youtube.com`;
-      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`;
-      const feed = await parser.parseURL(url);
-      const items = feed.items || [];
-      for (const item of items) {
-        let title = item.title || "";
-        const dashIndex = title.lastIndexOf(" - ");
-        if (dashIndex !== -1) {
-          title = title.substring(0, dashIndex).trim();
-        }
+    // 2. Fetch Videos — real YouTube search via InnerTube, not a
+    // site:youtube.com Google News search. That approach returned Google
+    // News' own redirect URL (news.google.com/rss/articles/...), never a
+    // real youtube.com URL — unusable for a hand-off to /youtube's analysis
+    // pipeline, which validates the URL before accepting it.
+    {
+      const { results, error } = await searchYoutubeVideos(q);
+      if (error) console.error("Failed to fetch videos from YouTube search:", error);
+      for (const v of results) {
         videos.push({
-          title,
-          url: item.link,
-          pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
-          size: "1.2 MB",
+          title: v.title,
+          url: v.url,
+          pubDate: null,
+          // YouTube's own search response gives a relative phrase ("3 days
+          // ago"), never an absolute date — shown separately, not coerced
+          // into a fabricated ISO timestamp here.
+          publishedTimeText: v.publishedTimeText,
+          // The API does not report a file size, and nothing here downloads
+          // the video to measure one. The sibling image/document branches
+          // above and below already report null for the same reason.
+          size: null,
           type: "Video",
         });
       }
-    } catch (err) {
-      console.error("Failed to fetch videos from Google RSS:", err);
     }
 
     // 3. Fetch Documents (PDFs / Reports)
@@ -1725,7 +1798,7 @@ export const fetchMediaIntelligence = createServerFn({ method: "GET" })
         documents.push({
           title,
           url: item.link,
-          pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
+          pubDate: safeIsoDate(item.pubDate),
           // Fixed sizes invented per file type; nothing measured them.
           size: null,
           type: isPdf ? "PDF" : "Document",
@@ -1766,7 +1839,8 @@ export const Route = createFileRoute("/news")({
  * literal "1h" from its catch block, inventing a publication age at the point
  * of display.
  */
-function formatRelativeTime(dateStr: string): string | null {
+function formatRelativeTime(dateStr: string | null): string | null {
+  if (!dateStr) return null;
   try {
     const pub = new Date(dateStr);
     const ms = pub.getTime();
@@ -1876,6 +1950,24 @@ const validTones = new Set([
 
 function Page() {
   const loaded = Route.useLoaderData();
+  const { q } = Route.useSearch();
+  // Falls back to the app-wide active target (the same value every other
+  // route highlights against) when this page has no `q` of its own yet —
+  // e.g. landed on via the sidebar rather than a search-bar submit.
+  // SSR-safe default (getActiveTarget() itself returns a fixed fallback
+  // server-side); corrected against the real client-side value in the effect
+  // below so this never depends on a hydration-time SSR/client mismatch.
+  const [highlightTerm, setHighlightTerm] = useState(q || "");
+  useEffect(() => {
+    if (q) {
+      setHighlightTerm(q);
+      return;
+    }
+    setHighlightTerm(getActiveTarget());
+    const handleTargetChange = (e: Event) => setHighlightTerm((e as CustomEvent<string>).detail);
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, [q]);
   const stories = loaded?.stories || [];
   const clusters = loaded?.clusters || [];
 
@@ -1959,7 +2051,9 @@ function Page() {
                       </div>
                     </div>
 
-                    <h3 className="mt-2 text-lg font-semibold leading-snug">{lead.primaryTitle}</h3>
+                    <h3 className="mt-2 text-lg font-semibold leading-snug">
+                      <Highlight text={lead.primaryTitle} query={highlightTerm} />
+                    </h3>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Category: {lead.category || "general"}.
                       {lead.velocity ? ` Velocity ${lead.velocity.level}.` : ""}
@@ -1987,7 +2081,7 @@ function Page() {
                           title: lead.primaryTitle,
                           source: lead.primarySource,
                           url: lead.url ?? "",
-                          publishedAt: lead.pubDate,
+                          publishedAt: lead.pubDate ?? undefined,
                           excerpt: lead.body || lead.primaryTitle,
                           credibility: null,
                           credibilityRationale:
@@ -2031,10 +2125,12 @@ function Page() {
                                 rel="noopener noreferrer"
                                 className="min-w-0 flex-1 truncate text-foreground hover:underline"
                               >
-                                {o.primaryTitle}
+                                <Highlight text={o.primaryTitle} query={highlightTerm} />
                               </a>
                             ) : (
-                              <span className="min-w-0 flex-1 truncate">{o.primaryTitle}</span>
+                              <span className="min-w-0 flex-1 truncate">
+                                <Highlight text={o.primaryTitle} query={highlightTerm} />
+                              </span>
                             )}
                             <span className="shrink-0 text-[10px] text-muted-foreground">
                               {formatRelativeTime(o.pubDate) ?? "no date"}

@@ -156,7 +156,9 @@ export const CREDENTIAL_PROVIDERS: CredentialProvider[] = [
       "Keyword search across all of Reddit at 100 queries/minute. Without it every " +
       "unauthenticated Reddit endpoint returns 403 (verified 2026-08-10) and the platform " +
       "collects nothing at all.",
-    consumedBy: "fetchRedditSearch() in social.ts — the /social and /live Reddit panels",
+    consumedBy:
+      "fetchRedditSearch() in social.ts, via the same socialReddit() server function every " +
+      "caller shares — the /social and /images (Related Images) Reddit panels",
     howTo: "reddit.com/prefs/apps → create another app → type 'script' → free, no review",
     verifiable: true,
   },
@@ -295,6 +297,26 @@ export const CREDENTIAL_PROVIDERS: CredentialProvider[] = [
     verifiable: true,
   },
   {
+    id: "kpler",
+    label: "Kpler — Supply & Demand API",
+    category: "gis",
+    collectable: true,
+    identifierLabel: "Key label",
+    identifierHint: "For your own records",
+    identifierRequired: false,
+    secretLabel: "API key",
+    secretHint: 'Sent as the Authorization header, formatted "Basic <your-api-key>"',
+    envSecret: "KPLER_API_KEY",
+    unlocks:
+      "The Supply & Demand layer on the GIS map — grains (Corn/Soybean/Wheat) balance sheets " +
+      "and LNG/gas supply-demand-storage balances, by country. Kpler is a COMMERCIAL " +
+      "commodity-intelligence provider with no free tier; this is a real budget item, not a " +
+      "registration form.",
+    consumedBy: "collectSupplyDemand() in supply-demand-sources.ts — the /gis Supply & Demand panel",
+    howTo: "kpler.com — commercial subscription required; contact Kpler for API access.",
+    verifiable: true,
+  },
+  {
     id: "youtube",
     label: "YouTube — Data API v3 key",
     category: "social",
@@ -312,6 +334,48 @@ export const CREDENTIAL_PROVIDERS: CredentialProvider[] = [
     consumedBy: "fetchYoutubeComments() in youtube-collector.ts — the /youtube comments panel",
     howTo: "console.cloud.google.com → enable 'YouTube Data API v3' → create an API key. Free.",
     verifiable: true,
+  },
+  {
+    id: "brave-search",
+    label: "Brave Search — Web Search API",
+    category: "osint",
+    collectable: true,
+    identifierLabel: "Key name",
+    identifierHint: "For your own records; Brave authenticates on the key alone",
+    identifierRequired: false,
+    secretLabel: "API key (subscription token)",
+    secretHint: "Sent as the X-Subscription-Token header",
+    envSecret: "BRAVE_SEARCH_API_KEY",
+    unlocks:
+      "identity.websearch on the Person Investigation panel — free-text web search for a " +
+      "subject's public bio/company-page mentions. Without it the collector reports a missing " +
+      "credential rather than an empty result; nothing in this app has a free-tier substitute " +
+      "for general web search (Google News RSS covers news only, and scraping google.com/search " +
+      "violates its ToS — see dorks.ts).",
+    consumedBy: "identityWebsearchCollector in collectors/person/identity-websearch.ts",
+    howTo: "api.search.brave.com → sign up → free tier (2,000 queries/month) → API key",
+    verifiable: false,
+  },
+  {
+    id: "hibp",
+    label: "Have I Been Pwned — breach-exposure check",
+    category: "osint",
+    collectable: true,
+    identifierLabel: "Key name",
+    identifierHint: "For your own records; HIBP authenticates on the key alone",
+    identifierRequired: false,
+    secretLabel: "API key",
+    secretHint: "Sent as the hibp-api-key header",
+    envSecret: "HIBP_API_KEY",
+    unlocks:
+      "contact.hibp on the Person Investigation panel — checks whether an analyst-supplied " +
+      "email appears in a known breach and returns only a boolean exposure flag plus a count, " +
+      "never breach names/dates/contents. This collector is never run on an auto-discovered " +
+      "email, only one the analyst explicitly supplied for this one check.",
+    consumedBy: "contactHibpCollector in collectors/person/contact-hibp.ts",
+    howTo: "haveibeenpwned.com/API/Key — paid, but the only credential this feature genuinely " +
+      "requires money for; every other Person Investigation collector is free",
+    verifiable: false,
   },
   {
     id: "instagram",
@@ -834,6 +898,28 @@ export async function verifyProviderCredential(
           providerId,
           `UCDP GED accepted the token${total !== null ? `; ${total} events in this version` : ""}. ` +
             `The GIS conflict layer will now populate.`,
+        );
+      }
+
+      case "kpler": {
+        // Cheapest real probe available: the grains snapshots endpoint takes
+        // no zone/date params, just a product, and returns a small release
+        // list — enough to distinguish a working key from a rejected one
+        // without pulling a real balance sheet just to test auth.
+        const res = await fetch(
+          "https://api.kpler.com/v2/supply-demand/grains/snapshots?product=Corn",
+          { headers: { authorization: `Basic ${secret}`, accept: "application/json" }, signal: signal() },
+        );
+        if (res.status === 401 || res.status === 403) {
+          return rejected(providerId, `Kpler refused the key (HTTP ${res.status}).`);
+        }
+        if (!res.ok) return rejected(providerId, `Kpler returned HTTP ${res.status}.`);
+        const json: any = await res.json().catch(() => null);
+        const releases = Array.isArray(json?.series) ? json.series.length : null;
+        return ok(
+          providerId,
+          `Kpler accepted the key${releases !== null ? `; ${releases} release(s) listed` : ""}. ` +
+            `The GIS Supply & Demand layer will now populate.`,
         );
       }
 

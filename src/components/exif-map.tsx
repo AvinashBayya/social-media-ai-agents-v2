@@ -114,16 +114,16 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
     <div className="space-y-1.5">
       <div
         ref={containerRef}
-        className="h-56 w-full rounded border border-[#263548]"
+        className="h-56 w-full rounded border border-console-border"
         style={{ background: MAP_BACKGROUND }}
       />
       {basemapError && (
-        <p className="font-mono text-[10px] leading-relaxed text-[#F59E0B]">
+        <p className="font-mono text-[10px] leading-relaxed text-console-amber">
           Offline basemap unavailable: {basemapError}. The marker is unaffected — only the coastline
           backdrop is missing, and nothing was substituted for it.
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-[#94A3B8]">
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-console-muted">
         <span>
           {gps.latitude.toFixed(6)}, {gps.longitude.toFixed(6)}
           {gps.altitude !== null ? ` · ${gps.altitude.toFixed(0)} m` : ""}
@@ -132,7 +132,7 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
           href={`https://www.openstreetmap.org/?mlat=${gps.latitude}&mlon=${gps.longitude}#map=16/${gps.latitude}/${gps.longitude}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[#3B82F6] hover:underline"
+          className="text-console-blue hover:underline"
         >
           OpenStreetMap
         </a>
@@ -140,20 +140,20 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
           href={`https://www.google.com/maps/search/?api=1&query=${gps.latitude},${gps.longitude}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[#3B82F6] hover:underline"
+          className="text-console-blue hover:underline"
         >
           Google Maps
         </a>
       </div>
 
-      <p className="text-[10px] leading-relaxed text-[#64748B]">
+      <p className="text-[10px] leading-relaxed text-console-label">
         Both links carry this coordinate in the URL, so opening one discloses it to that provider.
         Nothing is sent until you click.
       </p>
 
       {tiles ? (
-        <div className="rounded border border-[#F59E0B]/40 bg-[#F59E0B]/5 p-2">
-          <p className="text-[10px] leading-relaxed text-[#F59E0B]">
+        <div className="rounded border border-console-amber/40 bg-console-amber/5 p-2">
+          <p className="text-[10px] leading-relaxed text-console-amber">
             <span className="font-semibold">
               Requesting basemap tiles from {CARTO_DARK.host} — this image&apos;s location is being
               disclosed.
@@ -161,21 +161,21 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
             At the current zoom the fix sits in <span className="font-mono">{disclosure.path}</span>
             , a {disclosure.footprint} square. Every pan and zoom sends more paths. The image file
             itself still never leaves this browser.{" "}
-            <button onClick={() => setTiles(false)} className="underline hover:text-white">
+            <button onClick={() => setTiles(false)} className="underline hover:text-console-text">
               Turn tiles off
             </button>
           </p>
         </div>
       ) : (
-        <label className="flex items-start gap-2 rounded border border-[#263548] bg-[#0B1220] p-2">
+        <label className="flex items-start gap-2 rounded border border-console-border bg-console-deep p-2">
           <input
             type="checkbox"
             checked={false}
             onChange={() => setTiles(true)}
-            className="mt-0.5 size-3 shrink-0 accent-[#F59E0B]"
+            className="mt-0.5 size-3 shrink-0 accent-console-amber"
           />
-          <span className="text-[10px] leading-relaxed text-[#94A3B8]">
-            <span className="font-semibold text-white">
+          <span className="text-[10px] leading-relaxed text-console-muted">
+            <span className="font-semibold text-console-text">
               Load street-level basemap tiles from {CARTO_DARK.host} — off
             </span>
             <br />
@@ -186,7 +186,7 @@ export function ExifMap({ gps, label }: { gps: GpsFix; label: string }) {
             <span className="font-mono text-[#CBD5E1]">{CARTO_DARK.host}</span> (
             {CARTO_DARK.operator}
             ). A tile path is the coordinate: this image&apos;s fix would be requested as{" "}
-            <span className="font-mono text-[#F59E0B]">{disclosure.path}</span>, which pins the
+            <span className="font-mono text-console-amber">{disclosure.path}</span>, which pins the
             camera to a {disclosure.footprint} square in {CARTO_DARK.operator}&apos;s access log,
             together with your IP address, the time and your browser User-Agent. The image file is
             still never uploaded — only its location is disclosed. This box is not remembered; it is

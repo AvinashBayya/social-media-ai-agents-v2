@@ -261,36 +261,36 @@ function TasksPage() {
         description="Verify compliance matrix for the IAF PS18 challenge: AI Based OSINT Analysis and monitoring system and social media stacks."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[250px_1fr] font-mono text-xs text-[#94A3B8]">
+      <div className="grid gap-4 lg:grid-cols-[250px_1fr] font-mono text-xs text-console-muted">
         {/* Left Side Tab Navigation */}
         <div className="space-y-1.5">
           <button
             onClick={() => setActiveTab("matrix")}
-            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "matrix" ? "border-[#3B82F6] bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] hover:bg-[#1A2332]"}`}
+            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "matrix" ? "border-console-blue bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface hover:bg-console-elevated"}`}
           >
             Compliance Matrix
           </button>
           <button
             onClick={() => setActiveTab("mod1")}
-            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod1" ? "border-[#3B82F6] bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] hover:bg-[#1A2332]"}`}
+            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod1" ? "border-console-blue bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface hover:bg-console-elevated"}`}
           >
             M1: Source Credibility
           </button>
           <button
             onClick={() => setActiveTab("mod2")}
-            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod2" ? "border-[#3B82F6] bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] hover:bg-[#1A2332]"}`}
+            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod2" ? "border-console-blue bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface hover:bg-console-elevated"}`}
           >
             M2: Content Analysis
           </button>
           <button
             onClick={() => setActiveTab("mod3")}
-            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod3" ? "border-[#3B82F6] bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] hover:bg-[#1A2332]"}`}
+            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod3" ? "border-console-blue bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface hover:bg-console-elevated"}`}
           >
             M3: Social Intelligence
           </button>
           <button
             onClick={() => setActiveTab("mod4")}
-            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod4" ? "border-[#3B82F6] bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] hover:bg-[#1A2332]"}`}
+            className={`w-full text-left px-3 py-2 border rounded text-[10px] uppercase font-bold transition-all ${activeTab === "mod4" ? "border-console-blue bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface hover:bg-console-elevated"}`}
           >
             M4: Image & Video
           </button>
@@ -301,11 +301,11 @@ function TasksPage() {
           {/* Tab 1: Compliance Matrix */}
           {activeTab === "matrix" && (
             <div className="space-y-4">
-              <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-                <div className="absolute top-0 left-0 h-full w-0.5 bg-[#3B82F6]" />
-                <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                  <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
-                    <ListChecks className="size-4 text-[#3B82F6]" /> Verification Diagnostic Matrix
+              <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+                <div className="absolute top-0 left-0 h-full w-0.5 bg-console-blue" />
+                <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                  <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted flex items-center gap-1.5">
+                    <ListChecks className="size-4 text-console-blue" /> Verification Diagnostic Matrix
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 space-y-3">
@@ -368,14 +368,14 @@ function TasksPage() {
                   ].map((item, idx) => (
                     <div
                       key={idx}
-                      className="flex flex-wrap items-start justify-between gap-2 border-b border-[#263548]/30 pb-2 text-[10px]"
+                      className="flex flex-wrap items-start justify-between gap-2 border-b border-console-border/30 pb-2 text-[10px]"
                     >
                       <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="font-bold text-white">
+                        <div className="font-bold text-console-text">
                           {item.m} · {item.name}
                         </div>
-                        <div className="text-[9px] text-[#94A3B8]/60">{item.features}</div>
-                        <div className="text-[9px] italic text-[#64748B]">{item.note}</div>
+                        <div className="text-[9px] text-console-muted/60">{item.features}</div>
+                        <div className="text-[9px] italic text-console-label">{item.note}</div>
                       </div>
                       <Badge
                         variant="outline"
@@ -399,7 +399,7 @@ function TasksPage() {
                     <Button
                       onClick={runSelfTest}
                       disabled={testing}
-                      className="h-8 bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white font-mono text-[9px] uppercase tracking-wider gap-1.5 rounded"
+                      className="h-8 bg-console-blue hover:bg-console-blue/90 text-console-text font-mono text-[9px] uppercase tracking-wider gap-1.5 rounded"
                     >
                       {testing ? (
                         <RefreshCw className="size-3.5 animate-spin" />
@@ -413,8 +413,8 @@ function TasksPage() {
               </Card>
 
               {/* Console log tracker */}
-              <Card className="bg-[#0B1220] border-[#263548] p-3 text-[9px] text-green-400 font-mono space-y-1 h-44 overflow-y-auto rounded">
-                <div className="flex items-center gap-1 text-[#94A3B8] border-b border-[#263548]/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest">
+              <Card className="bg-console-deep border-console-border p-3 text-[9px] text-green-400 font-mono space-y-1 h-44 overflow-y-auto rounded">
+                <div className="flex items-center gap-1 text-console-muted border-b border-console-border/30 pb-1 mb-1 font-bold text-[8px] uppercase tracking-widest">
                   <Terminal className="size-3" /> Self-Test Log Output
                 </div>
                 {selfTestLog.length === 0 ? (
@@ -430,10 +430,10 @@ function TasksPage() {
 
           {/* Tab 2: Module 1 source credibility */}
           {activeTab === "mod1" && (
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#3B82F6]" />
-              <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-blue" />
+              <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted">
                   Module 1: Source Credibility Evaluator
                 </CardTitle>
               </CardHeader>
@@ -451,70 +451,70 @@ function TasksPage() {
                   <Input
                     value={mod1Source}
                     onChange={(e) => setMod1Source(e.target.value)}
-                    className="h-8 text-[11px] border-[#263548] bg-[#0B1220] text-white rounded"
+                    className="h-8 text-[11px] border-console-border bg-console-deep text-console-text rounded"
                   />
                 </div>
 
                 <Button
                   onClick={evaluateSource}
-                  className="h-7 bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white font-mono text-[9px] uppercase px-3 rounded"
+                  className="h-7 bg-console-blue hover:bg-console-blue/90 text-console-text font-mono text-[9px] uppercase px-3 rounded"
                 >
                   Evaluate Publisher Tier
                 </Button>
 
                 {mod1Result && (
-                  <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2 text-[10px]">
-                    <div className="flex justify-between items-center border-b border-[#263548]/40 pb-1.5">
+                  <div className="border border-console-border/40 bg-console-deep/60 rounded p-3 space-y-2 text-[10px]">
+                    <div className="flex justify-between items-center border-b border-console-border/40 pb-1.5">
                       <span>Publisher tier score ({mod1Result.domain}):</span>
-                      <strong className="text-white font-bold text-xs">
+                      <strong className="text-console-text font-bold text-xs">
                         {mod1Result.score === null
                           ? "Unscored"
                           : `${mod1Result.score}/100 (${mod1Result.rating})`}
                       </strong>
                     </div>
-                    <div className="flex justify-between text-[9px] text-[#94A3B8]">
+                    <div className="flex justify-between text-[9px] text-console-muted">
                       <span>Reputation table ({mod1Result.tier}):</span>
-                      <span className="text-[#06B6D4] font-bold">
+                      <span className="text-console-cyan font-bold">
                         {mod1Result.reputation === null
                           ? "not listed"
                           : mod1Result.reputation.toFixed(2)}
                       </span>
                     </div>
-                    <div className="flex justify-between text-[9px] text-[#94A3B8]">
+                    <div className="flex justify-between text-[9px] text-console-muted">
                       <span>Engine confidence:</span>
-                      <span className="text-white">
+                      <span className="text-console-text">
                         {typeof mod1Result.confidence === "number"
                           ? `${(mod1Result.confidence * 100).toFixed(0)}%`
                           : "not computed"}
                       </span>
                     </div>
-                    <p className="pt-1 text-[9px] leading-relaxed text-[#94A3B8]">
+                    <p className="pt-1 text-[9px] leading-relaxed text-console-muted">
                       {mod1Result.explanation}
                     </p>
                     {mod1Result.breakdown && mod1Result.breakdown.length > 0 && (
-                      <div className="space-y-1 border-t border-[#263548]/30 pt-1.5">
-                        <span className="text-[9px] font-bold text-[#F3F4F6] uppercase">
+                      <div className="space-y-1 border-t border-console-border/30 pt-1.5">
+                        <span className="text-[9px] font-bold text-console-text uppercase">
                           Factor Breakdown:
                         </span>
                         {mod1Result.breakdown.map((b: any) => (
                           <div
                             key={b.id}
-                            className="flex justify-between text-[9px] text-[#94A3B8]"
+                            className="flex justify-between text-[9px] text-console-muted"
                           >
                             <span>{b.name}:</span>
-                            <span className="text-[#06B6D4]">
+                            <span className="text-console-cyan">
                               score {b.rawScore.toFixed(2)} (w {b.weight.toFixed(2)})
                             </span>
                           </div>
                         ))}
                       </div>
                     )}
-                    <p className="border-t border-[#263548]/30 pt-1.5 text-[9px] leading-relaxed text-[#64748B]">
+                    <p className="border-t border-console-border/30 pt-1.5 text-[9px] leading-relaxed text-console-label">
                       This scores the PUBLISHER only. Corroboration, citation depth, recency, source
                       diversity and linguistic markers need a real article and a collected corpus,
                       neither of which a source name supplies — they are not run here rather than
                       being scored against filler text.{" "}
-                      <Link to="/sources" className="text-[#3B82F6] hover:underline">
+                      <Link to="/sources" className="text-console-blue hover:underline">
                         Run the full seven-factor assessment on /sources
                       </Link>
                       .
@@ -527,10 +527,10 @@ function TasksPage() {
 
           {/* Tab 3: Module 2 content analysis */}
           {activeTab === "mod2" && (
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#06B6D4]" />
-              <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-cyan" />
+              <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted">
                   Module 2: NLP Content Extraction
                 </CardTitle>
               </CardHeader>
@@ -540,37 +540,37 @@ function TasksPage() {
                   <Textarea
                     value={mod2Text}
                     onChange={(e) => setMod2Text(e.target.value)}
-                    className="min-h-20 text-[10.5px] border-[#263548] bg-[#0B1220] text-white rounded font-mono"
+                    className="min-h-20 text-[10.5px] border-console-border bg-console-deep text-console-text rounded font-mono"
                   />
                 </div>
 
                 <Button
                   onClick={evaluateModule2}
-                  className="h-7 bg-[#06B6D4] hover:bg-[#06B6D4]/90 text-white font-mono text-[9px] uppercase px-3 rounded"
+                  className="h-7 bg-console-cyan hover:bg-console-cyan/90 text-console-text font-mono text-[9px] uppercase px-3 rounded"
                 >
                   Analyze Text
                 </Button>
 
                 {mod2Result && (
-                  <div className="border border-[#263548]/40 bg-[#0B1220]/60 rounded p-3 space-y-2.5 text-[10px]">
+                  <div className="border border-console-border/40 bg-console-deep/60 rounded p-3 space-y-2.5 text-[10px]">
                     {mod2Result.error ? (
                       <div className="space-y-1">
-                        <span className="font-bold text-[#EF4444]">AI unavailable</span>
-                        <p className="text-[9px] leading-relaxed text-[#EF4444]/80">
+                        <span className="font-bold text-console-red">AI unavailable</span>
+                        <p className="text-[9px] leading-relaxed text-console-red/80">
                           No analysis was produced. {mod2Result.error}
                         </p>
                       </div>
                     ) : (
                       <>
-                        <div className="text-[9px] uppercase text-[#64748B]">
+                        <div className="text-[9px] uppercase text-console-label">
                           Generated by {mod2Result.model}
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[#94A3B8]/60 uppercase text-[9px] block">
+                          <span className="text-console-muted/60 uppercase text-[9px] block">
                             Named entities ({mod2Result.ner.length}):
                           </span>
                           {mod2Result.ner.length === 0 ? (
-                            <p className="text-[#94A3B8]">
+                            <p className="text-console-muted">
                               The model extracted no entities from this text.
                             </p>
                           ) : (
@@ -579,7 +579,7 @@ function TasksPage() {
                                 <Badge
                                   key={idx}
                                   variant="outline"
-                                  className="border-[#263548] text-white bg-[#111827] text-[8px] rounded-none h-4 uppercase"
+                                  className="border-console-border text-console-text bg-console-surface text-[8px] rounded-none h-4 uppercase"
                                 >
                                   {ent.entity} · {ent.type} · {ent.confidence}
                                 </Badge>
@@ -589,19 +589,19 @@ function TasksPage() {
                         </div>
                         <div className="flex justify-between">
                           <span>Topic:</span>
-                          <strong className="text-white uppercase">{mod2Result.topic}</strong>
+                          <strong className="text-console-text uppercase">{mod2Result.topic}</strong>
                         </div>
                         <div className="flex justify-between">
                           <span>Sentiment / threat level:</span>
-                          <strong className="text-white uppercase">
+                          <strong className="text-console-text uppercase">
                             {mod2Result.sentiment} / {mod2Result.threatLevel}
                           </strong>
                         </div>
-                        <div className="space-y-0.5 border-t border-[#263548]/30 pt-1.5 mt-1.5">
-                          <span className="text-[#94A3B8]/60 uppercase text-[9px] block font-bold">
+                        <div className="space-y-0.5 border-t border-console-border/30 pt-1.5 mt-1.5">
+                          <span className="text-console-muted/60 uppercase text-[9px] block font-bold">
                             Summary:
                           </span>
-                          <p className="italic text-white">"{mod2Result.summary}"</p>
+                          <p className="italic text-console-text">"{mod2Result.summary}"</p>
                         </div>
                       </>
                     )}
@@ -613,15 +613,15 @@ function TasksPage() {
 
           {/* Tab 4: Module 3 — NOT IMPLEMENTED */}
           {activeTab === "mod3" && (
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#64748B]" />
-              <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-label" />
+              <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted">
                   Module 3: Social Intelligence — Not Implemented
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4 space-y-3 text-[10px] text-[#94A3B8] font-mono leading-relaxed">
-                <p className="text-[#F59E0B]">
+              <CardContent className="p-4 space-y-3 text-[10px] text-console-muted font-mono leading-relaxed">
+                <p className="text-console-amber">
                   This module does not produce a result. Nothing is calculated.
                 </p>
                 <p>
@@ -631,7 +631,7 @@ function TasksPage() {
                   measured anything.
                 </p>
                 <p>
-                  <span className="text-[#F3F4F6] font-bold">What does work:</span> Reddit RSS
+                  <span className="text-console-text font-bold">What does work:</span> Reddit RSS
                   collection and Google News <code>site:</code> queries, on the News and Recon
                   pages. Bot scoring, influence mapping and narrative alignment are not built.
                   Instagram and Facebook require paid API access.
@@ -642,15 +642,15 @@ function TasksPage() {
 
           {/* Tab 5: Module 4 — NOT IMPLEMENTED */}
           {activeTab === "mod4" && (
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#64748B]" />
-              <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8]">
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-label" />
+              <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-muted">
                   Module 4: Computer Vision — Not Implemented
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4 space-y-3 text-[10px] text-[#94A3B8] font-mono leading-relaxed">
-                <p className="text-[#F59E0B]">
+              <CardContent className="p-4 space-y-3 text-[10px] text-console-muted font-mono leading-relaxed">
+                <p className="text-console-amber">
                   This module does not produce a result. No image is read.
                 </p>
                 <p>
