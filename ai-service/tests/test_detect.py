@@ -86,3 +86,45 @@ def test_detect_known_limitation_confident_false_positive_on_absent_object(gdino
         "if this now returns zero detections, the known false-positive limitation "
         "may be resolved — verify and update the docs, don't just delete this test"
     )
+
+
+def test_detect_does_not_lose_or_merge_results_across_many_prompts(gdino):
+    """
+    Regression test for a real bug found live 2026-08-20: the original
+    implementation joined every prompt into one "a. b. c." string for a
+    single Grounding DINO forward pass (its own documented multi-class
+    convention). With enough simultaneous prompts, phrase-grounding confused
+    adjacent prompt boundaries — verified two distinct failure modes:
+
+    1. A detection that clears the threshold when its prompt runs ALONE can
+       vanish entirely when batched with others. Measured: "a flag" alone
+       scores ~0.46 on this fixture (comfortably above box_threshold=0.35);
+       batched with 3 other prompts, it did not appear in the results at all.
+    2. Labels from different prompts can merge into one garbled string, e.g.
+       "a remote control a rifle" — neither prompt on its own.
+
+    `detect()` now runs one forward pass per prompt instead of one combined
+    pass. This asserts both failure modes stay fixed: a prompt that clears
+    the threshold alone must still appear when combined with others, and
+    every returned label must be exactly one of the input prompts, never a
+    concatenation of two.
+    """
+    model, processor, device = gdino
+    data = _read("08_detect_cats_remote.jpg")
+    prompts = ["a rifle", "a military vehicle", "a flag", "smoke"]
+
+    results = detect(data, prompts, model, processor, device, 0.35, 0.25)
+
+    normalized_prompts = {p.strip().lower() for p in prompts}
+    for r in results:
+        assert r["label"].strip().lower() in normalized_prompts, (
+            f"label {r['label']!r} is not exactly one input prompt — looks like a merged/garbled "
+            "label from a shared multi-prompt forward pass"
+        )
+
+    labels = {r["label"].strip().lower() for r in results}
+    assert "a flag" in labels, (
+        "a flag scores above threshold when run alone on this fixture and must still appear "
+        "when combined with other prompts — if this fails, per-prompt detection regressed "
+        "back to a single combined forward pass"
+    )

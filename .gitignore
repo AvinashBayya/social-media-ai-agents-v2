@@ -40,7 +40,29 @@ data/credentials.json
 data/credentials.prev.json
 # Analyst weight profiles \u2014 operator data, must not enter the repo.
 data/credibility-profiles.json
+# Pre-cleanup Lovable snapshot that reappeared mid-session, unexplained, with
+# an unresolved merge conflict — contains a real (live-format) Gemini API key
+# in .env and a real plaintext Instagram/Facebook credential pair in
+# data/credentials.json. The nested worldmonitor-main/ entry below already
+# covered the unrelated third-party project bundled inside it; this covers
+# the outer wrapper, which is where the actual secrets are.
+social-media-ai-agents--main/
 worldmonitor-main/
+
+# Zip downloads of six real third-party OSINT tool repos (theHarvester GPL-2.0,
+# maltego-telegram GPL-3.0, amass Apache-2.0, spiderfoot MIT, shodan-main
+# unlicensed API-spec, MailAccess — 219MB of which is someone else's compiled
+# Python virtualenv). Kept locally for reference; not vendored into this repo
+# to avoid GPL-compliance ambiguity and an unlicensed-reproduction question.
+Dump_of_OSINT_data/
+
+# Copyrighted celebrity publicity photo (mislabeled in a test comment as a
+# generic bundled library sample) and a face crop derived from it — real,
+# identifiable, famous individuals in a professionally shot promo image, not
+# rights-cleared for this repo. The face-matching test code itself is fine;
+# only these two binary fixtures are excluded.
+ai-service/tests/fixtures/09_faces_group.jpg
+ai-service/tests/fixtures/10_face_reference.jpg
 
 # Local dev helper, not part of the project
 preflight.sh
@@ -56,4 +78,7 @@ data/social_cache.json*
 # Optional SQLite-backed OSINT job store (JOB_STORE_PATH) — local runtime
 # state, not source; -wal/-shm are SQLite's WAL-mode companion files.
 data/jobs.sqlite*
+# Person Investigation audit log (PERSON_AUDIT_LOG_PATH) — local runtime
+# state containing real investigator/case/subject data, not source.
+data/person-investigation-audit.jsonl
 /*.js

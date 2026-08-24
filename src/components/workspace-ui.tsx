@@ -17,10 +17,10 @@ export function ClassifiedHeader({ level = "SECRET", className = "" }: Classifie
 
   return (
     <div
-      className={`flex items-center justify-between border-b border-[#263548]/40 pb-2 mb-2 font-mono text-[9px] ${className}`}
+      className={`flex items-center justify-between border-b border-console-border/40 pb-2 mb-2 font-mono text-[9px] ${className}`}
     >
-      <span className="text-[#94A3B8]/60 flex items-center gap-1">
-        <ShieldCheck className="size-3 text-[#3B82F6]" /> CONTROL SYSTEM: OSINT//STRICT
+      <span className="text-console-muted/60 flex items-center gap-1">
+        <ShieldCheck className="size-3 text-console-blue" /> CONTROL SYSTEM: OSINT//STRICT
       </span>
       <Badge
         variant="outline"
@@ -39,7 +39,7 @@ interface TacticalPanelProps {
   actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-  sideStripColor?: string; // e.g. "bg-[#3B82F6]"
+  sideStripColor?: string; // e.g. "bg-console-blue"
 }
 
 export function TacticalPanel({
@@ -48,15 +48,15 @@ export function TacticalPanel({
   actions,
   children,
   className = "",
-  sideStripColor = "bg-[#263548]",
+  sideStripColor = "bg-console-border",
 }: TacticalPanelProps) {
   return (
     <div
-      className={`bg-[#111827] border border-[#263548] rounded relative overflow-hidden font-mono ${className}`}
+      className={`bg-console-surface border border-console-border rounded relative overflow-hidden font-mono ${className}`}
     >
       <div className={`absolute top-0 left-0 h-full w-0.5 ${sideStripColor}`} />
-      <div className="p-3 border-b border-[#263548] bg-[#0B1220]/20 flex justify-between items-center pb-2">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[#94A3B8] flex items-center gap-1.5">
+      <div className="p-3 border-b border-console-border bg-console-deep/20 flex justify-between items-center pb-2">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-console-muted flex items-center gap-1.5">
           {icon} {title}
         </span>
         {actions && <div className="flex items-center gap-1.5">{actions}</div>}
@@ -77,16 +77,16 @@ interface EmptyStateProps {
 export function EmptyState({
   title = "No Telemetry Indexed",
   message = "Execute query to pull live coordinates and matches.",
-  icon = <AlertTriangle className="size-5 text-[#F59E0B] mx-auto mb-1.5" />,
+  icon = <AlertTriangle className="size-5 text-console-amber mx-auto mb-1.5" />,
   className = "",
 }: EmptyStateProps) {
   return (
     <div
-      className={`text-center py-8 text-[#94A3B8]/60 bg-[#111827] border border-[#263548] rounded font-mono text-[10px] ${className}`}
+      className={`text-center py-8 text-console-muted/60 bg-console-surface border border-console-border rounded font-mono text-[10px] ${className}`}
     >
       {icon}
-      <h4 className="font-bold text-white uppercase mt-1">{title}</h4>
-      <p className="text-[9px] mt-0.5 text-[#94A3B8]/50 max-w-xs mx-auto leading-normal">
+      <h4 className="font-bold text-console-text uppercase mt-1">{title}</h4>
+      <p className="text-[9px] mt-0.5 text-console-muted/50 max-w-xs mx-auto leading-normal">
         {message}
       </p>
     </div>
@@ -102,11 +102,11 @@ interface SkeletonLoaderProps {
 export function SkeletonLoader({ lines = 3, className = "" }: SkeletonLoaderProps) {
   return (
     <div
-      className={`p-4 border border-[#263548] bg-[#111827] rounded animate-pulse space-y-2.5 ${className}`}
+      className={`p-4 border border-console-border bg-console-surface rounded animate-pulse space-y-2.5 ${className}`}
     >
-      <div className="h-3 w-1/3 bg-[#263548] rounded" />
+      <div className="h-3 w-1/3 bg-console-border rounded" />
       {Array.from({ length: lines }).map((_, idx) => (
-        <div key={idx} className="h-2 w-full bg-[#263548]/60 rounded" />
+        <div key={idx} className="h-2 w-full bg-console-border/60 rounded" />
       ))}
     </div>
   );
@@ -121,20 +121,20 @@ interface TableSkeletonProps {
 
 export function TableSkeleton({ rows = 3, cols = 4, className = "" }: TableSkeletonProps) {
   return (
-    <div className={`border border-[#263548] bg-[#111827] rounded animate-pulse ${className}`}>
-      <div className="bg-[#0B1220]/40 p-2.5 border-b border-[#263548] flex justify-between">
+    <div className={`border border-console-border bg-console-surface rounded animate-pulse ${className}`}>
+      <div className="bg-console-deep/40 p-2.5 border-b border-console-border flex justify-between">
         {Array.from({ length: cols }).map((_, idx) => (
-          <div key={idx} className="h-2 w-16 bg-[#263548] rounded" />
+          <div key={idx} className="h-2 w-16 bg-console-border rounded" />
         ))}
       </div>
       <div className="p-2 space-y-2.5">
         {Array.from({ length: rows }).map((_, rowIdx) => (
           <div
             key={rowIdx}
-            className="flex justify-between pb-1.5 border-b border-[#263548]/10 last:border-b-0"
+            className="flex justify-between pb-1.5 border-b border-console-border/10 last:border-b-0"
           >
             {Array.from({ length: cols }).map((_, colIdx) => (
-              <div key={colIdx} className="h-2 w-14 bg-[#263548]/50 rounded" />
+              <div key={colIdx} className="h-2 w-14 bg-console-border/50 rounded" />
             ))}
           </div>
         ))}

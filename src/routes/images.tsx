@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,17 @@ import {
   ChevronRight,
   Info,
   Tags,
+  Newspaper,
+  Youtube,
+  Images,
+  BookOpen,
+  MessageCircle,
+  Globe2,
+  ImageOff,
 } from "lucide-react";
 import {
   assessProvenance,
   findNearDuplicates,
-  C2PA_ABSENCE_NOTE,
   OCR_LANGUAGES,
   OCR_LOW_CONFIDENCE,
   type C2paReport,
@@ -47,8 +53,27 @@ import {
 import { hashRgba } from "@/utils/imaging";
 import { ExifMap } from "@/components/exif-map";
 import { NotImplementedPanel } from "@/components/not-implemented";
+import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
+import {
+  aiServiceOcrVlm,
+  AiServiceUnavailableError,
+  type AiOcrVlmResult,
+} from "@/utils/ai-service-client";
 import { PinButton } from "@/components/pin-button";
 import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
+import { getActiveTarget } from "@/utils/active-target";
+import {
+  fetchNewsImages,
+  fetchWikipediaImages,
+  fetchOpenverseImages,
+  type NewsImageResult,
+  type WikipediaImageResult,
+  type OpenverseImageResult,
+} from "@/utils/image-sources";
+import { serverSearchYoutubeVideos, type YoutubeSearchResult } from "@/utils/youtube-collector";
+import { socialReddit } from "@/utils/social";
+import type { SocialMedia } from "@/utils/social";
+import { buildPlainQuery, parseQuery } from "@/utils/search";
 
 /**
  * Image Intelligence — Module 4 analysis workbench (PS-18 §6.4).
@@ -87,10 +112,19 @@ export const Route = createFileRoute("/images")({
   component: Page,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 /** Default OCR selection: English plus Hindi covers most Indian-language signage. */
 const DEFAULT_LANGS = ["eng", "hin"];
+
+/** A single real image, flattened out of a Reddit post's SocialMedia[]. */
+interface RedditImageResult {
+  url: string;
+  thumbnailUrl: string | null;
+  title: string;
+  postUrl: string;
+  author: string;
+}
 
 interface Analysis {
   name: string;
@@ -103,6 +137,14 @@ interface Analysis {
   exifError: string | null;
   c2pa: C2paReport | null;
   duplicates: DuplicateReport | null;
+  /**
+   * Real image bytes, kept only for the ai-service panel below (detection,
+   * description, faces all need to POST the file). null when analysing a
+   * URL whose bytes could not be fetched (the same CORS case that already
+   * leaves exifError set) — the panel reports that as a real absence of
+   * bytes to send, not as "zero objects found".
+   */
+  blob: Blob | null;
 }
 
 function Section({
@@ -124,17 +166,68 @@ function Section({
       <CardContent className="p-4">
         <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 text-left">
           {open ? (
-            <ChevronDown className="size-3.5 shrink-0 text-[#64748B]" />
+            <ChevronDown className="size-3.5 shrink-0 text-console-label" />
           ) : (
-            <ChevronRight className="size-3.5 shrink-0 text-[#64748B]" />
+            <ChevronRight className="size-3.5 shrink-0 text-console-label" />
           )}
           {icon}
-          <span className="text-xs font-bold uppercase text-white">{title}</span>
-          {subtitle && <span className="ml-auto text-[10px] text-[#64748B]">{subtitle}</span>}
+          <span className="text-xs font-bold uppercase text-console-text">{title}</span>
+          {subtitle && <span className="ml-auto text-[10px] text-console-label">{subtitle}</span>}
         </button>
         {open && <div className="mt-3">{children}</div>}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Related-image thumbnails come from external hosts (GDELT's crawled
+ * og:image, YouTube's CDN, Wikipedia/Openverse's originals) with no
+ * guarantee the URL still resolves — hotlink protection, a deleted upload,
+ * a CORS-blocked host. A plain `<img>` with no error handling just leaves a
+ * blank/broken box, observed live on Openverse results. Falls back from
+ * `src` to `fallbackSrc` (a thumbnail failing over to the full-size image,
+ * where one exists) once, then shows an explicit "preview unavailable"
+ * placeholder — never a substitute image, matching this panel's own "no
+ * invented previews" rule.
+ */
+function ThumbnailImage({
+  src,
+  fallbackSrc,
+  alt,
+  className,
+}: {
+  src: string;
+  fallbackSrc?: string | null;
+  alt: string;
+  className: string;
+}) {
+  const [stage, setStage] = useState<"primary" | "fallback" | "broken">("primary");
+
+  if (stage === "broken") {
+    return (
+      <div
+        className={`${className} flex items-center justify-center bg-console-deep text-console-label`}
+        title="Preview unavailable"
+      >
+        <ImageOff className="size-4" />
+      </div>
+    );
+  }
+
+  const current = stage === "fallback" && fallbackSrc ? fallbackSrc : src;
+  return (
+    <img
+      src={current}
+      alt={alt}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className={className}
+      onError={() => {
+        if (stage === "primary" && fallbackSrc && fallbackSrc !== src) setStage("fallback");
+        else setStage("broken");
+      }}
+    />
   );
 }
 
@@ -153,6 +246,201 @@ function Page() {
   const [showRaw, setShowRaw] = useState(false);
   const [entities, setEntities] = useState<AnalysisEntity[] | null>(null);
   const [entityError, setEntityError] = useState("");
+
+  // ── Florence-2 OCR (ai-service) — a sibling of Tesseract OCR above, for
+  // the case Tesseract structurally struggles with: legible text sharing
+  // the frame with a busy photo. See ai-service-client.ts's
+  // aiServiceOcrVlm doc comment.
+  const [ocrVlm, setOcrVlm] = useState<AiOcrVlmResult | null>(null);
+  const [ocrVlmError, setOcrVlmError] = useState("");
+  const [ocrVlmLoading, setOcrVlmLoading] = useState(false);
+
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. The mount+listener effect below
+  // sets the real value client-side and keeps it in sync with the top-nav
+  // search bar, matching the pattern used on every other route that shares
+  // this global target.
+  const [target, setTarget] = useState("");
+  // Wikipedia's plain search and Openverse understand neither quotes nor
+  // boolean operators — a query like `"sourav das" + "cjp"` searches for
+  // those literal characters on both and returns nothing, verified live.
+  // GDELT and Reddit both parse quoted phrases natively, so they keep using
+  // `target` as-is; only these two get the flattened, operator-free form.
+  const plainQuery = useMemo(() => {
+    const parsed = parseQuery(target);
+    return buildPlainQuery(parsed) || target.trim();
+  }, [target]);
+  const [newsImages, setNewsImages] = useState<NewsImageResult[]>([]);
+  const [newsImagesLoading, setNewsImagesLoading] = useState(false);
+  const [newsImagesError, setNewsImagesError] = useState<string | null>(null);
+  const [relatedVideos, setRelatedVideos] = useState<YoutubeSearchResult[]>([]);
+  const [relatedVideosLoading, setRelatedVideosLoading] = useState(false);
+  const [relatedVideosError, setRelatedVideosError] = useState<string | null>(null);
+  const [wikiImages, setWikiImages] = useState<WikipediaImageResult[]>([]);
+  const [wikiImagesLoading, setWikiImagesLoading] = useState(false);
+  const [wikiImagesError, setWikiImagesError] = useState<string | null>(null);
+  const [openverseImages, setOpenverseImages] = useState<OpenverseImageResult[]>([]);
+  const [openverseImagesLoading, setOpenverseImagesLoading] = useState(false);
+  const [openverseImagesError, setOpenverseImagesError] = useState<string | null>(null);
+  const [redditImages, setRedditImages] = useState<RedditImageResult[]>([]);
+  const [redditImagesLoading, setRedditImagesLoading] = useState(false);
+  const [redditImagesError, setRedditImagesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+
+    const handleTargetChange = (e: any) => {
+      if (e.detail) setTarget(e.detail);
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
+  useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      setNewsImagesLoading(true);
+      setNewsImagesError(null);
+      try {
+        const res = await fetchNewsImages({ data: { query: target } });
+        if (cancelled) return;
+        setNewsImages(res.results);
+        setNewsImagesError(res.error);
+      } catch (err: any) {
+        if (!cancelled) {
+          setNewsImages([]);
+          setNewsImagesError(err?.message ?? String(err));
+        }
+      } finally {
+        if (!cancelled) setNewsImagesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      setRelatedVideosLoading(true);
+      setRelatedVideosError(null);
+      try {
+        const res = await serverSearchYoutubeVideos({ data: { query: target } });
+        if (cancelled) return;
+        setRelatedVideos(res.results);
+        setRelatedVideosError(res.error);
+      } catch (err: any) {
+        if (!cancelled) {
+          setRelatedVideos([]);
+          setRelatedVideosError(err?.message ?? String(err));
+        }
+      } finally {
+        if (!cancelled) setRelatedVideosLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      setWikiImagesLoading(true);
+      setWikiImagesError(null);
+      try {
+        const res = await fetchWikipediaImages({ data: { query: plainQuery } });
+        if (cancelled) return;
+        setWikiImages(res.results);
+        setWikiImagesError(res.error);
+      } catch (err: any) {
+        if (!cancelled) {
+          setWikiImages([]);
+          setWikiImagesError(err?.message ?? String(err));
+        }
+      } finally {
+        if (!cancelled) setWikiImagesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target, plainQuery]);
+
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      setOpenverseImagesLoading(true);
+      setOpenverseImagesError(null);
+      try {
+        const res = await fetchOpenverseImages({ data: { query: plainQuery } });
+        if (cancelled) return;
+        setOpenverseImages(res.results);
+        setOpenverseImagesError(res.error);
+      } catch (err: any) {
+        if (!cancelled) {
+          setOpenverseImages([]);
+          setOpenverseImagesError(err?.message ?? String(err));
+        }
+      } finally {
+        if (!cancelled) setOpenverseImagesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target, plainQuery]);
+
+  // Reddit posts carry SocialPost[], not a flat image list — flattened here
+  // rather than in social.ts, since that shape is specific to this panel.
+  // A missing credential (the common case until the Reddit OAuth script app
+  // is configured — see credential-vault.ts) throws a real, honest
+  // SocialUnavailableError from fetchRedditSearch, surfaced as-is below
+  // rather than swallowed into an empty "no results" state.
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      setRedditImagesLoading(true);
+      setRedditImagesError(null);
+      try {
+        const posts = await socialReddit({ data: { query: target, limit: 50 } });
+        if (cancelled) return;
+        const flattened: RedditImageResult[] = [];
+        for (const post of posts as any[]) {
+          for (const m of (post.media ?? []) as SocialMedia[]) {
+            if (m.type !== "image") continue;
+            flattened.push({
+              url: m.url,
+              thumbnailUrl: m.thumbnailUrl,
+              title: post.text?.trim() ? post.text.trim().slice(0, 120) : "(no title text)",
+              postUrl: post.url,
+              author: post.author,
+            });
+          }
+        }
+        setRedditImages(flattened);
+      } catch (err: any) {
+        if (!cancelled) {
+          setRedditImages([]);
+          setRedditImagesError(err?.message ?? String(err));
+        }
+      } finally {
+        if (!cancelled) setRedditImagesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
 
   useEffect(() => setCorpus(loadImageCorpus()), []);
 
@@ -184,6 +472,8 @@ function Page() {
     setOcrError("");
     setEntities(null);
     setEntityError("");
+    setOcrVlm(null);
+    setOcrVlmError("");
     setAnalysis(null);
     setBusy("Decoding image");
 
@@ -194,6 +484,7 @@ function Page() {
       setBusy("Reading EXIF");
       let exif: ExifReport | null = null;
       let exifError: string | null = null;
+      let fetchedBlob: Blob | null = null;
       try {
         if (typeof source !== "string") {
           exif = await readExif(source);
@@ -207,7 +498,8 @@ function Page() {
           // claimed.
           const res = await fetch(source, { mode: "cors" });
           if (!res.ok) throw new Error(`HTTP ${res.status} fetching the image bytes.`);
-          exif = await readExif(await res.blob());
+          fetchedBlob = await res.blob();
+          exif = await readExif(fetchedBlob);
         }
       } catch (err: any) {
         // A parse or fetch failure is reported as a failure, never converted
@@ -224,6 +516,7 @@ function Page() {
 
       setBusy("Verifying Content Credentials");
       const c2pa = await readC2pa(source);
+      const blob: Blob | null = typeof source === "string" ? fetchedBlob : source;
 
       setBusy("Matching against corpus");
       const stored = loadImageCorpus();
@@ -269,6 +562,7 @@ function Page() {
         exifError,
         c2pa,
         duplicates,
+        blob,
       });
     } catch (err: any) {
       setError(
@@ -302,6 +596,23 @@ function Page() {
     }
   };
 
+  const doOcrVlm = async () => {
+    if (!analysis?.blob) return;
+    setOcrVlmLoading(true);
+    setOcrVlmError("");
+    setOcrVlm(null);
+    try {
+      const result = await aiServiceOcrVlm(analysis.blob);
+      setOcrVlm(result);
+    } catch (err: any) {
+      setOcrVlmError(
+        err instanceof AiServiceUnavailableError ? err.message : (err?.message ?? String(err)),
+      );
+    } finally {
+      setOcrVlmLoading(false);
+    }
+  };
+
   /**
    * OCR text into Module 2's entity extractor. The recognised text becomes an
    * Article, so exactly the same extractor runs over it as over a news feed —
@@ -332,6 +643,28 @@ function Page() {
     }
   };
 
+  // Passed to AiAnalysisPanel, which appends its own detect/describe/faces
+  // findings and calls llmReport — this is everything the forensic panel
+  // above already knows, so the report doesn't have to re-derive it.
+  const reportContextLines: string[] = analysis
+    ? [
+        `Perceptual hash: ${analysis.hash} (${analysis.width}x${analysis.height})`,
+        analysis.exif
+          ? `EXIF: ${analysis.exif.findings.map((f) => `${f.label}: ${f.value}`).join("; ") || "present, no notable fields"}`
+          : `EXIF: ${analysis.exifError ? `read failed — ${analysis.exifError}` : "absent"}`,
+        ...(analysis.c2pa ? [`C2PA Content Credentials: ${analysis.c2pa.summary}`] : []),
+        ...(analysis.duplicates?.matches.length
+          ? [`Near-duplicate matches: ${analysis.duplicates.summary}`]
+          : []),
+        ...(ocr?.text.trim()
+          ? [`OCR text (${ocr.languages.join("+")}): ${ocr.text.trim().slice(0, 1500)}`]
+          : []),
+        ...(ocrVlm?.text.trim()
+          ? [`Florence-2 OCR text: ${ocrVlm.text.trim().slice(0, 1500)}`]
+          : []),
+      ]
+    : [];
+
   const provenance = analysis
     ? assessProvenance({
         exif: analysis.exif,
@@ -342,11 +675,11 @@ function Page() {
 
   const statusIcon = (s: C2paReport["status"] | undefined) =>
     s === "valid" ? (
-      <ShieldCheck className="size-3.5 text-[#10B981]" />
+      <ShieldCheck className="size-3.5 text-console-green" />
     ) : s === "invalid" ? (
-      <ShieldAlert className="size-3.5 text-[#EF4444]" />
+      <ShieldAlert className="size-3.5 text-console-red" />
     ) : (
-      <ShieldQuestion className="size-3.5 text-[#64748B]" />
+      <ShieldQuestion className="size-3.5 text-console-label" />
     );
 
   return (
@@ -355,6 +688,368 @@ function Page() {
         title="Image Intelligence"
         description="Provenance-first image forensics. C2PA verification, EXIF, OCR and perceptual matching — all in this browser; the file is never uploaded."
       />
+
+      {/* ── Related images from news & open source ──────────────────────── */}
+      <Card className={`${CARD} mb-4`}>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-1.5">
+            <Images className="size-3.5 text-console-blue" />
+            <span className="text-xs font-bold uppercase text-console-text">
+              Related Images — News &amp; Open Source
+            </span>
+            {target && <span className="font-mono text-[10px] text-console-label">for "{target}"</span>}
+          </div>
+          <p className="mt-1 text-[10px] leading-relaxed text-console-label">
+            Real thumbnails only — no invented previews. "Analyse" loads the actual image into the
+            pipeline below exactly as if it had been pasted into the URL field; cross-origin EXIF
+            reads may still be CORS-blocked, reported as a failed read below, same as any pasted URL.
+          </p>
+
+          {!target ? (
+            <p className="mt-3 text-[11px] text-console-label">
+              Set a target with the search bar above to find related images.
+            </p>
+          ) : (
+            <div className="mt-3 grid gap-4 lg:grid-cols-3 2xl:grid-cols-5">
+              {/* News */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <Newspaper className="size-3 text-console-muted" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                    From collected news (GDELT)
+                  </span>
+                  {newsImagesLoading && (
+                    <Loader2 className="size-3 animate-spin text-console-label" />
+                  )}
+                </div>
+                {newsImagesError ? (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="font-mono text-[10px] leading-relaxed text-console-red">
+                      {newsImagesError}
+                    </span>
+                  </div>
+                ) : !newsImagesLoading && newsImages.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-console-label">
+                    No article thumbnails found for "{target}". GDELT does not detect a social
+                    image for every article, so this can be empty even with real coverage.
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                    {newsImages.map((n, i) => (
+                      <div
+                        key={`${n.url}-${i}`}
+                        className="flex items-center gap-2 rounded border border-console-border bg-console-deep/60 p-2"
+                      >
+                        <ThumbnailImage
+                          src={n.url}
+                          alt=""
+                          className="size-14 shrink-0 rounded border border-console-border object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          {n.articleUrl ? (
+                            <a
+                              href={n.articleUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block truncate text-[11px] text-console-text hover:underline"
+                            >
+                              {n.title}
+                            </a>
+                          ) : (
+                            <span className="block truncate text-[11px] text-console-text">
+                              {n.title}
+                            </span>
+                          )}
+                          <span className="font-mono text-[9px] text-console-label">
+                            {n.domain}
+                            {n.publishedAt ? ` · ${new Date(n.publishedAt).toLocaleDateString()}` : ""}
+                          </span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setUrlDraft(n.url);
+                            void analyse(n.url, n.title);
+                          }}
+                          className="h-6 shrink-0 gap-1 px-2 text-[9px]"
+                          title="Analyse this article thumbnail — EXIF, C2PA, OCR, perceptual hash"
+                        >
+                          Analyse
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* YouTube thumbnails */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <Youtube className="size-3 text-console-muted" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                    From YouTube (open source video)
+                  </span>
+                  {relatedVideosLoading && (
+                    <Loader2 className="size-3 animate-spin text-console-label" />
+                  )}
+                </div>
+                {relatedVideosError ? (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="font-mono text-[10px] leading-relaxed text-console-red">
+                      {relatedVideosError}
+                    </span>
+                  </div>
+                ) : !relatedVideosLoading && relatedVideos.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-console-label">
+                    No YouTube videos found for "{target}".
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                    {relatedVideos.map((v, i) => {
+                      const thumbUrl = `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+                      return (
+                        <div
+                          key={`${v.videoId}-${i}`}
+                          className="flex items-center gap-2 rounded border border-console-border bg-console-deep/60 p-2"
+                        >
+                          <ThumbnailImage
+                            src={thumbUrl}
+                            alt=""
+                            className="size-14 shrink-0 rounded border border-console-border object-cover"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <a
+                              href={v.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block truncate text-[11px] text-console-text hover:underline"
+                            >
+                              {v.title}
+                            </a>
+                            <span className="font-mono text-[9px] text-console-label">
+                              {v.channel ?? "unknown channel"}
+                              {v.publishedTimeText ? ` · ${v.publishedTimeText}` : ""}
+                            </span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setUrlDraft(thumbUrl);
+                              void analyse(thumbUrl, v.title);
+                            }}
+                            className="h-6 shrink-0 gap-1 px-2 text-[9px]"
+                            title="Analyse this video's thumbnail — EXIF, C2PA, OCR, perceptual hash"
+                          >
+                            Analyse
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Wikipedia */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <BookOpen className="size-3 text-console-muted" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                    From Wikipedia (open source)
+                  </span>
+                  {wikiImagesLoading && (
+                    <Loader2 className="size-3 animate-spin text-console-label" />
+                  )}
+                </div>
+                {wikiImagesError ? (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="font-mono text-[10px] leading-relaxed text-console-red">
+                      {wikiImagesError}
+                    </span>
+                  </div>
+                ) : !wikiImagesLoading && wikiImages.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-console-label">
+                    No Wikipedia page images found for "{plainQuery}".
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                    {wikiImages.map((w, i) => (
+                      <div
+                        key={`${w.url}-${i}`}
+                        className="flex items-center gap-2 rounded border border-console-border bg-console-deep/60 p-2"
+                      >
+                        <ThumbnailImage
+                          src={w.url}
+                          alt=""
+                          className="size-14 shrink-0 rounded border border-console-border object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <a
+                            href={w.pageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-[11px] text-console-text hover:underline"
+                          >
+                            {w.title}
+                          </a>
+                          <span className="font-mono text-[9px] text-console-label">en.wikipedia.org</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setUrlDraft(w.url);
+                            void analyse(w.url, w.title);
+                          }}
+                          className="h-6 shrink-0 gap-1 px-2 text-[9px]"
+                          title="Analyse this Wikipedia page image — EXIF, C2PA, OCR, perceptual hash"
+                        >
+                          Analyse
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Openverse */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <Globe2 className="size-3 text-console-muted" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                    From Openverse (open licence)
+                  </span>
+                  {openverseImagesLoading && (
+                    <Loader2 className="size-3 animate-spin text-console-label" />
+                  )}
+                </div>
+                {openverseImagesError ? (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="font-mono text-[10px] leading-relaxed text-console-red">
+                      {openverseImagesError}
+                    </span>
+                  </div>
+                ) : !openverseImagesLoading && openverseImages.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-console-label">
+                    No openly-licensed images found on Openverse for "{plainQuery}".
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                    {openverseImages.map((o, i) => (
+                      <div
+                        key={`${o.url}-${i}`}
+                        className="flex items-center gap-2 rounded border border-console-border bg-console-deep/60 p-2"
+                      >
+                        <ThumbnailImage
+                          src={o.thumbnailUrl ?? o.url}
+                          fallbackSrc={o.thumbnailUrl ? o.url : null}
+                          alt=""
+                          className="size-14 shrink-0 rounded border border-console-border object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <a
+                            href={o.sourcePageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-[11px] text-console-text hover:underline"
+                          >
+                            {o.title}
+                          </a>
+                          <span className="font-mono text-[9px] text-console-label">
+                            {o.creator ?? "creator not reported"}
+                            {o.license ? ` · ${o.license}` : ""}
+                          </span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setUrlDraft(o.url);
+                            void analyse(o.url, o.title);
+                          }}
+                          className="h-6 shrink-0 gap-1 px-2 text-[9px]"
+                          title="Analyse this Openverse image — EXIF, C2PA, OCR, perceptual hash"
+                        >
+                          Analyse
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Reddit */}
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <MessageCircle className="size-3 text-console-muted" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                    From Reddit (open source)
+                  </span>
+                  {redditImagesLoading && (
+                    <Loader2 className="size-3 animate-spin text-console-label" />
+                  )}
+                </div>
+                {redditImagesError ? (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="font-mono text-[10px] leading-relaxed text-console-red">
+                      {redditImagesError}
+                    </span>
+                  </div>
+                ) : !redditImagesLoading && redditImages.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-console-label">
+                    No Reddit image posts found for "{target}".
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                    {redditImages.map((r, i) => (
+                      <div
+                        key={`${r.url}-${i}`}
+                        className="flex items-center gap-2 rounded border border-console-border bg-console-deep/60 p-2"
+                      >
+                        <ThumbnailImage
+                          src={r.thumbnailUrl ?? r.url}
+                          fallbackSrc={r.thumbnailUrl ? r.url : null}
+                          alt=""
+                          className="size-14 shrink-0 rounded border border-console-border object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <a
+                            href={r.postUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-[11px] text-console-text hover:underline"
+                          >
+                            {r.title}
+                          </a>
+                          <span className="font-mono text-[9px] text-console-label">u/{r.author}</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setUrlDraft(r.url);
+                            void analyse(r.url, r.title);
+                          }}
+                          className="h-6 shrink-0 gap-1 px-2 text-[9px]"
+                          title="Analyse this Reddit image — EXIF, C2PA, OCR, perceptual hash"
+                        >
+                          Analyse
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className={`${CARD} mb-4`}>
         <CardContent className="p-4">
@@ -388,7 +1083,7 @@ function Page() {
                   e.key === "Enter" && urlDraft.trim() && analyse(urlDraft.trim(), urlDraft.trim())
                 }
                 placeholder="…or paste an image URL"
-                className="h-8 border-[#263548] bg-[#0B1220] text-[11px] text-white"
+                className="h-8 border-console-border bg-console-deep text-[11px] text-console-text"
               />
             </div>
             <Button
@@ -400,12 +1095,12 @@ function Page() {
             >
               Analyse URL
             </Button>
-            <span className="text-[10px] text-[#64748B]">
+            <span className="text-[10px] text-console-label">
               {corpus.length} image(s) hashed in this browser
             </span>
           </div>
 
-          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-label">
             <Info className="mt-px size-3 shrink-0" />
             Provenance beats classification. A C2PA signature either verifies or it does not — no
             threshold, no false positives. A deepfake score is a guess, so this system does not
@@ -413,9 +1108,9 @@ function Page() {
           </p>
 
           {error && (
-            <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-              <span className="font-mono text-[10px] leading-relaxed text-[#EF4444]">{error}</span>
+            <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+              <span className="font-mono text-[10px] leading-relaxed text-console-red">{error}</span>
             </div>
           )}
         </CardContent>
@@ -425,9 +1120,9 @@ function Page() {
         <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
           <Card className={CARD}>
             <CardContent className="p-10 text-center">
-              <Camera className="mx-auto size-8 text-[#263548]" />
-              <p className="mt-3 text-sm text-[#94A3B8]">No image loaded.</p>
-              <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-[#64748B]">
+              <Camera className="mx-auto size-8 text-console-border" />
+              <p className="mt-3 text-sm text-console-muted">No image loaded.</p>
+              <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-console-label">
                 Upload a file or paste a URL. Nothing is analysed until you do, and nothing is sent
                 anywhere — EXIF parsing, C2PA verification, OCR and hashing all run as WebAssembly
                 in this tab.
@@ -445,10 +1140,10 @@ function Page() {
                 <img
                   src={analysis.previewUrl}
                   alt={analysis.name}
-                  className="max-h-[420px] w-full rounded-t-lg bg-[#0B1220] object-contain"
+                  className="max-h-[420px] w-full rounded-t-lg bg-console-deep object-contain"
                 />
-                <div className="flex flex-wrap items-center gap-2 border-t border-[#263548] p-3 font-mono text-[10px] text-[#94A3B8]">
-                  <span className="truncate font-semibold text-white">{analysis.name}</span>
+                <div className="flex flex-wrap items-center gap-2 border-t border-console-border p-3 font-mono text-[10px] text-console-muted">
+                  <span className="truncate font-semibold text-console-text">{analysis.name}</span>
                   <span>
                     {analysis.width}×{analysis.height}
                   </span>
@@ -460,7 +1155,7 @@ function Page() {
                     pHash {analysis.hash}
                     <button
                       onClick={() => navigator.clipboard?.writeText(analysis.hash)}
-                      className="text-[#3B82F6] hover:underline"
+                      className="text-console-blue hover:underline"
                       title="Copy hash"
                     >
                       <Copy className="size-3" />
@@ -509,63 +1204,6 @@ function Page() {
               </CardContent>
             </Card>
 
-            {/* ── Provenance assessment ───────────────────────────────────── */}
-            {provenance && (
-              <Card className="border-[#3B82F6]/30 bg-[#111827]">
-                <CardContent className="p-4">
-                  <h3 className="text-xs font-bold uppercase text-white">Provenance assessment</h3>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-[#F3F4F6]">
-                    {provenance.summary}
-                  </p>
-
-                  <div className="mt-3 space-y-1.5">
-                    {provenance.findings.map((f, i) => (
-                      <div
-                        key={i}
-                        className={`rounded border p-2 ${
-                          f.strength === "verified"
-                            ? "border-[#10B981]/40 bg-[#10B981]/5"
-                            : f.strength === "observed"
-                              ? "border-[#F59E0B]/30 bg-[#F59E0B]/5"
-                              : "border-[#263548] bg-[#0B1220]/60"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-semibold text-white">{f.label}</span>
-                          <Badge
-                            variant="outline"
-                            className="ml-auto shrink-0 border-[#263548] text-[9px] font-normal text-[#94A3B8]"
-                          >
-                            {f.strength}
-                          </Badge>
-                        </div>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
-                          {f.detail}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 rounded border border-[#64748B]/30 bg-[#0B1220]/60 p-2.5">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
-                      What this system could NOT determine about this file
-                    </div>
-                    <ul className="mt-1 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-[#94A3B8]">
-                      {provenance.cannotDetermine.map((c, i) => (
-                        <li key={i}>{c}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <p className="mt-2 text-[10px] italic text-[#64748B]">
-                    This is a summary of findings, not a verdict. There is deliberately no
-                    authenticity score — any single number here would be read as one, and we have no
-                    basis for it.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
             {/* ── C2PA ────────────────────────────────────────────────────── */}
             <Section
               icon={statusIcon(analysis.c2pa?.status)}
@@ -574,16 +1212,16 @@ function Page() {
             >
               {analysis.c2pa && (
                 <>
-                  <p className="text-[11px] leading-relaxed text-[#F3F4F6]">
+                  <p className="text-[11px] leading-relaxed text-console-text">
                     {analysis.c2pa.summary}
                   </p>
 
                   {analysis.c2pa.aiGenerated && (
-                    <div className="mt-2 rounded border border-[#8B5CF6]/40 bg-[#8B5CF6]/10 p-2">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#8B5CF6]">
+                    <div className="mt-2 rounded border border-console-purple/40 bg-console-purple/10 p-2">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-console-purple">
                         Declared AI-generated — high confidence
                       </div>
-                      <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                      <p className="mt-0.5 text-[10px] leading-relaxed text-console-muted">
                         {analysis.c2pa.aiEvidence} This is the only high-confidence AI finding this
                         system produces, because it is declared by the producing tool and
                         cryptographically signed rather than inferred from the pixels.
@@ -592,7 +1230,7 @@ function Page() {
                   )}
 
                   {analysis.c2pa.validationIssues.length > 0 && (
-                    <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[10px] text-[#EF4444]">
+                    <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[10px] text-console-red">
                       {analysis.c2pa.validationIssues.map((v, i) => (
                         <li key={i}>{v}</li>
                       ))}
@@ -601,18 +1239,18 @@ function Page() {
 
                   {analysis.c2pa.actions.length > 0 && (
                     <div className="mt-2">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
                         Signed provenance chain
                       </div>
                       <ol className="mt-1 space-y-1">
                         {analysis.c2pa.actions.map((a, i) => (
                           <li
                             key={i}
-                            className="rounded border border-[#263548] bg-[#0B1220]/60 p-1.5 text-[10px]"
+                            className="rounded border border-console-border bg-console-deep/60 p-1.5 text-[10px]"
                           >
-                            <span className="font-mono text-white">{a.action}</span>
-                            {a.agent && <span className="text-[#94A3B8]"> · {a.agent}</span>}
-                            {a.when && <span className="text-[#64748B]"> · {a.when}</span>}
+                            <span className="font-mono text-console-text">{a.action}</span>
+                            {a.agent && <span className="text-console-muted"> · {a.agent}</span>}
+                            {a.when && <span className="text-console-label"> · {a.when}</span>}
                           </li>
                         ))}
                       </ol>
@@ -623,27 +1261,31 @@ function Page() {
                     <dl className="mt-2 space-y-0.5 font-mono text-[10px]">
                       {analysis.c2pa.signedBy && (
                         <div className="flex justify-between">
-                          <dt className="text-[#64748B]">Signing authority</dt>
-                          <dd className="text-white">{analysis.c2pa.signedBy}</dd>
+                          <dt className="text-console-label">Signing authority</dt>
+                          <dd className="text-console-text">{analysis.c2pa.signedBy}</dd>
                         </div>
                       )}
                       {analysis.c2pa.generator && (
                         <div className="flex justify-between">
-                          <dt className="text-[#64748B]">Claim generator</dt>
-                          <dd className="text-white">{analysis.c2pa.generator}</dd>
+                          <dt className="text-console-label">Claim generator</dt>
+                          <dd className="text-console-text">{analysis.c2pa.generator}</dd>
                         </div>
                       )}
                       {analysis.c2pa.signedAt && (
                         <div className="flex justify-between">
-                          <dt className="text-[#64748B]">Signed at</dt>
-                          <dd className="text-white">{analysis.c2pa.signedAt}</dd>
+                          <dt className="text-console-label">Signed at</dt>
+                          <dd className="text-console-text">{analysis.c2pa.signedAt}</dd>
                         </div>
                       )}
                     </dl>
                   )}
 
-                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
-                    {analysis.c2pa.status === "absent" ? C2PA_ABSENCE_NOTE : analysis.c2pa.method}
+                  {/* `method` describes HOW the check ran, independent of the
+                      outcome — always shown here. The absence explanation
+                      itself already lives in `summary` above; showing
+                      C2PA_ABSENCE_NOTE a second time here duplicated it. */}
+                  <p className="mt-2 text-[10px] leading-relaxed text-console-label">
+                    {analysis.c2pa.method}
                   </p>
                 </>
               )}
@@ -651,14 +1293,14 @@ function Page() {
 
             {/* ── EXIF ────────────────────────────────────────────────────── */}
             <Section
-              icon={<Camera className="size-3.5 text-[#3B82F6]" />}
+              icon={<Camera className="size-3.5 text-console-blue" />}
               title="EXIF metadata"
               subtitle={analysis.exif?.present ? "present" : "absent"}
             >
               {analysis.exifError && (
-                <div className="mb-2 flex items-start gap-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#F59E0B]" />
-                  <span className="text-[10px] leading-relaxed text-[#F59E0B]">
+                <div className="mb-2 flex items-start gap-2 rounded border border-console-amber/30 bg-console-amber/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-amber" />
+                  <span className="text-[10px] leading-relaxed text-console-amber">
                     {analysis.exifError}
                   </span>
                 </div>
@@ -672,15 +1314,15 @@ function Page() {
                         key={f.id}
                         className={`rounded border p-2 ${
                           f.severity === "notable"
-                            ? "border-[#F59E0B]/30 bg-[#F59E0B]/5"
-                            : "border-[#263548] bg-[#0B1220]/60"
+                            ? "border-console-amber/30 bg-console-amber/5"
+                            : "border-console-border bg-console-deep/60"
                         }`}
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] font-semibold text-white">{f.label}</span>
-                          <span className="font-mono text-[10px] text-[#94A3B8]">{f.value}</span>
+                          <span className="text-[11px] font-semibold text-console-text">{f.label}</span>
+                          <span className="font-mono text-[10px] text-console-muted">{f.value}</span>
                         </div>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-[#94A3B8]">
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-console-muted">
                           {f.note}
                         </p>
                       </div>
@@ -691,20 +1333,20 @@ function Page() {
                     <>
                       <button
                         onClick={() => setShowRaw(!showRaw)}
-                        className="mt-2 text-[10px] text-[#3B82F6] hover:underline"
+                        className="mt-2 text-[10px] text-console-blue hover:underline"
                       >
                         {showRaw ? "Hide" : "Show"} full metadata dump (
                         {Object.keys(analysis.exif.raw).length} tags)
                       </button>
                       {showRaw && (
-                        <pre className="mt-1.5 max-h-64 overflow-auto rounded border border-[#263548] bg-[#0B1220] p-2 font-mono text-[9px] leading-relaxed text-[#94A3B8]">
+                        <pre className="mt-1.5 max-h-64 overflow-auto rounded border border-console-border bg-console-deep p-2 font-mono text-[9px] leading-relaxed text-console-muted">
                           {JSON.stringify(analysis.exif.raw, null, 2)}
                         </pre>
                       )}
                     </>
                   )}
 
-                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                  <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                     {analysis.exif.method}
                   </p>
                 </>
@@ -714,12 +1356,12 @@ function Page() {
             {/* ── GPS ─────────────────────────────────────────────────────── */}
             {analysis.exif?.gps && (
               <Section
-                icon={<MapPin className="size-3.5 text-[#10B981]" />}
+                icon={<MapPin className="size-3.5 text-console-green" />}
                 title="GPS fix from EXIF"
                 subtitle="geotagged"
               >
                 <ExifMap gps={analysis.exif.gps} label={analysis.name} />
-                <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                   Written by the capturing device. Among the highest-value signals in image OSINT
                   because it places the camera — and forgeable with ordinary tools, so treat it as a
                   strong lead rather than a fact.
@@ -729,7 +1371,7 @@ function Page() {
 
             {/* ── OCR ─────────────────────────────────────────────────────── */}
             <Section
-              icon={<Type className="size-3.5 text-[#06B6D4]" />}
+              icon={<Type className="size-3.5 text-console-cyan" />}
               title="Text recognition (OCR)"
               subtitle={ocr ? `${ocr.words.length} words` : "not run"}
             >
@@ -749,8 +1391,8 @@ function Page() {
                       title={l.accuracyNote}
                       className={`rounded border px-1.5 py-0.5 text-[10px] ${
                         on
-                          ? "border-[#06B6D4]/50 bg-[#06B6D4]/10 text-[#06B6D4]"
-                          : "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                          ? "border-console-cyan/50 bg-console-cyan/10 text-console-cyan"
+                          : "border-console-border bg-console-deep text-console-label"
                       }`}
                     >
                       {l.label}
@@ -775,7 +1417,7 @@ function Page() {
                   Run OCR
                 </Button>
                 {ocrProgress && (
-                  <span className="font-mono text-[10px] text-[#94A3B8]">
+                  <span className="font-mono text-[10px] text-console-muted">
                     {ocrProgress.status} {Math.round(ocrProgress.progress * 100)}%
                   </span>
                 )}
@@ -785,27 +1427,30 @@ function Page() {
                   and WASM engine used to be fetched from a CDN at this point without
                   saying so; they are now our own assets, and whatever is still remote is
                   named here rather than left for the analyst to discover in devtools. */}
-              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                 {OCR_ASSET_PROVENANCE.disclosure}
               </p>
 
               {ocrError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <span className="text-[10px] leading-relaxed text-[#EF4444]">{ocrError}</span>
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <span className="text-[10px] leading-relaxed text-console-red">{ocrError}</span>
                 </div>
               )}
 
               {ocr && (
                 <div className="mt-2 space-y-2">
-                  {ocr.words.length === 0 ? (
-                    <p className="text-[11px] text-[#64748B]">
+                  {/* Gated on text, not words.length: text is the primary
+                      recognition signal and can succeed even in an edge
+                      case where word-level parsing comes back short. */}
+                  {!ocr.text.trim() ? (
+                    <p className="text-[11px] text-console-label">
                       Tesseract found no text in this image with the selected languages. That is an
                       absence of recognised text, not a finding that the image contains none.
                     </p>
                   ) : (
                     <>
-                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-[#263548] bg-[#0B1220] p-2 text-[11px] leading-relaxed text-[#F3F4F6]">
+                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-console-border bg-console-deep p-2 text-[11px] leading-relaxed text-console-text">
                         {ocr.text}
                       </pre>
                       <div className="flex flex-wrap gap-1">
@@ -814,8 +1459,8 @@ function Page() {
                             key={i}
                             className={`rounded border px-1 py-0.5 font-mono text-[10px] ${
                               w.confidence < OCR_LOW_CONFIDENCE
-                                ? "border-[#EF4444]/40 bg-[#EF4444]/5 text-[#EF4444]"
-                                : "border-[#263548] bg-[#0B1220] text-[#94A3B8]"
+                                ? "border-console-red/40 bg-console-red/5 text-console-red"
+                                : "border-console-border bg-console-deep text-console-muted"
                             }`}
                             title={`Tesseract confidence ${w.confidence.toFixed(1)}`}
                           >
@@ -824,7 +1469,7 @@ function Page() {
                           </span>
                         ))}
                       </div>
-                      <div className="font-mono text-[10px] text-[#94A3B8]">
+                      <div className="font-mono text-[10px] text-console-muted">
                         mean confidence{" "}
                         {ocr.meanConfidence === null ? "—" : ocr.meanConfidence.toFixed(1)} ·{" "}
                         {ocr.lowConfidenceCount} word(s) below {OCR_LOW_CONFIDENCE}
@@ -832,16 +1477,16 @@ function Page() {
                     </>
                   )}
 
-                  <p className="text-[10px] leading-relaxed text-[#64748B]">{ocr.method}</p>
+                  <p className="text-[10px] leading-relaxed text-console-label">{ocr.method}</p>
                   {ocr.accuracyNotes.map((n, i) => (
-                    <p key={i} className="text-[10px] leading-relaxed text-[#F59E0B]">
+                    <p key={i} className="text-[10px] leading-relaxed text-console-amber">
                       {n}
                     </p>
                   ))}
 
                   {/* ── OCR text into Module 2's entity extraction ────────── */}
                   {ocr.text.trim() && (
-                    <div className="border-t border-[#263548] pt-2">
+                    <div className="border-t border-console-border pt-2">
                       <Button
                         size="sm"
                         variant="outline"
@@ -856,23 +1501,23 @@ function Page() {
                         )}
                         Extract entities from this text
                       </Button>
-                      <p className="mt-1 text-[10px] leading-relaxed text-[#64748B]">
+                      <p className="mt-1 text-[10px] leading-relaxed text-console-label">
                         Runs Module 2's extractor over the recognised text. Note it inherits OCR's
                         errors: a mis-recognised name is extracted as a mis-spelled entity, and the
                         model has no way to know the text came from an image.
                       </p>
 
                       {entityError && (
-                        <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                          <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                          <span className="text-[10px] leading-relaxed text-[#EF4444]">
+                        <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                          <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                          <span className="text-[10px] leading-relaxed text-console-red">
                             <span className="font-bold">AI unavailable.</span> {entityError}
                           </span>
                         </div>
                       )}
 
                       {entities && entities.length === 0 && (
-                        <p className="mt-1.5 text-[10px] text-[#64748B]">
+                        <p className="mt-1.5 text-[10px] text-console-label">
                           The model found no named entities in the recognised text.
                         </p>
                       )}
@@ -882,7 +1527,7 @@ function Page() {
                           {entities.map((e, i) => (
                             <Badge
                               key={`${e.entity}-${i}`}
-                              className="border-[#8B5CF6]/30 bg-[#8B5CF6]/10 text-[10px] font-normal text-[#8B5CF6]"
+                              className="border-console-purple/30 bg-console-purple/10 text-[10px] font-normal text-console-purple"
                               title={`${e.type} · model-reported confidence ${e.confidence}`}
                             >
                               {e.entity}
@@ -895,17 +1540,76 @@ function Page() {
                   )}
                 </div>
               )}
+
+              {/* ── Florence-2 OCR (ai-service) — for the case Tesseract
+                  structurally struggles with: legible text sharing the frame
+                  with a busy photo. Independent of whether Tesseract ran or
+                  found anything above. ────────────────────────────────── */}
+              <div className="mt-3 border-t border-console-border pt-3">
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={ocrVlmLoading || !analysis?.blob}
+                    onClick={doOcrVlm}
+                    className="h-7 gap-1 text-[10px]"
+                  >
+                    {ocrVlmLoading ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Type className="size-3" />
+                    )}
+                    Try Florence-2 OCR instead
+                  </Button>
+                </div>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-console-label">
+                  Tesseract above works from layout/connected-component analysis and struggles when
+                  text shares the frame with a busy photo — verified live: a real composition of
+                  that kind returned confidence ~33 and no real words from Tesseract. Florence-2,
+                  trained on real-world image-text data, is a different tool for exactly that case.
+                  Unlike Tesseract above, this sends the image to ai-service (the same local
+                  backend the Local AI Analysis panel's detection/description already use) over
+                  the network — nothing leaves this machine in normal local development, but it is
+                  a real network call, not an in-browser computation.
+                </p>
+
+                {ocrVlmError && (
+                  <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="text-[10px] leading-relaxed text-console-red">{ocrVlmError}</span>
+                  </div>
+                )}
+
+                {ocrVlm && (
+                  <div className="mt-2 space-y-1.5">
+                    {!ocrVlm.text.trim() ? (
+                      <p className="text-[11px] text-console-label">
+                        Florence-2 found no text in this image either. That is an absence of
+                        recognised text, not a finding that the image contains none.
+                      </p>
+                    ) : (
+                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-console-border bg-console-deep p-2 text-[11px] leading-relaxed text-console-text">
+                        {ocrVlm.text}
+                      </pre>
+                    )}
+                    <div className="font-mono text-[10px] text-console-muted">
+                      {ocrVlm.provenance.model} · no per-word confidence — a language model's own
+                      certainty is not comparable to Tesseract's per-glyph score
+                    </div>
+                  </div>
+                )}
+              </div>
             </Section>
 
             {/* ── Near-duplicates ─────────────────────────────────────────── */}
             <Section
-              icon={<Fingerprint className="size-3.5 text-[#8B5CF6]" />}
+              icon={<Fingerprint className="size-3.5 text-console-purple" />}
               title="Near-duplicate matches"
               subtitle={`${analysis.duplicates?.matches.length ?? 0} match(es)`}
             >
               {analysis.duplicates && (
                 <>
-                  <p className="text-[11px] leading-relaxed text-[#F3F4F6]">
+                  <p className="text-[11px] leading-relaxed text-console-text">
                     {analysis.duplicates.summary}
                   </p>
                   {analysis.duplicates.matches.length > 0 && (
@@ -913,16 +1617,16 @@ function Page() {
                       {analysis.duplicates.matches.map((m) => (
                         <div
                           key={m.image.id}
-                          className="rounded border border-[#263548] bg-[#0B1220]/60 p-2"
+                          className="rounded border border-console-border bg-console-deep/60 p-2"
                         >
                           <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                            <span className="font-mono text-white">{m.image.source}</span>
+                            <span className="font-mono text-console-text">{m.image.source}</span>
                             {m.identical && (
-                              <Badge className="border-[#EF4444]/40 bg-[#EF4444]/10 text-[9px] font-normal text-[#EF4444]">
+                              <Badge className="border-console-red/40 bg-console-red/10 text-[9px] font-normal text-console-red">
                                 same image
                               </Badge>
                             )}
-                            <span className="ml-auto font-mono text-[#94A3B8]">
+                            <span className="ml-auto font-mono text-console-muted">
                               distance {m.distance}/64
                               {m.daysEarlier !== null &&
                                 m.daysEarlier > 0 &&
@@ -930,14 +1634,14 @@ function Page() {
                             </span>
                           </div>
                           {m.image.context && (
-                            <p className="mt-0.5 text-[10px] text-[#94A3B8]">{m.image.context}</p>
+                            <p className="mt-0.5 text-[10px] text-console-muted">{m.image.context}</p>
                           )}
                           {m.image.url && (
                             <a
                               href={m.image.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[10px] text-[#3B82F6] hover:underline"
+                              className="text-[10px] text-console-blue hover:underline"
                             >
                               {m.image.url.slice(0, 80)}
                             </a>
@@ -946,7 +1650,7 @@ function Page() {
                       ))}
                     </div>
                   )}
-                  <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+                  <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                     {analysis.duplicates.method} Corpus is {corpus.length} image(s) hashed in this
                     browser; matching is against what has been analysed here, not the open web.
                   </p>
@@ -956,6 +1660,79 @@ function Page() {
           </div>
 
           <div className="space-y-4">
+            {/* ── Provenance assessment ─────────────────────────────────────
+                Moved here from the top of the main column: this is a SUMMARY
+                across C2PA/EXIF/duplicates, not another detail section, so it
+                reads better as an at-a-glance sidebar card next to the AI
+                tools than stacked ahead of the full detail sections it
+                summarises (which used to make its own text feel repeated the
+                moment the reader reached the Content Credentials section
+                right below it). ─────────────────────────────────────────── */}
+            {provenance && (
+              <Card className="border-console-blue/30 bg-console-surface">
+                <CardContent className="p-4">
+                  <h3 className="text-xs font-bold uppercase text-console-text">Provenance assessment</h3>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-console-text">
+                    {provenance.summary}
+                  </p>
+
+                  <div className="mt-3 space-y-1.5">
+                    {provenance.findings.map((f, i) => (
+                      <div
+                        key={i}
+                        className={`rounded border p-2 ${
+                          f.strength === "verified"
+                            ? "border-console-green/40 bg-console-green/5"
+                            : f.strength === "observed"
+                              ? "border-console-amber/30 bg-console-amber/5"
+                              : "border-console-border bg-console-deep/60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-console-text">{f.label}</span>
+                          <Badge
+                            variant="outline"
+                            className="ml-auto shrink-0 border-console-border text-[9px] font-normal text-console-muted"
+                          >
+                            {f.strength}
+                          </Badge>
+                        </div>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-console-muted">
+                          {f.detail}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 rounded border border-console-label/30 bg-console-deep/60 p-2.5">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
+                      What this system could NOT determine about this file
+                    </div>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-console-muted">
+                      {provenance.cannotDetermine.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <p className="mt-2 text-[10px] italic text-console-label">
+                    This is a summary of findings, not a verdict. There is deliberately no
+                    authenticity score — any single number here would be read as one, and we have no
+                    basis for it.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            <AiAnalysisPanel
+              image={analysis.blob}
+              imageName={analysis.name}
+              resetKey={analysis.hash}
+              reportType="Image Intelligence"
+              reportContextLines={reportContextLines}
+              bytesUnavailableNote="Image bytes are unavailable for this item — same CORS restriction as the EXIF read above. Upload the file directly to use detection, description or faces."
+            />
+
             <NotImplementedPanel />
           </div>
         </div>

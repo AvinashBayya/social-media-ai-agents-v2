@@ -263,6 +263,26 @@ export function buildUpstreamQuery(parsed: ParsedQuery): string {
 }
 
 /**
+ * Rebuild a query string for engines that understand NEITHER quotes NOR
+ * boolean operators — Wikipedia's plain search and Openverse, both verified
+ * live to return zero results for a query like `"sourav das" + "cjp"` that
+ * buildUpstreamQuery's Google-News-shaped syntax produces (or that the
+ * analyst typed directly): those literal `"` and `+` characters become part
+ * of the literal search string on an engine that never parses them as
+ * operators. Every phrase, term and OR-group alternative is flattened to
+ * bare words, in original order, with no operator syntax at all — the words
+ * are what a full-text search engine can actually use; the structure around
+ * them (site:, exclusions) has no equivalent on either engine and is
+ * dropped rather than leaking through as literal text.
+ */
+export function buildPlainQuery(parsed: ParsedQuery): string {
+  if (parsed.isEmpty) return "";
+  const parts: string[] = [...parsed.phrases, ...parsed.terms];
+  for (const group of parsed.orGroups) parts.push(...group);
+  return parts.join(" ").trim();
+}
+
+/**
  * Parse once and keep the result while the string is unchanged. Matching runs
  * per row over long feeds, so this avoids re-parsing on every comparison.
  */

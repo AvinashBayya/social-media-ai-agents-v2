@@ -36,7 +36,7 @@ export const Route = createFileRoute("/watchlists")({
   component: WatchlistsPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 function WatchlistsPage() {
   const [watchlists, setWatchlists] = useState<any[]>([]);
@@ -123,17 +123,17 @@ function WatchlistsPage() {
       <div className="space-y-6 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748B]" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter watchlists by name, term, org or person…"
-              className="h-9 border-[#263548] bg-[#0B1220] pl-8 font-mono text-xs text-white"
+              className="h-9 border-console-border bg-console-deep pl-8 font-mono text-xs text-console-text"
             />
           </div>
           <Button
             onClick={() => setCreating((v) => !v)}
-            className="h-9 gap-1.5 bg-[#3B82F6] font-mono text-[10px] uppercase tracking-wider text-white hover:bg-[#3B82F6]/90"
+            className="h-9 gap-1.5 bg-console-blue font-mono text-[10px] uppercase tracking-wider text-console-text hover:bg-console-blue/90"
           >
             <Plus className="size-3.5" />
             {creating ? "Cancel" : "New watchlist"}
@@ -142,49 +142,49 @@ function WatchlistsPage() {
 
         {creating && (
           <Card className={CARD}>
-            <CardHeader className="border-b border-[#263548] p-3">
-              <CardTitle className="font-mono text-xs uppercase tracking-wider text-[#94A3B8]">
+            <CardHeader className="border-b border-console-border p-3">
+              <CardTitle className="font-mono text-xs uppercase tracking-wider text-console-muted">
                 New watchlist
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 p-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="font-mono text-[10px] uppercase text-[#94A3B8]">Name</label>
+                  <label className="font-mono text-[10px] uppercase text-console-muted">Name</label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Eastern seaboard shipping"
-                    className="h-8 border-[#263548] bg-[#0B1220] text-xs text-white"
+                    className="h-8 border-console-border bg-console-deep text-xs text-console-text"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-mono text-[10px] uppercase text-[#94A3B8]">
+                  <label className="font-mono text-[10px] uppercase text-console-muted">
                     Description
                   </label>
                   <Input
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="What this filter is for"
-                    className="h-8 border-[#263548] bg-[#0B1220] text-xs text-white"
+                    className="h-8 border-console-border bg-console-deep text-xs text-console-text"
                   />
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="font-mono text-[10px] uppercase text-[#94A3B8]">
+                <label className="font-mono text-[10px] uppercase text-console-muted">
                   Keywords (comma separated)
                 </label>
                 <Input
                   value={keywords}
                   onChange={(e) => setKeywords(e.target.value)}
                   placeholder="port closure, naval, blockade"
-                  className="h-8 border-[#263548] bg-[#0B1220] text-xs text-white"
+                  className="h-8 border-console-border bg-console-deep text-xs text-console-text"
                 />
               </div>
-              {formError && <p className="font-mono text-[11px] text-[#EF4444]">{formError}</p>}
+              {formError && <p className="font-mono text-[11px] text-console-red">{formError}</p>}
               <Button
                 onClick={submit}
-                className="h-8 bg-[#3B82F6] font-mono text-[10px] uppercase tracking-wider text-white hover:bg-[#3B82F6]/90"
+                className="h-8 bg-console-blue font-mono text-[10px] uppercase tracking-wider text-console-text hover:bg-console-blue/90"
               >
                 Create
               </Button>
@@ -196,11 +196,11 @@ function WatchlistsPage() {
           <Card className={CARD}>
             <CardContent className="p-8 text-center">
               <Bookmark className="mx-auto mb-3 size-6 text-[#334155]" />
-              <p className="font-mono text-xs text-[#94A3B8]">No watchlists yet.</p>
-              <p className="mx-auto mt-2 max-w-md text-[11px] leading-relaxed text-[#64748B]">
+              <p className="font-mono text-xs text-console-muted">No watchlists yet.</p>
+              <p className="mx-auto mt-2 max-w-md text-[11px] leading-relaxed text-console-label">
                 A watchlist is a saved set of terms. Create one here, then run it against a
                 collected corpus on{" "}
-                <Link to="/subjects" className="text-[#3B82F6] hover:underline">
+                <Link to="/subjects" className="text-console-blue hover:underline">
                   Subjects
                 </Link>{" "}
                 — that page collects the material and computes the matches.
@@ -209,7 +209,7 @@ function WatchlistsPage() {
           </Card>
         ) : visible.length === 0 ? (
           <Card className={CARD}>
-            <CardContent className="p-8 text-center font-mono text-xs text-[#94A3B8]">
+            <CardContent className="p-8 text-center font-mono text-xs text-console-muted">
               No watchlist matches “{filter}”.
             </CardContent>
           </Card>
@@ -217,10 +217,10 @@ function WatchlistsPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {visible.map((w) => (
               <Card key={w.id} className={CARD}>
-                <CardHeader className="border-b border-[#263548] pb-3">
-                  <CardTitle className="flex items-center justify-between font-mono text-sm text-[#F3F4F6]">
+                <CardHeader className="border-b border-console-border pb-3">
+                  <CardTitle className="flex items-center justify-between font-mono text-sm text-console-text">
                     <span className="flex min-w-0 items-center gap-2">
-                      <Bookmark className="size-4 shrink-0 text-[#3B82F6]" />
+                      <Bookmark className="size-4 shrink-0 text-console-blue" />
                       <span className="truncate">{w.name}</span>
                     </span>
                     <Button
@@ -228,17 +228,17 @@ function WatchlistsPage() {
                       size="sm"
                       onClick={() => remove(w)}
                       aria-label={`Delete watchlist ${w.name}`}
-                      className="size-7 shrink-0 p-0 text-[#64748B] hover:bg-[#EF4444]/10 hover:text-[#EF4444]"
+                      className="size-7 shrink-0 p-0 text-console-label hover:bg-console-red/10 hover:text-console-red"
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2 p-4 font-mono text-xs text-[#94A3B8]">
+                <CardContent className="space-y-2 p-4 font-mono text-xs text-console-muted">
                   <div>Keywords: {w.filters?.keywords?.join(", ") || "none"}</div>
                   <div>Organisations: {w.filters?.organizations?.join(", ") || "none"}</div>
                   <div>People: {w.filters?.people?.join(", ") || "none"}</div>
-                  <div className="border-t border-[#263548]/50 pt-2 text-[10px] text-[#64748B]">
+                  <div className="border-t border-console-border/50 pt-2 text-[10px] text-console-label">
                     {/*
                       This was a hardcoded green "ACTIVE" badge on every card.
                       Nothing schedules a watchlist and nothing runs it on a
@@ -246,17 +246,17 @@ function WatchlistsPage() {
                       process between requests to run one in.
                     */}
                     Not scheduled. Run this filter from{" "}
-                    <Link to="/subjects" className="text-[#3B82F6] hover:underline">
+                    <Link to="/subjects" className="text-console-blue hover:underline">
                       Subjects
                     </Link>
                     .
                   </div>
                   {w.riskScore === null ? (
-                    <div className="text-[10px] text-[#64748B]">
+                    <div className="text-[10px] text-console-label">
                       Risk index: not scored — no matches have been evaluated against this filter.
                     </div>
                   ) : (
-                    <Badge className="border-[#3B82F6]/30 bg-[#3B82F6]/10 font-mono text-[10px] text-[#3B82F6]">
+                    <Badge className="border-console-blue/30 bg-console-blue/10 font-mono text-[10px] text-console-blue">
                       Risk index {w.riskScore}/100
                     </Badge>
                   )}
@@ -266,10 +266,10 @@ function WatchlistsPage() {
           </div>
         )}
 
-        <Card className="border-[#263548] bg-[#0B1220]/60">
+        <Card className="border-console-border bg-console-deep/60">
           <CardContent className="flex gap-3 p-4">
-            <Info className="mt-0.5 size-4 shrink-0 text-[#3B82F6]" />
-            <p className="text-[11px] leading-relaxed text-[#94A3B8]">
+            <Info className="mt-0.5 size-4 shrink-0 text-console-blue" />
+            <p className="text-[11px] leading-relaxed text-console-muted">
               Watchlists are stored in this browser only. They are not shared between operators, not
               audited, and are lost if site data is cleared. Scheduled monitoring is not implemented
               — matching is on demand, against whatever corpus the Subjects page has collected at

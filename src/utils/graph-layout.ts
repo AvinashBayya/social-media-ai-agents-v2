@@ -46,6 +46,8 @@ export interface LayoutOptions {
   ringGap?: number;
   minRadius?: number;
   maxRadius?: number;
+  /** Minimum center-to-center pixel spacing between two nodes sharing a ring — wide enough that their rendered labels don't collide. */
+  minArcSpacing?: number;
 }
 
 const DEFAULTS: Required<LayoutOptions> = {
@@ -54,6 +56,7 @@ const DEFAULTS: Required<LayoutOptions> = {
   ringGap: 85,
   minRadius: 10,
   maxRadius: 26,
+  minArcSpacing: 92,
 };
 
 /**
@@ -68,7 +71,7 @@ export function layoutRadial(
   preferredRootId: string | null,
   options: LayoutOptions = {},
 ): LayoutResult {
-  const { width, height, ringGap, minRadius, maxRadius } = { ...DEFAULTS, ...options };
+  const { width, height, ringGap, minRadius, maxRadius, minArcSpacing } = { ...DEFAULTS, ...options };
   const centerX = width / 2;
   const centerY = height / 2;
 
@@ -120,8 +123,20 @@ export function layoutRadial(
     return minRadius + (maxRadius - minRadius) * (d / maxDegree);
   };
 
+  // Ring radius must grow with *this ring's own member count*, not just its
+  // BFS depth: a fixed `ring * ringGap` packs a busy ring's nodes so close
+  // together that their real labels (rendered under each node) overlap —
+  // exactly what happened when a target's ~25 "MENTIONED_IN" article
+  // entities all landed one hop out, sharing a single narrow ring. Radius is
+  // computed outward-cumulative (never less than the previous ring + gap,
+  // so ring order still reads visually as "further = more hops"), boosted
+  // to whatever this ring's own circumference needs to give each member at
+  // least `minArcSpacing` px of its neighbors on the same ring.
   const nodes: LayoutNode[] = [];
-  for (const [ring, memberIds] of ringMembers) {
+  const sortedRings = [...ringMembers.keys()].sort((a, b) => a - b);
+  let previousRadius = 0;
+  for (const ring of sortedRings) {
+    const memberIds = ringMembers.get(ring)!;
     if (ring === 0) {
       nodes.push({
         id: memberIds[0]!,
@@ -130,9 +145,12 @@ export function layoutRadial(
         r: radiusFor(memberIds[0]!),
         ring: 0,
       });
+      previousRadius = 0;
       continue;
     }
-    const radius = ring * ringGap;
+    const requiredForSpacing = (memberIds.length * minArcSpacing) / (2 * Math.PI);
+    const radius = Math.max(previousRadius + ringGap, requiredForSpacing);
+    previousRadius = radius;
     memberIds.forEach((id, i) => {
       const angle = (2 * Math.PI * i) / memberIds.length;
       nodes.push({

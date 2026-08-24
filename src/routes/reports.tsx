@@ -73,7 +73,7 @@ export const Route = createFileRoute("/reports")({
   component: ReportsPage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 const STORE_KEY = "sentinel_products";
 
 function loadProducts(): IntelligenceProduct[] {
@@ -97,8 +97,13 @@ function saveProducts(list: IntelligenceProduct[]): void {
 }
 
 function ReportsPage() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [draft, setDraft] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); a mount effect now sets the real
+  // value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [draft, setDraft] = useState("");
   const [type, setType] = useState<ProductType>("EXECUTIVE_BRIEF");
 
   const [candidates, setCandidates] = useState<SourceRef[]>([]);
@@ -175,6 +180,26 @@ function ReportsPage() {
   }, []);
 
   useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setDraft(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setDraft(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
+  useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     collect(target);
   }, [target, collect]);
 
@@ -351,13 +376,13 @@ function ReportsPage() {
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-[220px] flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748B]" />
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
                   <Input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && search()}
                     placeholder="Subject…"
-                    className="h-8 border-[#263548] bg-[#0B1220] pl-8 text-[11px] text-white"
+                    className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
                   />
                 </div>
                 <Button size="sm" onClick={search} disabled={collecting} className="h-8">
@@ -372,28 +397,28 @@ function ReportsPage() {
                     onClick={() => setType(p.id)}
                     className={`rounded border px-2 py-1 text-[10px] ${
                       type === p.id
-                        ? "border-[#3B82F6]/60 bg-[#3B82F6]/10 text-[#3B82F6]"
-                        : "border-[#263548] bg-[#0B1220] text-[#64748B]"
+                        ? "border-console-blue/60 bg-console-blue/10 text-console-blue"
+                        : "border-console-border bg-console-deep text-console-label"
                     }`}
                   >
                     {p.label}
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-[10px] leading-relaxed text-[#94A3B8]">
+              <p className="mt-1.5 text-[10px] leading-relaxed text-console-muted">
                 {spec.description}
               </p>
 
               {collectError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <span className="font-mono text-[10px] text-[#EF4444]">{collectError}</span>
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <span className="font-mono text-[10px] text-console-red">{collectError}</span>
                 </div>
               )}
 
-              <div className="mt-3 flex items-center gap-2 border-t border-[#263548] pt-3">
-                <Network className="size-3.5 shrink-0 text-[#8B5CF6]" />
-                <p className="flex-1 text-[10px] leading-relaxed text-[#94A3B8]">
+              <div className="mt-3 flex items-center gap-2 border-t border-console-border pt-3">
+                <Network className="size-3.5 shrink-0 text-console-purple" />
+                <p className="flex-1 text-[10px] leading-relaxed text-console-muted">
                   Also run DNS/RDAP/crt.sh/Shodan/dorks/news/social/theHarvester/SpiderFoot against
                   "{target}" and cite their evidence and relationships. Most useful when the subject
                   is a domain, IP, email or similar recon target — a general topic subject will
@@ -404,7 +429,7 @@ function ReportsPage() {
                   variant="outline"
                   onClick={collectOsint}
                   disabled={osintCollecting || collecting || !target.trim()}
-                  className="h-7 shrink-0 gap-1.5 border-[#8B5CF6]/40 text-[10px] text-[#8B5CF6] hover:bg-[#8B5CF6]/10"
+                  className="h-7 shrink-0 gap-1.5 border-console-purple/40 text-[10px] text-console-purple hover:bg-console-purple/10"
                 >
                   {osintCollecting ? (
                     <Loader2 className="size-3 animate-spin" />
@@ -417,13 +442,13 @@ function ReportsPage() {
 
               {osintIncluded && (
                 <>
-                  <p className="mt-1.5 font-mono text-[9px] text-[#8B5CF6]">
+                  <p className="mt-1.5 font-mono text-[9px] text-console-purple">
                     Included: {osintIncluded.evidence.length} evidence item(s) and{" "}
                     {osintIncluded.relationships.length} relationship(s) from{" "}
                     {osintIncluded.plan.collectors.length} candidate collector(s).
                   </p>
                   {osintIncluded.errors.map((e, i) => (
-                    <p key={i} className="mt-0.5 font-mono text-[9px] text-[#F59E0B]">
+                    <p key={i} className="mt-0.5 font-mono text-[9px] text-console-amber">
                       ⚠ {e}
                     </p>
                   ))}
@@ -431,9 +456,9 @@ function ReportsPage() {
               )}
 
               {osintError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <span className="font-mono text-[10px] text-[#EF4444]">{osintError}</span>
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <span className="font-mono text-[10px] text-console-red">{osintError}</span>
                 </div>
               )}
             </CardContent>
@@ -443,11 +468,11 @@ function ReportsPage() {
           <Card className={CARD}>
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Shield className="size-3.5 text-[#10B981]" />
-                <h3 className="text-xs font-bold uppercase text-white">
+                <Shield className="size-3.5 text-console-green" />
+                <h3 className="text-xs font-bold uppercase text-console-text">
                   Sources that will be used
                 </h3>
-                <span className="ml-auto font-mono text-[10px] text-[#94A3B8]">
+                <span className="ml-auto font-mono text-[10px] text-console-muted">
                   {selected.length} of {candidates.length} included
                   {meanCredibility !== null &&
                     ` · mean credibility ${(meanCredibility * 100).toFixed(0)}% (${bandFor(meanCredibility).label})`}
@@ -460,8 +485,8 @@ function ReportsPage() {
                 it says so and points at the control that undoes it.
               */}
               {autoTrimmed > 0 && (
-                <p className="mb-2 rounded border border-[#F59E0B]/25 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed text-[#94A3B8]">
-                  <span className="font-bold text-[#F59E0B]">
+                <p className="mb-2 rounded border border-console-amber/25 bg-console-amber/5 p-2 text-[10px] leading-relaxed text-console-muted">
+                  <span className="font-bold text-console-amber">
                     {autoTrimmed} lower-scored source{autoTrimmed === 1 ? "" : "s"} pre-excluded.
                   </span>{" "}
                   The configured free tier allows 8,000 tokens per minute, and a full
@@ -471,7 +496,7 @@ function ReportsPage() {
                 </p>
               )}
 
-              <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-label">
                 <Info className="mt-px size-3 shrink-0" />
                 Nothing is generated until you press Generate. Exclude anything you do not want
                 cited — the product can only draw on what remains, and every claim in it is checked
@@ -480,12 +505,12 @@ function ReportsPage() {
 
               <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
                 {collecting && (
-                  <div className="flex items-center gap-2 text-[11px] text-[#94A3B8]">
+                  <div className="flex items-center gap-2 text-[11px] text-console-muted">
                     <Loader2 className="size-3.5 animate-spin" /> Collecting and scoring…
                   </div>
                 )}
                 {!collecting && candidates.length === 0 && !collectError && (
-                  <p className="text-[11px] text-[#64748B]">
+                  <p className="text-[11px] text-console-label">
                     Nothing collected for "{target}". Generation is refused with no sources — a
                     product written without material would be the model's invention.
                   </p>
@@ -505,23 +530,23 @@ function ReportsPage() {
                       }
                       className={`flex w-full items-start gap-2 rounded border p-2 text-left ${
                         off
-                          ? "border-[#263548] bg-[#0B1220]/40 opacity-45"
-                          : "border-[#263548] bg-[#0B1220]/70"
+                          ? "border-console-border bg-console-deep/40 opacity-45"
+                          : "border-console-border bg-console-deep/70"
                       }`}
                     >
                       <span
                         className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border ${
-                          off ? "border-[#334155]" : "border-[#10B981] bg-[#10B981]/20"
+                          off ? "border-[#334155]" : "border-console-green bg-console-green/20"
                         }`}
                       >
-                        {!off && <Check className="size-2.5 text-[#10B981]" />}
+                        {!off && <Check className="size-2.5 text-console-green" />}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[11px] text-[#F3F4F6]">{s.title}</span>
-                        <span className="block truncate font-mono text-[9px] text-[#64748B]">
+                        <span className="block truncate text-[11px] text-console-text">{s.title}</span>
+                        <span className="block truncate font-mono text-[9px] text-console-label">
                           {s.outlet} · {s.module}
                         </span>
-                        <span className="block text-[9px] leading-relaxed text-[#94A3B8]">
+                        <span className="block text-[9px] leading-relaxed text-console-muted">
                           {s.credibility === null
                             ? "not scored"
                             : `credibility ${(s.credibility * 100).toFixed(0)}% (${bandFor(s.credibility).label})`}
@@ -537,7 +562,7 @@ function ReportsPage() {
               <Button
                 onClick={generate}
                 disabled={generating || selected.length === 0}
-                className="mt-3 h-9 w-full gap-1.5 bg-[#10B981] font-bold text-black hover:bg-[#059669]"
+                className="mt-3 h-9 w-full gap-1.5 bg-console-green font-bold text-console-accent-foreground hover:bg-console-green-hover"
               >
                 {generating ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -550,9 +575,9 @@ function ReportsPage() {
               </Button>
 
               {genError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-                  <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                  <div className="font-mono text-[10px] leading-relaxed text-console-red">
                     <span className="font-bold">No product was produced.</span>
                     <div className="pt-0.5 opacity-80">{genError}</div>
                   </div>
@@ -565,8 +590,8 @@ function ReportsPage() {
           {products.length > 0 && (
             <Card className={CARD}>
               <CardContent className="p-4">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-                  <FileBarChart className="size-3.5 text-[#3B82F6]" />
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                  <FileBarChart className="size-3.5 text-console-blue" />
                   Generated products ({products.length})
                 </h3>
 
@@ -574,22 +599,22 @@ function ReportsPage() {
                   {[...products].reverse().map((p) => {
                     const open = openId === p.id;
                     return (
-                      <div key={p.id} className="rounded border border-[#263548] bg-[#0B1220]/60">
+                      <div key={p.id} className="rounded border border-console-border bg-console-deep/60">
                         <div className="flex flex-wrap items-center gap-2 p-2.5">
                           <button
                             onClick={() => setOpenId(open ? null : p.id)}
                             className="flex min-w-0 flex-1 items-center gap-2 text-left"
                           >
                             {open ? (
-                              <ChevronDown className="size-3.5 shrink-0 text-[#64748B]" />
+                              <ChevronDown className="size-3.5 shrink-0 text-console-label" />
                             ) : (
-                              <ChevronRight className="size-3.5 shrink-0 text-[#64748B]" />
+                              <ChevronRight className="size-3.5 shrink-0 text-console-label" />
                             )}
                             <span className="min-w-0">
-                              <span className="block truncate text-[11px] font-semibold text-white">
+                              <span className="block truncate text-[11px] font-semibold text-console-text">
                                 {p.typeLabel} — {p.subject}
                               </span>
-                              <span className="block font-mono text-[9px] text-[#64748B]">
+                              <span className="block font-mono text-[9px] text-console-label">
                                 {p.provenance.generatedAt.slice(0, 16).replace("T", " ")} ·{" "}
                                 {p.sources.length} sources
                               </span>
@@ -598,7 +623,7 @@ function ReportsPage() {
 
                           <Badge
                             variant="outline"
-                            className="shrink-0 border-[#8B5CF6]/40 bg-[#8B5CF6]/10 text-[9px] font-normal text-[#8B5CF6]"
+                            className="shrink-0 border-console-purple/40 bg-console-purple/10 text-[9px] font-normal text-console-purple"
                             title="Open-source model — PS-18 §6.5"
                           >
                             {p.provenance.model}
@@ -629,7 +654,7 @@ function ReportsPage() {
                           </Button>
                           <button
                             onClick={() => remove(p.id)}
-                            className="shrink-0 text-[#64748B] hover:text-[#EF4444]"
+                            className="shrink-0 text-console-label hover:text-console-red"
                             aria-label="Delete product"
                           >
                             <Trash2 className="size-3" />
@@ -651,8 +676,8 @@ function ReportsPage() {
 
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="text-xs font-bold uppercase text-white">Sourcing discipline</h3>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-[#94A3B8]">
+              <h3 className="text-xs font-bold uppercase text-console-text">Sourcing discipline</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-relaxed text-console-muted">
                 <li>Every judgement and finding must cite numbered sources.</li>
                 <li>
                   Citations are resolved against the real source list AFTER generation. A citation
@@ -686,51 +711,51 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
   const byNumber = new Map(product.sources.map((s) => [s.n, s]));
 
   const cite = (nums: number[]) => (
-    <span className="ml-1 font-mono text-[9px] text-[#3B82F6]">
+    <span className="ml-1 font-mono text-[9px] text-console-blue">
       {nums.map((n) => `[${n}]`).join("")}
     </span>
   );
 
   return (
-    <div className="space-y-3 border-t border-[#263548] p-3">
-      <div className="rounded border border-[#F59E0B]/40 bg-[#F59E0B]/5 px-2 py-1 text-center font-mono text-[9px] font-bold tracking-wider text-[#F59E0B]">
+    <div className="space-y-3 border-t border-console-border p-3">
+      <div className="rounded border border-console-amber/40 bg-console-amber/5 px-2 py-1 text-center font-mono text-[9px] font-bold tracking-wider text-console-amber">
         {product.classification}
       </div>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-blue">
           Bottom line
         </h4>
-        <p className="mt-1 text-[11px] leading-relaxed text-[#F3F4F6]">{product.bottomLine}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-console-text">{product.bottomLine}</p>
       </section>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-blue">
           Key judgements
         </h4>
         <div className="mt-1 space-y-2">
           {product.keyJudgements.map((kj, i) => (
-            <div key={i} className="rounded border border-[#263548] bg-[#111827] p-2">
+            <div key={i} className="rounded border border-console-border bg-console-surface p-2">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[9px] font-bold text-white">KJ-{i + 1}</span>
+                <span className="font-mono text-[9px] font-bold text-console-text">KJ-{i + 1}</span>
                 <Badge
                   variant="outline"
                   className={`text-[8px] font-normal ${
                     kj.confidence === "high"
-                      ? "border-[#10B981]/40 bg-[#10B981]/10 text-[#10B981]"
+                      ? "border-console-green/40 bg-console-green/10 text-console-green"
                       : kj.confidence === "moderate"
-                        ? "border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[#F59E0B]"
-                        : "border-[#EF4444]/40 bg-[#EF4444]/10 text-[#EF4444]"
+                        ? "border-console-amber/40 bg-console-amber/10 text-console-amber"
+                        : "border-console-red/40 bg-console-red/10 text-console-red"
                   }`}
                 >
                   {kj.confidence} confidence
                 </Badge>
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-[#F3F4F6]">
+              <p className="mt-1 text-[11px] leading-relaxed text-console-text">
                 {kj.judgement}
                 {cite(kj.sources)}
               </p>
-              <p className="mt-0.5 text-[9px] italic leading-relaxed text-[#94A3B8]">
+              <p className="mt-0.5 text-[9px] italic leading-relaxed text-console-muted">
                 Confidence basis: {kj.confidenceRationale}
               </p>
             </div>
@@ -739,13 +764,13 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
       </section>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">Findings</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-blue">Findings</h4>
         <ul className="mt-1 space-y-1">
           {product.findings.map((f, i) => (
-            <li key={i} className="text-[11px] leading-relaxed text-[#F3F4F6]">
+            <li key={i} className="text-[11px] leading-relaxed text-console-text">
               • {f.text}
               {f.kind === "assessment" && (
-                <span className="ml-1 font-mono text-[9px] text-[#F59E0B]">
+                <span className="ml-1 font-mono text-[9px] text-console-amber">
                   [analyst assessment, not reported fact]
                 </span>
               )}
@@ -756,27 +781,27 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
       </section>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#F59E0B]">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-amber">
           Intelligence gaps
         </h4>
         <ul className="mt-1 space-y-1">
           {product.gaps.map((g, i) => (
-            <li key={i} className="text-[10px] leading-relaxed text-[#94A3B8]">
-              • <span className="font-semibold text-[#F3F4F6]">{g.gap}</span> — {g.why}
+            <li key={i} className="text-[10px] leading-relaxed text-console-muted">
+              • <span className="font-semibold text-console-text">{g.gap}</span> — {g.why}
             </li>
           ))}
         </ul>
       </section>
 
       <section>
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#3B82F6]">Sources</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-blue">Sources</h4>
         <ol className="mt-1 space-y-1">
           {product.sources.map((s) => (
             <li key={s.n} className="text-[10px] leading-relaxed">
-              <span className="font-mono text-[#3B82F6]">[{s.n}]</span>{" "}
-              <span className="text-[#F3F4F6]">{s.title}</span>{" "}
-              <span className="text-[#64748B]">— {s.outlet}</span>
-              <div className="pl-6 text-[9px] text-[#94A3B8]">
+              <span className="font-mono text-console-blue">[{s.n}]</span>{" "}
+              <span className="text-console-text">{s.title}</span>{" "}
+              <span className="text-console-label">— {s.outlet}</span>
+              <div className="pl-6 text-[9px] text-console-muted">
                 {s.credibility === null
                   ? "credibility not scored"
                   : `credibility ${(s.credibility * 100).toFixed(0)}%`}
@@ -789,7 +814,7 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
                     href={s.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-mono text-[9px] text-[#3B82F6] hover:underline"
+                    className="font-mono text-[9px] text-console-blue hover:underline"
                   >
                     {s.url.slice(0, 90)}
                   </a>
@@ -799,36 +824,36 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
           ))}
         </ol>
         {byNumber.size !== product.sources.length && (
-          <p className="mt-1 text-[9px] text-[#EF4444]">Duplicate source numbering detected.</p>
+          <p className="mt-1 text-[9px] text-console-red">Duplicate source numbering detected.</p>
         )}
       </section>
 
-      <section className="border-t border-[#263548] pt-2">
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+      <section className="border-t border-console-border pt-2">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-muted">
           Provenance
         </h4>
         <dl className="mt-1 space-y-0.5 font-mono text-[9px]">
           <div className="flex justify-between">
-            <dt className="text-[#64748B]">Model</dt>
-            <dd className="text-white">{product.provenance.model}</dd>
+            <dt className="text-console-label">Model</dt>
+            <dd className="text-console-text">{product.provenance.model}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#64748B]">Provider</dt>
-            <dd className="text-white">
+            <dt className="text-console-label">Provider</dt>
+            <dd className="text-console-text">
               {product.provenance.provider}
               {product.provenance.cacheHit ? " (cached)" : ""}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#64748B]">Generated</dt>
-            <dd className="text-white">{product.provenance.generatedAt}</dd>
+            <dt className="text-console-label">Generated</dt>
+            <dd className="text-console-text">{product.provenance.generatedAt}</dd>
           </div>
           <div className="flex justify-between gap-2">
-            <dt className="shrink-0 text-[#64748B]">Modules</dt>
-            <dd className="text-right text-white">{product.provenance.modules.join(", ")}</dd>
+            <dt className="shrink-0 text-console-label">Modules</dt>
+            <dd className="text-right text-console-text">{product.provenance.modules.join(", ")}</dd>
           </div>
         </dl>
-        <p className="mt-1.5 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[9px] leading-relaxed text-[#F59E0B]">
+        <p className="mt-1.5 rounded border border-console-amber/30 bg-console-amber/5 p-2 text-[9px] leading-relaxed text-console-amber">
           {product.provenance.notice}
         </p>
       </section>

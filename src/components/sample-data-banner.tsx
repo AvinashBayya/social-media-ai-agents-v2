@@ -13,9 +13,9 @@ import { FlaskConical } from "lucide-react";
  */
 export function SampleDataBanner({ detail }: { detail?: string }) {
   return (
-    <div className="mx-6 mt-4 flex items-start gap-2 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 px-3 py-2">
-      <FlaskConical className="mt-0.5 size-3.5 shrink-0 text-[#F59E0B]" />
-      <div className="font-mono text-[10px] leading-relaxed text-[#F59E0B]">
+    <div className="mx-6 mt-4 flex items-start gap-2 rounded border border-console-amber/30 bg-console-amber/5 px-3 py-2">
+      <FlaskConical className="mt-0.5 size-3.5 shrink-0 text-console-amber" />
+      <div className="font-mono text-[10px] leading-relaxed text-console-amber">
         <span className="font-bold uppercase tracking-wider">Sample data</span> — this view renders
         seeded demonstration records, not collected intelligence.
         {detail ? ` ${detail}` : ""}

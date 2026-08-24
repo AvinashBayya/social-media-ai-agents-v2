@@ -59,7 +59,11 @@ export type GeoLayerId =
   | "infrastructure"
   | "gpsjam"
   | "radiation"
-  | "reliefweb";
+  | "reliefweb"
+  | "supplyDemand"
+  | "gdeltEvents"
+  | "assetTracks"
+  | "mentions";
 
 export interface GeoLayer {
   id: GeoLayerId;
@@ -146,6 +150,55 @@ export const GEO_LAYERS: GeoLayer[] = [
       "sourced from partner agencies. Coordinates are country-level centroids from the API's " +
       "country field — requires RELIEFWEB_APP_NAME (free registration at reliefweb.int/developers).",
     colour: "#EC4899",
+  },
+  {
+    id: "supplyDemand",
+    label: "Supply & Demand (Kpler)",
+    provenance:
+      "Kpler Supply & Demand API — grains (Corn/Soybean/Wheat) balance sheets and LNG/gas " +
+      "supply-demand-storage balances, by country. Kpler is a COMMERCIAL data provider with " +
+      "no free tier; requires a paid KPLER_API_KEY. Analyst-selected product and zones only — " +
+      "unlike every other layer here, it does not auto-collect from the global search bar, " +
+      "because Kpler's API takes explicit zone names, not a free-text query. Coordinates are " +
+      "country centroids (the country's balance sheet, not a specific port, field or facility).",
+    colour: "#84CC16",
+  },
+  {
+    id: "gdeltEvents",
+    label: "Geocoded events (GDELT 2.0)",
+    provenance:
+      "GDELT 2.0 Events export (data.gdeltproject.org/gdeltv2/*.export.CSV.zip, refreshed " +
+      "every 15 minutes). GDELT's own geocoder places each event; ActionGeo_Type 1 (COUNTRY) " +
+      "renders at country precision, every other type at city precision — GDELT gives no " +
+      "device-level fix, so this layer never renders a point as exact. No natural-language " +
+      "headline is supplied, so the title is built from GDELT's own CAMEO EventRootCode.",
+    colour: "#A855F7",
+  },
+  {
+    id: "assetTracks",
+    label: "Asset tracks (OpenSky)",
+    provenance:
+      "OpenSky Network public ADS-B feed — transponder-derived aircraft positions, the most " +
+      "precisely located data this page plots. Networked-only, off by default and disabled " +
+      "in air-gapped deployments; requires OPENSKY_TRACKS_ENABLED=true. Bounded to a " +
+      "configurable region (defaults to South Asia) rather than the whole globe's traffic.",
+    colour: "#FACC15",
+  },
+  {
+    id: "mentions",
+    label: "Target mentions (geocoded)",
+    provenance:
+      "Real news articles collected for the current search (Google News RSS, the same feed " +
+      "/news uses), run through the same LLM entity extraction /entities already uses (an " +
+      "open-weight model via Sarvam) to find place NAMES actually written in that real text, " +
+      "then geocoded through OpenStreetMap Nominatim (free, keyless, rate-limited to 1 " +
+      "lookup/second by its usage policy — the top 6 most-mentioned real places per search " +
+      "are geocoded, not every mention). Social media is deliberately excluded from this " +
+      "layer's sources — see geo-sources.ts's collectTargetMentions for why. A pin marks " +
+      "where the mentioned place name resolves to — a city or region's representative point, " +
+      "not the specific event or person — so this always renders at city precision, never as " +
+      "an exact fix.",
+    colour: "#14B8A6",
   },
 ];
 
@@ -268,11 +321,63 @@ export const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
   Kenya: [-0.02, 37.91],
   Qatar: [25.35, 51.18],
   "United Arab Emirates": [23.42, 53.85],
+  // Added for the Kpler Supply & Demand layer — major grain and LNG/gas
+  // exporters the existing ~52-country list didn't yet cover.
+  Kazakhstan: [48.02, 66.92],
+  Romania: [45.94, 24.97],
+  Algeria: [28.03, 1.66],
+  "Trinidad and Tobago": [10.69, -61.22],
+  Azerbaijan: [40.14, 47.58],
+  Turkmenistan: [38.97, 59.56],
+  Peru: [-9.19, -75.02],
+  Oman: [21.47, 55.98],
+  Paraguay: [-23.44, -58.44],
+  Uruguay: [-32.52, -55.77],
+  Mozambique: [-18.67, 35.53],
 };
 
 // ─── Adapters: upstream record -> GeoRecord | null ─────────────────────────
 // Each returns null when the source carries no real coordinate. That null is
 // the mechanism preventing fabricated placement; every adapter is tested for it.
+
+/**
+ * A real place name extracted from real collected text (news/social) about
+ * the current target, already geocoded to a real coordinate by
+ * geo-sources.ts's Nominatim lookup. Kept as a separate, testable, pure step
+ * from that lookup — same pure/impure split every other adapter here follows
+ * — so this only shapes the record; it never decides whether a coordinate is
+ * real (isRealCoordinate does that, defensively, in case the caller ever
+ * passes through a bad value).
+ */
+export function fromLocationMention(input: {
+  placeName: string;
+  lat: number;
+  lon: number;
+  mentionCount: number;
+  sampleTitle: string;
+  sampleSource: string;
+  sampleUrl: string;
+  sampleTimestamp: string | null;
+}): GeoRecord | null {
+  if (!isRealCoordinate(input.lat, input.lon)) return null;
+  const slug = input.placeName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return {
+    id: `mention-${slug || "place"}`,
+    layer: "mentions",
+    lat: input.lat,
+    lon: input.lon,
+    precision: "city",
+    locates: `where "${input.placeName}" resolves to — a mentioned place, not the event or person itself`,
+    title: `"${input.placeName}" — ${input.mentionCount} real mention${input.mentionCount === 1 ? "" : "s"}`,
+    source: input.sampleSource,
+    url: input.sampleUrl,
+    timestamp: input.sampleTimestamp,
+    magnitude: input.mentionCount,
+    magnitudeLabel: `${input.mentionCount} mention${input.mentionCount === 1 ? "" : "s"}`,
+    detail: { place: input.placeName, sampleHeadline: input.sampleTitle },
+    credibility: null,
+  };
+}
 
 /** USGS earthquake GeoJSON feature. Coordinates are [lon, lat, depth]. */
 export function fromUsgsFeature(feature: any): GeoRecord | null {
@@ -428,6 +533,182 @@ export function fromGdeltArticle(
 }
 
 /**
+ * CAMEO EventRootCode (01-20) -> a short human label. GDELT's Events export
+ * gives no natural-language headline for a row — this is the only vocabulary
+ * upstream provides for what happened, and every one of the twenty root
+ * codes is used verbatim, not paraphrased.
+ * https://www.gdeltproject.org/data/lookups/CAMEO.eventcodes.txt
+ */
+export const CAMEO_ROOT_CODE_LABELS: Record<string, string> = {
+  "01": "Made a public statement",
+  "02": "Made an appeal",
+  "03": "Expressed intent to cooperate",
+  "04": "Held consultations",
+  "05": "Engaged in diplomatic cooperation",
+  "06": "Engaged in material cooperation",
+  "07": "Provided aid",
+  "08": "Yielded",
+  "09": "Investigated",
+  "10": "Issued a demand",
+  "11": "Disapproved",
+  "12": "Rejected",
+  "13": "Issued a threat",
+  "14": "Protested",
+  "15": "Exhibited military posture",
+  "16": "Reduced relations",
+  "17": "Coerced",
+  "18": "Assaulted",
+  "19": "Fought",
+  "20": "Engaged in unconventional mass violence",
+};
+
+/**
+ * One tab-separated row from a GDELT 2.0 Events export CSV — 61 fixed
+ * columns, no header row. Fetched from
+ * data.gdeltproject.org/gdeltv2/<TIMESTAMP>.export.CSV.zip, with the latest
+ * timestamp discovered via .../lastupdate.txt. GDELT's REST query endpoints
+ * (api/v2/events/events, api/v2/geo/geo) both return 404 — verified live —
+ * this periodic export is the real, working mechanism; see geo-sources.ts.
+ *
+ * Column indices used here (0-based; GDELT's own documentation is 1-based):
+ *   0  GLOBALEVENTID         30 GoldsteinScale        56 ActionGeo_Lat
+ *   26 EventCode             31 NumMentions            57 ActionGeo_Long
+ *   28 EventRootCode         34 AvgTone                59 DATEADDED (YYYYMMDDHHMMSS)
+ *                            51 ActionGeo_Type          52 ActionGeo_FullName
+ *                                                        60 SOURCEURL
+ *
+ * ActionGeo_Type: 1=COUNTRY, 2=USSTATE, 3=USCITY, 4=WORLDCITY, 5=WORLDSTATE.
+ * Mapped conservatively — type 1 to "country", every other type to "city" —
+ * the same collapse-to-coarser-bucket approach fromUcdpEvent uses for UCDP's
+ * own finer where_prec scale. GDELT supplies no device-level fix, so this
+ * adapter never produces "exact".
+ */
+export function fromGdeltEvent(columns: string[]): GeoRecord | null {
+  if (!Array.isArray(columns) || columns.length < 61) return null;
+
+  const lat = Number(columns[56]);
+  const lon = Number(columns[57]);
+  if (!isRealCoordinate(lat, lon)) return null;
+
+  const rawDate = String(columns[59] ?? "");
+  const normalised = /^\d{14}$/.test(rawDate)
+    ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}T${rawDate.slice(8, 10)}:${rawDate.slice(10, 12)}:${rawDate.slice(12, 14)}Z`
+    : rawDate;
+  const time = iso(normalised);
+  if (!time) return null;
+
+  const geoType = Number(columns[51]);
+  const precision: GeoPrecision = geoType === 1 ? "country" : "city";
+  const placeName = String(columns[52] ?? "").trim() || "unnamed location";
+
+  const rootCode = String(columns[28] ?? "").trim();
+  const rootLabel = CAMEO_ROOT_CODE_LABELS[rootCode] ?? null;
+  const eventCode = String(columns[26] ?? "").trim();
+
+  const numMentions = Number(columns[31]);
+  const magnitude = Number.isFinite(numMentions) ? numMentions : null;
+
+  const goldstein = Number(columns[30]);
+  const avgTone = Number(columns[34]);
+
+  const globalEventId = String(columns[0] ?? "").trim();
+  const sourceUrl = String(columns[60] ?? "").trim();
+
+  return {
+    id: `gdelt-event-${globalEventId || `${lat},${lon},${rawDate}`}`,
+    layer: "gdeltEvents",
+    lat,
+    lon,
+    precision,
+    locates:
+      geoType === 1
+        ? `GDELT's geocoded action country (${placeName}) — not a specific site`
+        : `GDELT's geocoded action location (${placeName})`,
+    title: rootLabel
+      ? `${rootLabel} — ${placeName}`
+      : `Event code ${eventCode || "unclassified"} — ${placeName}`,
+    source: "GDELT 2.0 Events",
+    url: sourceUrl,
+    timestamp: time,
+    magnitude,
+    magnitudeLabel:
+      magnitude === null
+        ? "mention count not reported by GDELT"
+        : `${magnitude} mention(s) across monitored sources`,
+    detail: {
+      eventCode: eventCode || "unknown",
+      eventRootCode: rootCode || "unknown",
+      ...(Number.isFinite(goldstein) ? { goldsteinScale: goldstein } : {}),
+      ...(Number.isFinite(avgTone) ? { avgTone: Number(avgTone.toFixed(2)) } : {}),
+      actionGeoType: Number.isFinite(geoType) ? geoType : "unknown",
+    },
+    credibility: null,
+  };
+}
+
+/**
+ * One row of OpenSky Network's `/states/all` response — a fixed positional
+ * array (OpenSky does not name these fields in the JSON itself):
+ *   0 icao24, 1 callsign, 2 origin_country, 3 time_position, 4 last_contact,
+ *   5 longitude, 6 latitude, 7 baro_altitude, 8 on_ground, 9 velocity,
+ *   10 true_track, 11 vertical_rate, 12 sensors, 13 geo_altitude,
+ *   14 squawk, 15 spi, 16 position_source.
+ * Verified live against the real endpoint. `time_position` (not
+ * `last_contact`) is used as the timestamp — it is null whenever the
+ * position itself is stale, which is exactly when this adapter should
+ * refuse to plot a fresh-looking pin for an old fix.
+ */
+export function fromOpenSkyState(state: unknown[]): GeoRecord | null {
+  if (!Array.isArray(state) || state.length < 17) return null;
+
+  const lon = state[5];
+  const lat = state[6];
+  if (typeof lat !== "number" || typeof lon !== "number" || !isRealCoordinate(lat, lon)) {
+    return null;
+  }
+
+  const timePosition = state[3];
+  if (typeof timePosition !== "number") return null;
+  const time = iso(timePosition * 1000);
+  if (!time) return null;
+
+  const icao24 = String(state[0] ?? "unknown");
+  const callsign = String(state[1] ?? "").trim() || null;
+  const originCountry = String(state[2] ?? "unknown");
+  const onGround = state[8] === true;
+  const velocity = typeof state[9] === "number" ? state[9] : null;
+  const trueTrack = typeof state[10] === "number" ? state[10] : null;
+  const geoAltitude = typeof state[13] === "number" ? state[13] : null;
+  const baroAltitude = typeof state[7] === "number" ? state[7] : null;
+  const altitude = geoAltitude ?? baroAltitude;
+  const squawk = state[14] !== null && state[14] !== undefined ? String(state[14]) : null;
+
+  return {
+    id: `opensky-${icao24}-${timePosition}`,
+    layer: "assetTracks",
+    lat,
+    lon,
+    precision: "exact",
+    locates: "the aircraft's ADS-B transponder-reported position at time_position",
+    title: `${callsign ?? icao24} (${originCountry})${onGround ? " — on ground" : ""}`,
+    source: "OpenSky Network",
+    url: "https://opensky-network.org",
+    timestamp: time,
+    magnitude: velocity,
+    magnitudeLabel: velocity === null ? "groundspeed not reported" : `${velocity.toFixed(0)} m/s groundspeed`,
+    detail: {
+      icao24,
+      originCountry,
+      onGround: onGround ? "true" : "false",
+      headingDeg: trueTrack ?? "not reported",
+      altitudeM: altitude ?? "not reported",
+      squawk: squawk ?? "not reported",
+    },
+    credibility: null,
+  };
+}
+
+/**
  * ReliefWeb API disaster / humanitarian crisis report.
  *
  * The ReliefWeb API returns a `country` array on each report. We take the
@@ -489,6 +770,81 @@ export function fromReliefWebReport(report: unknown): GeoRecord | null {
       disasterType: disasterLabel,
       country: countryName || primaryIso3,
     },
+    credibility: null,
+  };
+}
+
+/**
+ * One zone's row from a Kpler Supply & Demand balances response (grains,
+ * LNG or gas — all three share this shape: a `zone` name, a period, and a
+ * flat `metrics` object of numeric fields).
+ */
+export interface KplerBalanceRow {
+  domain: "grains" | "lng" | "gas";
+  /** "Corn" / "Soybean" / "Wheat" for grains; "LNG" or "Gas" otherwise. */
+  product: string;
+  zone: string;
+  startDate: string;
+  endDate: string;
+  metrics: Record<string, unknown>;
+  /** metric name -> unit string, from the response's `metadata.units`. */
+  units: Record<string, string>;
+}
+
+/**
+ * Kpler Supply & Demand balance row -> GeoRecord.
+ *
+ * Kpler's `zone` is a country/region NAME ("Argentina"), so this is
+ * country-centroid precision like GDELT/ReliefWeb above — a marker here
+ * locates the COUNTRY the balance sheet describes, never a specific farm,
+ * port, terminal or gas field. `magnitude` is the domain's headline supply
+ * figure (grains: total supply; LNG/gas: supply) for marker sizing —
+ * everything else Kpler reported for the row goes into `detail` verbatim,
+ * with its real unit, rather than picking a handful of "important" fields
+ * and silently dropping the rest of a balance sheet.
+ */
+export function fromKplerBalance(row: KplerBalanceRow): GeoRecord | null {
+  const centroid = COUNTRY_CENTROIDS[row.zone];
+  if (!centroid) return null;
+  const time = iso(row.startDate);
+  if (!time) return null;
+
+  const headlineKey = row.domain === "grains" ? "supplyTotal" : "supply";
+  const headlineRaw = row.metrics[headlineKey];
+  const magnitude = typeof headlineRaw === "number" ? headlineRaw : null;
+  const headlineUnit = row.units[headlineKey] ?? "";
+  const magnitudeLabel =
+    magnitude === null
+      ? `${headlineKey} not reported by Kpler for this period`
+      : `${magnitude.toLocaleString()} ${headlineUnit} ${row.domain === "grains" ? "total supply" : "supply"}`;
+
+  const detail: Record<string, string | number> = {
+    zone: row.zone,
+    product: row.product,
+    period: `${row.startDate} to ${row.endDate}`,
+  };
+  for (const [key, value] of Object.entries(row.metrics)) {
+    if (typeof value !== "number") continue;
+    const unit = row.units[key];
+    detail[key] = unit ? `${value} ${unit}` : value;
+  }
+
+  return {
+    id: `kpler-${row.domain}-${row.product}-${row.zone}-${row.startDate}`,
+    layer: "supplyDemand",
+    lat: centroid[0],
+    lon: centroid[1],
+    precision: "country",
+    locates:
+      `${row.zone}'s national ${row.product} supply & demand balance sheet — a country-level ` +
+      `aggregate, not a specific farm, port, terminal or field`,
+    title: `${row.product} balance — ${row.zone}`,
+    source: "Kpler Supply & Demand API",
+    url: "",
+    timestamp: time,
+    magnitude,
+    magnitudeLabel,
+    detail,
     credibility: null,
   };
 }

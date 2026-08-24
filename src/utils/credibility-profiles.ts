@@ -24,14 +24,21 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import type { WeightProfile } from "./credibility";
 
 // ─── File path ─────────────────────────────────────────────────────────────
 
-const DATA_DIR = join(process.cwd(), "data");
-const PROFILES_FILE = join(DATA_DIR, "credibility-profiles.json");
+/**
+ * Plain relative string literals, not `path.join(process.cwd(), ...)` —
+ * matching `credential-vault.ts`'s own `VAULT_PATH` exactly. `node:path`
+ * gets the same "externalized for browser compatibility" throw `node:fs/
+ * promises` did (see the dynamic-import notes below): sources.tsx, a client
+ * route, imports this module for its `createServerFn` exports, so anything
+ * evaluated at this file's top level ships into the browser bundle. A plain
+ * string needs no import, static or dynamic, so there's nothing to leak.
+ */
+const DATA_DIR = "./data";
+const PROFILES_FILE = "./data/credibility-profiles.json";
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -50,6 +57,14 @@ export class ProfileStoreError extends Error {
  */
 export async function readProfilesFile(): Promise<WeightProfile[]> {
   try {
+    // Dynamic import, not a static top-level one — see this file's header
+    // change note: sources.tsx (a client route) imports this module for the
+    // createServerFn exports below, and a static `node:fs/promises` import
+    // would ship into the browser bundle the same way `bun:sqlite` did in
+    // job-store-sqlite.ts, crashing on mere import evaluation. Matches
+    // credential-vault.ts's existing, already-working `await import("fs")`
+    // pattern for the same reason.
+    const { readFile } = await import("node:fs/promises");
     const raw = await readFile(PROFILES_FILE, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -70,6 +85,7 @@ export async function readProfilesFile(): Promise<WeightProfile[]> {
  */
 export async function writeProfilesFile(profiles: WeightProfile[]): Promise<void> {
   try {
+    const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(DATA_DIR, { recursive: true });
     const custom = profiles.filter((p) => !p.builtin);
     await writeFile(PROFILES_FILE, JSON.stringify(custom, null, 2), "utf-8");

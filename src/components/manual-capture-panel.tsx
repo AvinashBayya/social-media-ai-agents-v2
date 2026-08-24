@@ -192,26 +192,26 @@ export function ManualCapturePanel() {
 
   const fieldError = (name: string) =>
     error?.field === name ? (
-      <p className="mt-1 text-[9px] leading-relaxed text-[#EF4444]">{error.message}</p>
+      <p className="mt-1 text-[9px] leading-relaxed text-console-red">{error.message}</p>
     ) : null;
 
   return (
-    <Card className="border-[#F59E0B]/30 bg-[#111827]">
+    <Card className="border-console-amber/30 bg-console-surface">
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <UploadCloud className="size-4 text-[#F59E0B]" />
-          <h3 className="text-xs font-bold uppercase text-white">
+          <UploadCloud className="size-4 text-console-amber" />
+          <h3 className="text-xs font-bold uppercase text-console-text">
             Manual capture — Meta and other
           </h3>
           <Badge
             variant="outline"
-            className="h-4 border-[#F59E0B]/40 bg-[#F59E0B]/10 px-1.5 text-[8px] font-normal text-[#F59E0B]"
+            className="h-4 border-console-amber/40 bg-console-amber/10 px-1.5 text-[8px] font-normal text-console-amber"
           >
             analyst-attested
           </Badge>
         </div>
 
-        <p className="text-[10px] leading-relaxed text-[#94A3B8]">
+        <p className="text-[10px] leading-relaxed text-console-muted">
           Instagram and Facebook are not collected — Meta&apos;s terms prohibit it and bulk
           collection would process personal data without a lawful basis under the DPDP Act 2023. A
           public post still enters here, as a capture an analyst makes and stands behind. It is
@@ -233,8 +233,8 @@ export function ManualCapturePanel() {
           }}
           className={`flex min-h-[70px] cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed p-3 text-center transition-colors ${
             dragging
-              ? "border-[#F59E0B] bg-[#F59E0B]/5"
-              : "border-[#263548] hover:border-[#F59E0B]/50"
+              ? "border-console-amber bg-console-amber/5"
+              : "border-console-border hover:border-console-amber/50"
           }`}
         >
           <label className="cursor-pointer">
@@ -246,11 +246,11 @@ export function ManualCapturePanel() {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             {file ? (
-              <span className="font-mono text-[10px] text-[#10B981]">
+              <span className="font-mono text-[10px] text-console-green">
                 {file.name} · {(file.size / 1024).toFixed(0)} KB
               </span>
             ) : (
-              <span className="text-[10px] text-[#64748B]">
+              <span className="text-[10px] text-console-label">
                 Drop the screenshot or PDF here, or click to choose
               </span>
             )}
@@ -260,11 +260,11 @@ export function ManualCapturePanel() {
 
         <div className="grid gap-2 sm:grid-cols-2">
           <div>
-            <label className="text-[9px] font-semibold uppercase text-[#64748B]">Platform</label>
+            <label className="text-[9px] font-semibold uppercase text-console-label">Platform</label>
             <select
               value={platform}
               onChange={(e) => setPlatform(e.target.value as CapturePlatform)}
-              className="mt-0.5 h-7 w-full rounded border border-[#263548] bg-[#0B1220] px-2 text-[10px] text-white"
+              className="mt-0.5 h-7 w-full rounded border border-console-border bg-console-deep px-2 text-[10px] text-console-text"
             >
               {(Object.keys(CAPTURE_PLATFORM_LABELS) as CapturePlatform[]).map((p) => (
                 <option key={p} value={p}>
@@ -274,13 +274,13 @@ export function ManualCapturePanel() {
             </select>
           </div>
           <div>
-            <label className="text-[9px] font-semibold uppercase text-[#64748B]">
+            <label className="text-[9px] font-semibold uppercase text-console-label">
               Link to case (optional)
             </label>
             <select
               value={caseId}
               onChange={(e) => setCaseId(e.target.value)}
-              className="mt-0.5 h-7 w-full rounded border border-[#263548] bg-[#0B1220] px-2 text-[10px] text-[#06B6D4]"
+              className="mt-0.5 h-7 w-full rounded border border-console-border bg-console-deep px-2 text-[10px] text-console-cyan"
             >
               <option value="">— none —</option>
               {cases.map((c: any) => (
@@ -293,47 +293,47 @@ export function ManualCapturePanel() {
         </div>
 
         <div>
-          <label className="text-[9px] font-semibold uppercase text-[#64748B]">
-            Public URL of the post <span className="text-[#EF4444]">*</span>
+          <label className="text-[9px] font-semibold uppercase text-console-label">
+            Public URL of the post <span className="text-console-red">*</span>
           </label>
           <Input
             value={sourceUrl}
             onChange={(e) => setSourceUrl(e.target.value)}
             placeholder="https://www.instagram.com/p/…"
-            className="mt-0.5 h-7 border-[#263548] bg-[#0B1220] text-[10px] text-white"
+            className="mt-0.5 h-7 border-console-border bg-console-deep text-[10px] text-console-text"
           />
           {fieldError("sourceUrl")}
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <div>
-            <label className="text-[9px] font-semibold uppercase text-[#64748B]">
-              Captured by <span className="text-[#EF4444]">*</span>
+            <label className="text-[9px] font-semibold uppercase text-console-label">
+              Captured by <span className="text-console-red">*</span>
             </label>
             <Input
               value={capturedBy}
               onChange={(e) => setCapturedBy(e.target.value)}
               placeholder="Analyst name or callsign"
-              className="mt-0.5 h-7 border-[#263548] bg-[#0B1220] text-[10px] text-white"
+              className="mt-0.5 h-7 border-console-border bg-console-deep text-[10px] text-console-text"
             />
             {fieldError("capturedBy")}
           </div>
           <div>
-            <label className="text-[9px] font-semibold uppercase text-[#64748B]">
-              Captured at <span className="text-[#EF4444]">*</span>
+            <label className="text-[9px] font-semibold uppercase text-console-label">
+              Captured at <span className="text-console-red">*</span>
             </label>
             <input
               type="datetime-local"
               value={capturedAt}
               onChange={(e) => setCapturedAt(e.target.value)}
-              className="mt-0.5 h-7 w-full rounded border border-[#263548] bg-[#0B1220] px-2 text-[10px] text-white"
+              className="mt-0.5 h-7 w-full rounded border border-console-border bg-console-deep px-2 text-[10px] text-console-text"
             />
             {fieldError("capturedAt")}
           </div>
         </div>
 
         <div>
-          <label className="text-[9px] font-semibold uppercase text-[#64748B]">
+          <label className="text-[9px] font-semibold uppercase text-console-label">
             What this shows, and how it was obtained
           </label>
           <textarea
@@ -341,18 +341,18 @@ export function ManualCapturePanel() {
             onChange={(e) => setNote(e.target.value)}
             rows={2}
             placeholder="e.g. Public post by @handle, visible without login, captured from a browser at the stated time. Post timestamp legible as 14:02 IST."
-            className="mt-0.5 w-full rounded border border-[#263548] bg-[#0B1220] px-2 py-1 text-[10px] leading-relaxed text-white"
+            className="mt-0.5 w-full rounded border border-console-border bg-console-deep px-2 py-1 text-[10px] leading-relaxed text-console-text"
           />
         </div>
 
         {error && !error.field && (
-          <p className="text-[9px] leading-relaxed text-[#EF4444]">{error.message}</p>
+          <p className="text-[9px] leading-relaxed text-console-red">{error.message}</p>
         )}
 
         <Button
           onClick={() => void submit()}
           disabled={busy}
-          className="h-8 w-full gap-1.5 bg-[#F59E0B] text-[10px] font-bold uppercase text-black hover:bg-[#F59E0B]/90"
+          className="h-8 w-full gap-1.5 bg-console-amber text-[10px] font-bold uppercase text-console-accent-foreground hover:bg-console-amber/90"
         >
           {busy ? (
             <Loader2 className="size-3.5 animate-spin" />
@@ -364,23 +364,23 @@ export function ManualCapturePanel() {
 
         {/* The caveats are not boilerplate — each names a wrong inference this
             panel would otherwise invite. */}
-        <div className="space-y-1.5 rounded border border-[#263548] bg-[#0B1220] p-2.5">
-          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase text-[#F59E0B]">
+        <div className="space-y-1.5 rounded border border-console-border bg-console-deep p-2.5">
+          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase text-console-amber">
             <AlertTriangle className="size-3" /> What this record does and does not establish
           </div>
           <ul className="space-y-1">
             {CAPTURE_CAVEATS.map((c) => (
-              <li key={c} className="flex gap-1.5 text-[9px] leading-relaxed text-[#94A3B8]">
-                <span className="text-[#64748B]">·</span>
+              <li key={c} className="flex gap-1.5 text-[9px] leading-relaxed text-console-muted">
+                <span className="text-console-label">·</span>
                 <span>{c}</span>
               </li>
             ))}
           </ul>
-          <p className="flex gap-1.5 border-t border-[#263548]/60 pt-1.5 text-[9px] leading-relaxed text-[#64748B]">
+          <p className="flex gap-1.5 border-t border-console-border/60 pt-1.5 text-[9px] leading-relaxed text-console-label">
             <FileWarning className="mt-px size-3 shrink-0" />
             {ATTRIBUTION_LIMITATION}
           </p>
-          <p className="text-[9px] leading-relaxed text-[#64748B]">{HASH_MEANING}</p>
+          <p className="text-[9px] leading-relaxed text-console-label">{HASH_MEANING}</p>
         </div>
       </CardContent>
     </Card>

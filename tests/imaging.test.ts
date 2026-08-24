@@ -5,6 +5,7 @@ import {
   detectSceneCuts,
   dct2d,
   findNearDuplicates,
+  grayscaleAutocontrastRgba,
   hammingDistance,
   hashRgba,
   interpretC2pa,
@@ -22,6 +23,7 @@ import {
   SCENE_CUT_DISTANCE,
   type HashedImage,
 } from "../src/utils/imaging";
+import { AI_SERVICE_PROVENANCE } from "../src/utils/ai-service-client";
 import {
   buildJpegWithExif,
   buildJpegWithoutExif,
@@ -101,6 +103,82 @@ describe("rgbaToGrayscale", () => {
 
   test("rejects a buffer too small for the stated dimensions", () => {
     expect(() => rgbaToGrayscale(new Uint8ClampedArray(16), 100, 100)).toThrow();
+  });
+});
+
+// ─── OCR preprocessing ──────────────────────────────────────────────────────
+// The algorithm behind imaging-client.ts's preprocessForOcr. Verified live
+// 2026-08-20 (mirrored in PIL, same percentile-clip-and-stretch approach)
+// against real degraded test images before this was written: mean OCR
+// confidence 75->77 on a low-contrast/noisy case, unchanged (95->95, no
+// regression) on an already-clean fixture. See grayscaleAutocontrastRgba's
+// doc comment in imaging.ts for what this does and does not fix.
+describe("grayscaleAutocontrastRgba", () => {
+  test("stretches a low-contrast image toward the full 0-255 range", () => {
+    // All pixels sit in a narrow mid-grey band (100-140) — exactly the
+    // "low contrast" case this exists to fix.
+    const low = syntheticImage(20, 20, (x) => 100 + (x % 40));
+    const out = grayscaleAutocontrastRgba(low.data);
+    let min = 255;
+    let max = 0;
+    for (let i = 0; i < out.length; i += 4) {
+      min = Math.min(min, out[i]);
+      max = Math.max(max, out[i]);
+    }
+    expect(min).toBeLessThan(20);
+    expect(max).toBeGreaterThan(235);
+  });
+
+  test("outputs true grayscale — R, G and B channels are equal", () => {
+    const data = new Uint8ClampedArray(4 * 3);
+    data.set([200, 50, 10, 255, 10, 200, 50, 255, 50, 10, 200, 255]);
+    const out = grayscaleAutocontrastRgba(data);
+    for (let i = 0; i < out.length; i += 4) {
+      expect(out[i]).toBe(out[i + 1]);
+      expect(out[i + 1]).toBe(out[i + 2]);
+    }
+  });
+
+  test("preserves the alpha channel untouched", () => {
+    const data = new Uint8ClampedArray([10, 20, 30, 77, 200, 210, 220, 133]);
+    const out = grayscaleAutocontrastRgba(data);
+    expect(out[3]).toBe(77);
+    expect(out[7]).toBe(133);
+  });
+
+  test("clips outlier pixels instead of letting a handful of them flatten the whole stretch", () => {
+    // 1000 mid-grey pixels (the real signal) plus a few near-black/near-
+    // white outliers (noise) — a naive min/max stretch would use the
+    // outliers as its 0/255 anchors and barely move the mid-grey cluster;
+    // percentile clipping should still spread the cluster out.
+    const pixelCount = 1000;
+    const data = new Uint8ClampedArray(pixelCount * 4);
+    for (let p = 0; p < pixelCount; p += 1) {
+      const i = p * 4;
+      const isOutlier = p < 5;
+      const v = isOutlier ? (p % 2 === 0 ? 0 : 255) : 120 + (p % 20);
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+    const out = grayscaleAutocontrastRgba(data, 2);
+    // Sample a mid-cluster pixel (well past the outliers) — it should have
+    // moved far from its original ~120-140 value, not stayed compressed.
+    const midClusterValue = out[100 * 4];
+    expect(Math.abs(midClusterValue - 130)).toBeGreaterThan(50);
+  });
+
+  test("a flat (single-colour) image is returned as plain grayscale, not amplified noise", () => {
+    const flat = syntheticImage(10, 10, () => 128);
+    const out = grayscaleAutocontrastRgba(flat.data);
+    for (let i = 0; i < out.length; i += 4) {
+      expect(out[i]).toBe(128);
+    }
+  });
+
+  test("an empty buffer does not throw", () => {
+    expect(() => grayscaleAutocontrastRgba(new Uint8ClampedArray(0))).not.toThrow();
   });
 });
 
@@ -537,6 +615,92 @@ describe("OCR interpretation", () => {
     expect(report.words).toEqual([]);
   });
 
+  /**
+   * Regression test for a real bug, found live 2026-08-20: tesseract.js 7's
+   * actual Page type has no flat `data.words` array at all — words nest
+   * four levels deep, blocks[].paragraphs[].lines[].words[], and `blocks`
+   * itself is null unless the caller's `output` option explicitly requests
+   * it. The tests above only pass because they mock a flat `data.words`
+   * shape that has never existed in this library version's real output —
+   * that mock is exactly why OCR silently returning zero words (while
+   * `data.text` and `data.confidence` succeeded correctly) went unnoticed.
+   * This uses the real, verified-live block/paragraph/line/word nesting.
+   */
+  test("flattens Tesseract's real nested blocks/paragraphs/lines/words shape", () => {
+    const nestedRaw = {
+      data: {
+        text: "SECTOR 7 PERIMETER LOG\nConvoy departed at 04:15 local time.\n",
+        confidence: 95,
+        blocks: [
+          {
+            paragraphs: [
+              {
+                lines: [
+                  {
+                    words: [
+                      { text: "SECTOR", confidence: 96.4, bbox: { x0: 10, y0: 10, x1: 60, y1: 30 } },
+                      { text: "7", confidence: 98.1, bbox: { x0: 65, y0: 10, x1: 75, y1: 30 } },
+                      {
+                        text: "PERIMETER",
+                        confidence: 92.7,
+                        bbox: { x0: 80, y0: 10, x1: 160, y1: 30 },
+                      },
+                      { text: "LOG", confidence: 95.0, bbox: { x0: 165, y0: 10, x1: 195, y1: 30 } },
+                    ],
+                  },
+                ],
+              },
+              {
+                lines: [
+                  {
+                    words: [
+                      {
+                        text: "Convoy",
+                        confidence: 90.3,
+                        bbox: { x0: 10, y0: 40, x1: 70, y1: 60 },
+                      },
+                      {
+                        text: "departed",
+                        confidence: 88.6,
+                        bbox: { x0: 75, y0: 40, x1: 140, y1: 60 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const report = interpretOcr(nestedRaw, ["eng"]);
+    expect(report.words.map((w) => w.text)).toEqual([
+      "SECTOR",
+      "7",
+      "PERIMETER",
+      "LOG",
+      "Convoy",
+      "departed",
+    ]);
+    expect(report.words[0].confidence).toBe(96.4);
+    expect(report.words[0].bbox).toEqual({ x0: 10, y0: 10, x1: 60, y1: 30 });
+    expect(report.text).toContain("SECTOR 7 PERIMETER LOG");
+    expect(report.meanConfidence).not.toBeNull();
+  });
+
+  test("real recognition with blocks null (output.blocks not requested) still yields zero words, not a crash", () => {
+    // What runOcr's recognize() call looked like BEFORE requesting
+    // `output: { blocks: true }` — text/confidence succeed, blocks stays
+    // null, so words is correctly empty rather than throwing.
+    const report = interpretOcr(
+      { data: { text: "SECTOR 7 PERIMETER LOG\n", confidence: 95, blocks: null } },
+      ["eng"],
+    );
+    expect(report.words).toEqual([]);
+    expect(report.text).toBe("SECTOR 7 PERIMETER LOG");
+  });
+
   test("covers the nine Indic scripts the language layer detects", () => {
     const scripts = new Set(OCR_LANGUAGES.map((l) => l.script));
     for (const s of [
@@ -645,13 +809,35 @@ describe("documented gaps", () => {
     expect(gap.requires).toContain("GPU");
   });
 
-  test("object detection records the AGPL licence trap", () => {
-    // Ultralytics YOLO is AGPL-3.0 — using it would force open-sourcing the
-    // whole system. The warning belongs in the code, not in someone's memory.
-    const gap = NOT_IMPLEMENTED.find((g) => g.capability.includes("Object"))!;
-    expect(gap.licence).toContain("Apache 2.0");
-    expect(gap.licence).toContain("AGPL-3.0");
-    expect(gap.licence).toContain("must NOT");
+  test("object detection is implemented and still records the AGPL licence trap", () => {
+    // Object detection moved from NOT_IMPLEMENTED to a real ai-service
+    // capability (Grounding DINO tiny). Ultralytics YOLO is AGPL-3.0 and
+    // using it would force open-sourcing the whole system — that warning
+    // now lives with the implementation, not with the absence.
+    expect(NOT_IMPLEMENTED.some((g) => g.capability.includes("Object"))).toBe(false);
+    expect(AI_SERVICE_PROVENANCE.models).toContain("Apache 2.0");
+    expect(AI_SERVICE_PROVENANCE.models).toContain("AGPL-3.0");
+    expect(AI_SERVICE_PROVENANCE.models).toContain("force open-sourcing");
+  });
+
+  test("audio transcription is implemented (Sarvam) and no longer declared a gap", () => {
+    // Transcription moved from NOT_IMPLEMENTED to a real capability
+    // (src/utils/transcription.ts, Sarvam saaras:v3) on the Video
+    // Intelligence page. Voice-clone/anti-spoofing detection is a
+    // different, still-real gap and stays declared.
+    expect(NOT_IMPLEMENTED.some((g) => g.capability.includes("transcription"))).toBe(false);
+    const gap = NOT_IMPLEMENTED.find((g) => g.capability.includes("Voice-clone"))!;
+    expect(gap).toBeDefined();
+    expect(gap.limitation).toContain("out-of-distribution");
+  });
+
+  test("face matching against a standing watchlist is still declared not implemented", () => {
+    // Per-request matching against an operator-supplied reference set is
+    // real now (ai-service /ai/faces); a persisted, cross-case watchlist is
+    // not, and still needs a DPDP Act 2023 lawful basis before it could be.
+    const gap = NOT_IMPLEMENTED.find((g) => g.capability.includes("watchlist"))!;
+    expect(gap.limitation).toContain("DPDP Act 2023");
+    expect(gap.limitation).toContain("reference set");
   });
 
   test("every declared gap states both what it needs and what it would still get wrong", () => {

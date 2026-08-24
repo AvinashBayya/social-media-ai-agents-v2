@@ -112,10 +112,25 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+/**
+ * Runs before first paint (a blocking script, no async/defer) to apply the
+ * real stored theme to <html> ahead of hydration — mirrors
+ * src/utils/theme.ts's getThemePreference()/resolveTheme() logic exactly
+ * (an absent key means "never touched the toggle" and resolves to dark,
+ * matching this app's pre-toggle behavior, rather than silently following
+ * the OS preference for an existing user who never chose anything).
+ * suppressHydrationWarning on <html> below is required alongside this:
+ * server-rendered markup can never know the real client-side preference, so
+ * the class this script applies will always differ from what SSR rendered,
+ * by design — that's the flash this script exists to prevent, not a bug.
+ */
+const THEME_INIT_SCRIPT = `(function(){try{var v=localStorage.getItem("sentinel_theme");var dark=v==="light"?false:v==="system"?window.matchMedia("(prefers-color-scheme: dark)").matches:true;document.documentElement.classList.toggle("dark",dark);}catch(e){}})();`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>

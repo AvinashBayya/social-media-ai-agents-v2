@@ -44,8 +44,9 @@ import type { CollectorRegistry } from "../collectors/registry";
 import { collectorRegistry } from "../collectors/registry";
 import { registerExistingCollectors } from "../collectors/existing";
 import { registerExternalCollectors } from "../collectors/external";
+import { registerPersonCollectors } from "../collectors/person";
 import { resolveInvestigationEntities } from "./entity-resolution";
-import { dedupeEntitiesById, dedupeRelationships } from "./merge";
+import { dedupeEntitiesById, dedupeRelationships, mergeTargetSelfEntities } from "./merge";
 import type { OsintPlan } from "./query-planner";
 import { planInvestigation } from "./query-planner";
 
@@ -91,9 +92,19 @@ export async function runInvestigation(
     }),
   );
 
-  const entities = dedupeEntitiesById(collectorResults.flatMap((r) => r.result.entities));
-  const relationships = dedupeRelationships(
+  const dedupedEntities = dedupeEntitiesById(collectorResults.flatMap((r) => r.result.entities));
+  const dedupedRelationships = dedupeRelationships(
     collectorResults.flatMap((r) => r.result.relationships),
+  );
+  // See mergeTargetSelfEntities()'s own doc — collapses each collector's own
+  // `<collector>:target:<value>` bookkeeping entity into one node, distinct
+  // from (and safe where) entity-resolution.ts's general person/organization
+  // value-merging is not. Mirrors jobs.ts's pollInvestigation() so both
+  // pipelines dedupe identically, per this file's own stated design goal.
+  const { entities, relationships } = mergeTargetSelfEntities(
+    dedupedEntities,
+    dedupedRelationships,
+    plan.input,
   );
   const evidence = collectorResults.flatMap((r) => r.result.evidence);
   const warnings = collectorResults.flatMap((r) => r.result.warnings);
@@ -133,6 +144,7 @@ export const runOsintInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     registerExistingCollectors();
     registerExternalCollectors();
+    registerPersonCollectors(); // no-op unless PERSON_INVESTIGATION_ENABLED=true
     const investigation = await runInvestigation(data.target);
     const resolved = resolveInvestigationEntities(investigation);
     // `Investigation.entities[].metadata`/`evidence[].rawValue` are typed

@@ -119,6 +119,11 @@ class DescribeResult(BaseModel):
     provenance: Provenance
 
 
+class OcrVlmResult(BaseModel):
+    text: str
+    provenance: Provenance
+
+
 class ChatResult(BaseModel):
     reply: str
     provenance: Provenance

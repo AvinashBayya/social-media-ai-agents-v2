@@ -56,16 +56,16 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
   };
 
   return (
-    <div className="rounded-md border border-[#3B82F6]/25 bg-[#3B82F6]/[0.03] p-3">
+    <div className="rounded-md border border-console-blue/25 bg-console-blue/[0.03] p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Layers className="size-3.5 text-[#3B82F6]" />
+        <Layers className="size-3.5 text-console-blue" />
         <span className="text-xs font-semibold">
           {independent} source{independent === 1 ? "" : "s"} reporting this
         </span>
         {cluster.syndicated && (
           <Badge
             variant="outline"
-            className="border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[10px] font-normal text-[#F59E0B]"
+            className="border-console-amber/40 bg-console-amber/10 text-[10px] font-normal text-console-amber"
             title={
               `Collapsed as syndicated re-publication: ${cluster.syndicatedDomains.join(", ")}. ` +
               `Counting a wire pickup as independent corroboration is how one story ` +
@@ -85,7 +85,7 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
         {cluster.independentDomains.map((d) => (
           <Badge key={d} variant="secondary" className="text-[10px] font-normal">
             {d}
-            {timeline.brokenBy === d && <span className="ml-1 text-[#10B981]">first</span>}
+            {timeline.brokenBy === d && <span className="ml-1 text-console-green">first</span>}
           </Badge>
         ))}
         {cluster.syndicatedDomains.map((d) => (
@@ -137,9 +137,9 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
       </div>
 
       {error && (
-        <div className="mt-2 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-          <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-          <div className="font-mono text-[10px] leading-relaxed text-[#EF4444]">
+        <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+          <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+          <div className="font-mono text-[10px] leading-relaxed text-console-red">
             <span className="font-bold">AI unavailable.</span> No synthesis was produced.
             <div className="pt-0.5 opacity-80">{error}</div>
           </div>
@@ -157,7 +157,7 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
               model-reported confidence {synth.confidence.toFixed(2)}
             </span>
             {synth.crossLingual && (
-              <Badge className="gap-1 border-[#8B5CF6]/30 bg-[#8B5CF6]/10 text-[10px] font-normal text-[#8B5CF6]">
+              <Badge className="gap-1 border-console-purple/30 bg-console-purple/10 text-[10px] font-normal text-console-purple">
                 <Languages className="size-2.5" />
                 cross-lingual: {synth.languages.join(" + ")}
               </Badge>
@@ -167,8 +167,8 @@ export function ClusterPanel({ cluster }: { cluster: StoryCluster }) {
           <p className="text-sm leading-relaxed">{synth.consensus}</p>
 
           {synth.disagreements.length > 0 ? (
-            <div className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[#F59E0B]">
+            <div className="rounded border border-console-amber/30 bg-console-amber/5 p-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-console-amber">
                 Sources disagree ({synth.disagreements.length})
               </div>
               <ul className="mt-1 space-y-1.5">

@@ -1,8 +1,27 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useEffect, useMemo } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
+import { Highlight } from "@/utils/highlight";
 import { containsWord, matchesQuery, parseQueryCached } from "@/utils/search";
 import { buildOverviewModules, formatFeedDate, rssEmptyReason } from "@/utils/osint-summary";
+import {
+  buildSeedEntities,
+  classifyFact,
+  personInvestigationStatus,
+  startPersonInvestigationAudit,
+  type PersonInvestigationSeeds,
+} from "@/utils/osint/person-investigation";
+import {
+  planOsintInvestigation,
+  startOsintInvestigationJob,
+  pollOsintInvestigationJob,
+} from "@/utils/osint/jobs";
+import type { InvestigationJob, InvestigationPoll, StartedInvestigation } from "@/utils/osint/jobs";
+import type { OsintPlan } from "@/utils/osint/query-planner";
+import type { CollectorEntity, CollectorRelationship } from "@/utils/collectors/result";
+import { saveGraphSnapshot } from "@/utils/graph-store";
+import { OSINT_NOT_IMPLEMENTED } from "@/utils/osint/gaps";
+import { NotImplementedPanel } from "@/components/not-implemented";
 
 /**
  * Renders a value the collector did not supply.
@@ -15,7 +34,7 @@ import { buildOverviewModules, formatFeedDate, rssEmptyReason } from "@/utils/os
  * absence looks, so it cannot drift back into a plausible substitute.
  */
 function NotReported({ what = "not reported" }: { what?: string }) {
-  return <span className="italic text-[#64748B]">{what}</span>;
+  return <span className="italic text-console-label">{what}</span>;
 }
 
 /**
@@ -36,20 +55,20 @@ function CollectorAbsence({
   emptyLabel: string;
 }) {
   if (loading) {
-    return <div className="py-8 text-center text-[#94A3B8]">Collecting…</div>;
+    return <div className="py-8 text-center text-console-muted">Collecting…</div>;
   }
   if (error) {
     return (
-      <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-4 text-[10px]">
-        <div className="font-bold uppercase text-[#EF4444]">Collection failed</div>
-        <p className="mt-1 text-[#94A3B8]">
+      <div className="rounded border border-console-red/30 bg-console-red/5 p-4 text-[10px]">
+        <div className="font-bold uppercase text-console-red">Collection failed</div>
+        <p className="mt-1 text-console-muted">
           This is a collection fault, not a finding that nothing is happening.
         </p>
-        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[#64748B]">{error}</pre>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-console-label">{error}</pre>
       </div>
     );
   }
-  return <div className="py-8 text-center text-[#94A3B8]">{emptyLabel}</div>;
+  return <div className="py-8 text-center text-console-muted">{emptyLabel}</div>;
 }
 
 /**
@@ -703,6 +722,895 @@ const OVERVIEW_ICONS: Record<string, typeof Globe> = {
 };
 
 // ============================================================================
+// Person Investigation panel
+// ============================================================================
+
+const PERSON_POLL_INTERVAL_MS = 1200;
+
+/**
+ * Groups a `CollectorEntity`/`CollectorEvidence`'s `.source` (the collector
+ * id that produced it, or "analyst-seed" for form-supplied seeds) into one
+ * of the task's requested report branches. `dorks`/`news`/`social`/`rdap`
+ * are the pre-existing, reused-as-is collectors this panel's investigation
+ * also runs — folded into the branch that matches their character rather
+ * than an "Other" catch-all, since a report grouped by "new vs. reused"
+ * collector would mean nothing to the analyst reading it.
+ */
+function branchOf(source: string): "Identity" | "Contact" | "Presence" | "Relationships" | "Other" {
+  if (source.startsWith("identity.") || source === "dorks" || source === "analyst-seed") return "Identity";
+  if (source.startsWith("contact.") || source === "rdap") return "Contact";
+  if (source.startsWith("presence.") || source === "news" || source === "social") return "Presence";
+  return "Other";
+}
+
+const BRANCH_ORDER = ["Identity", "Contact", "Presence", "Relationships", "Other"] as const;
+
+const FACT_STATUS_STYLE: Record<string, string> = {
+  Confirmed: "border-console-green/40 bg-console-green/10 text-console-green",
+  Possible: "border-console-amber/40 bg-console-amber/10 text-console-amber",
+  Unknown: "border-console-label/40 bg-console-label/10 text-console-muted",
+};
+
+const JOB_STATUS_STYLE: Record<string, string> = {
+  completed: "border-console-green/40 bg-console-green/10 text-console-green",
+  partial: "border-console-amber/40 bg-console-amber/10 text-console-amber",
+  failed: "border-console-red/40 bg-console-red/10 text-console-red",
+  cancelled: "border-console-label/40 bg-console-label/10 text-console-muted",
+  running: "border-console-cyan/40 bg-console-cyan/10 text-console-cyan",
+  queued: "border-console-label/40 bg-console-label/10 text-console-muted",
+};
+
+function PersonInvestigationPanel() {
+  const navigate = useNavigate();
+  const [flagChecked, setFlagChecked] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+
+  // Core Person Target Model Fields
+  const [personName, setPersonName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [age, setAge] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [country, setCountry] = useState("");
+  const [designation, setDesignation] = useState("");
+  const [organization, setOrganization] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [username, setUsername] = useState("");
+  const [knownProfiles, setKnownProfiles] = useState("");
+  const [website, setWebsite] = useState("");
+  const [domain, setDomain] = useState("");
+
+  // Audit & Governance Fields
+  const [caseRef, setCaseRef] = useState("");
+  const [lawfulBasisAttestation, setLawfulBasisAttestation] = useState("");
+  const [investigator, setInvestigator] = useState("");
+
+  // Execution & Results State
+  const [plan, setPlan] = useState<OsintPlan | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [started, setStarted] = useState<StartedInvestigation | null>(null);
+  const [poll, setPoll] = useState<InvestigationPoll | null>(null);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState("");
+  const [reportSubTab, setReportSubTab] = useState<"overview" | "contact" | "social" | "orgs" | "news" | "infra" | "evidence" | "timeline">("overview");
+  const stoppedRef = useRef(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const status = (await personInvestigationStatus()) as { enabled: boolean };
+        setEnabled(status.enabled);
+      } catch {
+        setEnabled(false);
+      } finally {
+        setFlagChecked(true);
+      }
+    })();
+  }, []);
+
+  // Preview candidate collectors when person name is typed
+  useEffect(() => {
+    let cancelled = false;
+    if (!personName.trim()) {
+      setPlan(null);
+      setSelected(new Set());
+      return;
+    }
+    (async () => {
+      try {
+        const data = (await planOsintInvestigation({ data: { target: personName.trim() } })) as OsintPlan;
+        if (cancelled) return;
+        setPlan(data);
+        setSelected(
+          new Set(data.collectors.map((c) => c.collectorId).filter((id) => id !== "contact.hibp")),
+        );
+      } catch {
+        if (cancelled) return;
+        setPlan(null);
+        setSelected(new Set());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [personName]);
+
+  const toggleCollector = (collectorId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(collectorId)) next.delete(collectorId);
+      else next.add(collectorId);
+      return next;
+    });
+  };
+
+  const seeds: PersonInvestigationSeeds = {
+    personName: personName.trim(),
+    aliases: aliases.split(",").map((s) => s.trim()).filter(Boolean),
+    age: age ? parseInt(age.trim(), 10) || undefined : undefined,
+    dateOfBirth: dateOfBirth.trim() || undefined,
+    city: city.trim() || undefined,
+    state: state.trim() || undefined,
+    country: country.trim() || undefined,
+    designation: designation.trim() || undefined,
+    organization: organization.trim() || undefined,
+    publicEmail: email.trim() || undefined,
+    publicPhone: phone.trim() || undefined,
+    username: username.trim() || undefined,
+    knownSocialProfiles: knownProfiles.split(",").map((s) => s.trim()).filter(Boolean),
+    website: website.trim() || undefined,
+    domain: domain.trim() || undefined,
+  };
+
+  const start = async () => {
+    setGateError(null);
+    setRunError("");
+    setStarted(null);
+    setPoll(null);
+
+    const gate = (await startPersonInvestigationAudit({
+      data: {
+        investigator,
+        caseRef,
+        lawfulBasisAttestation,
+        seeds,
+        sources: [...selected],
+      },
+    })) as { ok: boolean; message?: string };
+    if (!gate.ok) {
+      setGateError(gate.message ?? "The investigation could not start.");
+      return;
+    }
+
+    setRunning(true);
+    try {
+      const data = await startOsintInvestigationJob({
+        data: { target: personName.trim(), collectorIds: [...selected] },
+      });
+      setStarted(data as StartedInvestigation);
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : String(err));
+      setRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!started || !running) return;
+    stoppedRef.current = false;
+    const tick = async () => {
+      let data: InvestigationPoll;
+      try {
+        data = (await pollOsintInvestigationJob({
+          data: { investigationId: started.investigationId },
+        })) as InvestigationPoll;
+      } catch (err) {
+        if (stoppedRef.current) return;
+        setRunError(err instanceof Error ? err.message : String(err));
+        setRunning(false);
+        return;
+      }
+      if (stoppedRef.current) return;
+      setPoll(data);
+      if (data.done) {
+        setRunning(false);
+        return;
+      }
+      if (!stoppedRef.current) setTimeout(tick, PERSON_POLL_INTERVAL_MS);
+    };
+    void tick();
+    return () => {
+      stoppedRef.current = true;
+    };
+  }, [started, running]);
+
+  const jobs: InvestigationJob[] = poll?.jobs ?? started?.jobs ?? [];
+
+  const allEntities: CollectorEntity[] = useMemo(() => {
+    if (!poll) return [];
+    const seedEntities = buildSeedEntities(seeds);
+    const existingIds = new Set(poll.entities.map((e) => e.id));
+    return [...poll.entities, ...seedEntities.filter((e) => !existingIds.has(e.id))];
+  }, [poll, personName, aliases, age, dateOfBirth, city, state, country, designation, organization, email, phone, username, knownProfiles, website, domain]);
+
+  const allRelationships: CollectorRelationship[] = poll?.relationships ?? [];
+
+  /** Real organization entities — both analyst-seeded and identity.websearch's real LLM-discovered ones. Shared by the Overview card and the Orgs & Roles tab so both read the same real data. */
+  const orgEntities = useMemo(() => allEntities.filter((e) => e.type === "organization"), [allEntities]);
+
+  /** Real per-collector warnings relevant to why org discovery found nothing
+   * (e.g. Readability couldn't extract the top result) — computed by
+   * identity.websearch's normalize() and already present on `poll`, but never
+   * surfaced anywhere in this page before. Filtered by keyword since
+   * InvestigationPoll's `warnings` is a flat, collector-unattributed list. */
+  const orgSearchWarnings = useMemo(
+    () => (poll?.warnings ?? []).filter((w) => /organization|extract/i.test(w)),
+    [poll],
+  );
+
+  const branches = useMemo(() => {
+    const groups: Record<string, CollectorEntity[]> = {};
+    for (const entity of allEntities) {
+      const branch = branchOf(entity.source);
+      (groups[branch] ??= []).push(entity);
+    }
+    return groups;
+  }, [allEntities]);
+
+  const viewInGraph = () => {
+    if (!started || !poll) return;
+    saveGraphSnapshot({
+      investigationId: started.investigationId,
+      target: personName.trim(),
+      savedAt: new Date().toISOString(),
+      entities: allEntities,
+      relationships: allRelationships,
+    });
+    void navigate({ to: "/graph" });
+  };
+
+  if (!flagChecked) return null;
+
+  if (!enabled) {
+    return (
+      <Card className="bg-console-surface border-console-border p-4 text-xs font-mono text-console-text">
+        <div className="flex items-start gap-2 rounded border border-console-amber/30 bg-console-amber/5 p-3">
+          <AlertTriangle className="size-4 shrink-0 text-console-amber" />
+          <div>
+            <div className="font-bold uppercase text-console-amber">Person Investigation is disabled</div>
+            <p className="mt-1 text-[10px] leading-relaxed text-console-muted">
+              Set <code className="text-console-text">PERSON_INVESTIGATION_ENABLED=true</code> to enable
+              this feature. It is off by default — this is a new capability that collects personal
+              data, so it does not turn on silently.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const canStart =
+    personName.trim() && caseRef.trim() && lawfulBasisAttestation.trim() && investigator.trim();
+
+  return (
+    <div className="space-y-4 font-mono text-xs text-console-text">
+      {/* Search Input Form Card */}
+      <Card className="bg-console-surface border-console-border p-4">
+        <div className="mb-3 border-b border-console-border pb-2 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-bold text-console-text flex items-center gap-2">
+              <Shield className="size-4 text-console-purple" /> Person Investigation Pipeline
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-console-muted">
+              Authorized public OSINT investigation engine. Required fields: Person Name, Investigator, Case Ref, & Lawful-Basis.
+            </p>
+          </div>
+          <Badge variant="outline" className="border-console-purple text-console-purple text-[9px] uppercase">
+            Strict Public OSINT Only
+          </Badge>
+        </div>
+
+        {/* Required Governance Fields */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div>
+            <label className="text-[10px] uppercase font-bold text-console-blue">
+              Person name *
+            </label>
+            <Input
+              value={personName}
+              onChange={(e) => setPersonName(e.target.value)}
+              placeholder="e.g. John Smith"
+              className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-bold text-console-blue">
+              Investigator *
+            </label>
+            <Input
+              value={investigator}
+              onChange={(e) => setInvestigator(e.target.value)}
+              placeholder="Operator / Analyst Name"
+              className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-bold text-console-blue">
+              Case reference *
+            </label>
+            <Input
+              value={caseRef}
+              onChange={(e) => setCaseRef(e.target.value)}
+              placeholder="e.g. INV-2026-081"
+              className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-bold text-console-blue">
+              Lawful-basis attestation *
+            </label>
+            <Input
+              value={lawfulBasisAttestation}
+              onChange={(e) => setLawfulBasisAttestation(e.target.value)}
+              placeholder="Specific legal / public basis"
+              className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+            />
+          </div>
+        </div>
+
+        {/* Optional Person Target Parameters */}
+        <div className="mt-4 border-t border-console-border pt-3 space-y-3">
+          <div className="text-[10px] uppercase font-bold text-console-muted">
+            Progressive Target Enrichment Parameters (Optional)
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Aliases (comma separated)</label>
+              <Input
+                value={aliases}
+                onChange={(e) => setAliases(e.target.value)}
+                placeholder="e.g. Johnny, J. Smith"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Age / Date of Birth</label>
+              <div className="flex gap-1.5 mt-1">
+                <Input
+                  value={age}
+                  onChange={(e) => setAge(e.target.value)}
+                  placeholder="Age"
+                  className="h-8 w-16 border-console-border bg-console-deep text-[11px] text-console-text"
+                />
+                <Input
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  placeholder="YYYY-MM-DD"
+                  className="h-8 flex-1 border-console-border bg-console-deep text-[11px] text-console-text"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">City / State / Country</label>
+              <div className="flex gap-1 mt-1">
+                <Input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="City"
+                  className="h-8 w-1/3 border-console-border bg-console-deep text-[10px] text-console-text"
+                />
+                <Input
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                  placeholder="State"
+                  className="h-8 w-1/3 border-console-border bg-console-deep text-[10px] text-console-text"
+                />
+                <Input
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  placeholder="Country"
+                  className="h-8 w-1/3 border-console-border bg-console-deep text-[10px] text-console-text"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Designation / Role</label>
+              <Input
+                value={designation}
+                onChange={(e) => setDesignation(e.target.value)}
+                placeholder="e.g. CTO / Director"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Organization / Company</label>
+              <Input
+                value={organization}
+                onChange={(e) => setOrganization(e.target.value)}
+                placeholder="e.g. ACME Technologies"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Public / Business Email</label>
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="john@example.com"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Public / Business Phone</label>
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+1 555-0199"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Username / Handle</label>
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. johnsmith_dev"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Known Social Profile URLs</label>
+              <Input
+                value={knownProfiles}
+                onChange={(e) => setKnownProfiles(e.target.value)}
+                placeholder="Comma separated URLs"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Website / Bio URL</label>
+              <Input
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://johnsmith.com"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] uppercase text-console-label">Org Domain</label>
+              <Input
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                placeholder="example.com"
+                className="mt-1 h-8 border-console-border bg-console-deep text-[11px] text-console-text"
+              />
+            </div>
+          </div>
+        </div>
+
+        {plan && plan.collectors.length > 0 && (
+          <div className="mt-3 border-t border-console-border pt-3">
+            <div className="text-[10px] uppercase tracking-wider text-console-label">
+              Active Collectors to Run ({selected.size}/{plan.collectors.length})
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {plan.collectors.map((c) => (
+                <button
+                  key={c.collectorId}
+                  type="button"
+                  onClick={() => toggleCollector(c.collectorId)}
+                  title={c.reason}
+                  className={`rounded border px-2 py-0.5 text-[9px] uppercase ${
+                    selected.has(c.collectorId)
+                      ? "border-console-cyan/40 bg-console-cyan/10 text-console-cyan"
+                      : "border-console-border bg-console-deep text-console-label"
+                  }`}
+                >
+                  {selected.has(c.collectorId) ? "✓ " : ""}
+                  {c.collectorId}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {gateError && (
+          <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+            <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+            <span className="text-[10px] leading-relaxed text-console-red">{gateError}</span>
+          </div>
+        )}
+        {runError && (
+          <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+            <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+            <span className="text-[10px] leading-relaxed text-console-red">{runError}</span>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between border-t border-console-border pt-3">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={start}
+              disabled={!canStart || running}
+              className="h-8 gap-1.5 bg-console-purple hover:bg-console-purple/90 text-console-text text-[10px] uppercase font-bold"
+            >
+              {running ? "Executing Pipeline…" : "Start Person Investigation"}
+            </Button>
+            {!canStart && (
+              <span className="text-[9px] text-console-label">
+                Fill required fields (Person Name, Investigator, Case Ref, & Attestation) to start.
+              </span>
+            )}
+          </div>
+
+          {poll && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={viewInGraph}
+              className="h-8 gap-1.5 text-[10px] border-console-blue text-console-blue hover:bg-console-blue/10 font-bold"
+            >
+              View Relationships in Graph
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      {/* Collector Execution Status Cards */}
+      {jobs.length > 0 && (
+        <Card className="bg-console-surface border-console-border p-4 text-xs font-mono text-console-text">
+          <div className="mb-2 text-[10px] uppercase tracking-wider text-console-label flex items-center justify-between">
+            <span>Pipeline Execution Progress</span>
+            <span>{jobs.filter((j) => j.status === "completed").length}/{jobs.length} Completed</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {jobs.map((j) => (
+              <div
+                key={j.id}
+                className="flex items-center justify-between rounded border border-console-border bg-console-deep/60 px-2.5 py-1.5"
+              >
+                <span className="text-[10px] text-console-text font-bold truncate max-w-[100px]">{j.collector}</span>
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[8px] uppercase ${
+                    JOB_STATUS_STYLE[j.status] ?? JOB_STATUS_STYLE.queued
+                  }`}
+                >
+                  {j.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Sectional Investigation Results View */}
+      {poll?.done && allEntities.length > 0 && (
+        <Card className="bg-console-surface border-console-border p-4 text-xs font-mono text-console-text space-y-4">
+          <div className="flex flex-wrap items-center justify-between border-b border-console-border pb-3">
+            <div>
+              <div className="text-sm font-bold text-console-text flex items-center gap-2">
+                Investigation Results: <span className="text-console-cyan">{personName}</span>
+              </div>
+              <p className="text-[10px] text-console-muted">
+                {allEntities.length} entities & {allRelationships.length} relationships analyzed. Provenance preserved.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={reportSubTab === "overview" ? "default" : "outline"}
+                onClick={() => setReportSubTab("overview")}
+                className="h-7 text-[9px] uppercase"
+              >
+                Overview
+              </Button>
+              <Button
+                size="sm"
+                variant={reportSubTab === "contact" ? "default" : "outline"}
+                onClick={() => setReportSubTab("contact")}
+                className="h-7 text-[9px] uppercase"
+              >
+                Contact & Profiles
+              </Button>
+              <Button
+                size="sm"
+                variant={reportSubTab === "orgs" ? "default" : "outline"}
+                onClick={() => setReportSubTab("orgs")}
+                className="h-7 text-[9px] uppercase"
+              >
+                Orgs & Roles
+              </Button>
+              <Button
+                size="sm"
+                variant={reportSubTab === "news" ? "default" : "outline"}
+                onClick={() => setReportSubTab("news")}
+                className="h-7 text-[9px] uppercase"
+              >
+                News & Articles
+              </Button>
+              <Button
+                size="sm"
+                variant={reportSubTab === "infra" ? "default" : "outline"}
+                onClick={() => setReportSubTab("infra")}
+                className="h-7 text-[9px] uppercase"
+              >
+                Domains & Infra
+              </Button>
+              <Button
+                size="sm"
+                variant={reportSubTab === "evidence" ? "default" : "outline"}
+                onClick={() => setReportSubTab("evidence")}
+                className="h-7 text-[9px] uppercase"
+              >
+                Evidence ({poll.evidence.length})
+              </Button>
+            </div>
+          </div>
+
+          {/* Sub-Tab 1: Overview */}
+          {reportSubTab === "overview" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Card className="bg-console-deep border-console-border p-3">
+                  <div className="text-[10px] text-console-label uppercase font-bold">Subject Identity</div>
+                  <div className="text-sm font-bold text-console-text mt-1">{personName}</div>
+                  {aliases && <div className="text-[10px] text-console-cyan mt-1">Aliases: {aliases}</div>}
+                  {age && <div className="text-[10px] text-console-muted">Age: {age}</div>}
+                </Card>
+                <Card className="bg-console-deep border-console-border p-3">
+                  <div className="text-[10px] text-console-label uppercase font-bold">Affiliation & Role</div>
+                  {/*
+                    Was reading raw form state (`organization`), which only
+                    ever echoed what the analyst typed and never reflected a
+                    real discovered affiliation — the exact bug behind "org
+                    isn't coming when I just search a name". Now reads
+                    `allEntities`, which carries BOTH the analyst's seeded
+                    organization (source: analyst-seed) AND any real
+                    organization identity.websearch's LLM extraction found
+                    in the top real search result (source: identity.websearch).
+                  */}
+                  {orgEntities.length === 0 ? (
+                    <div className="text-sm font-bold text-console-text mt-1">
+                      <NotReported what="no organization found or specified" />
+                    </div>
+                  ) : (
+                    <div className="mt-1 space-y-1">
+                      {orgEntities.map((e) => (
+                        <div key={e.id} className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-console-text">{e.displayName}</span>
+                          <span className="text-[9px] text-console-label uppercase">
+                            {e.source === "analyst-seed" ? "· supplied" : "· discovered"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="text-[10px] text-console-green mt-1">
+                    {designation ? (
+                      <>
+                        {designation} <span className="text-console-label uppercase">· supplied</span>
+                      </>
+                    ) : (
+                      <NotReported what="no role listed — no automated discovery for role exists yet, only analyst input" />
+                    )}
+                  </div>
+                </Card>
+                <Card className="bg-console-deep border-console-border p-3">
+                  <div className="text-[10px] text-console-label uppercase font-bold">Known Location</div>
+                  <div className="text-sm font-bold text-console-text mt-1">
+                    {[city, state, country].filter(Boolean).join(", ") || <NotReported what="not reported" />}
+                  </div>
+                </Card>
+              </div>
+
+              {/* Branch summary list */}
+              {BRANCH_ORDER.filter((b) => branches[b]?.length).map((branch) => (
+                <div key={branch} className="border-t border-console-border pt-3">
+                  <div className="text-[11px] font-bold uppercase text-console-purple mb-1.5">{branch}</div>
+                  <div className="space-y-1">
+                    {branches[branch].map((entity) => {
+                      const status = classifyFact(entity.confidence);
+                      return (
+                        <div
+                          key={entity.id}
+                          className="flex items-center justify-between gap-2 rounded border border-console-border bg-console-deep/60 px-3 py-1.5"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[10px] text-console-text">
+                            <span className="text-console-label uppercase mr-2">[{entity.type}]</span> {entity.displayName}
+                          </span>
+                          <span className="shrink-0 text-[9px] text-console-label">{entity.source}</span>
+                          <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase ${FACT_STATUS_STYLE[status]}`}>
+                            {status}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sub-Tab 2: Contact & Profiles */}
+          {reportSubTab === "contact" && (
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase text-console-cyan">Discovered Contacts & Handles</div>
+              {allEntities.filter((e) => ["email", "phone", "username", "social_account"].includes(e.type)).length === 0 ? (
+                <div className="p-6 text-center text-console-label">No public contact information or usernames recorded yet.</div>
+              ) : (
+                allEntities.filter((e) => ["email", "phone", "username", "social_account"].includes(e.type)).map((e) => (
+                  <div key={e.id} className="flex items-center justify-between p-2.5 rounded border border-console-border bg-console-deep">
+                    <div>
+                      <Badge variant="outline" className="border-console-cyan text-console-cyan text-[9px] uppercase mr-2">
+                        {e.type}
+                      </Badge>
+                      <span className="font-bold text-console-text">{e.displayName}</span>
+                    </div>
+                    <span className="text-[9px] text-console-label">Source: {e.source}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 3: Organizations & Roles */}
+          {reportSubTab === "orgs" && (
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase text-console-green">Organizations & Roles</div>
+
+              {/* Role/designation is a fact about the PERSON, not a
+                  separate discoverable entity — result.ts's schema has no
+                  standalone "role" type, and no collector attempts to
+                  discover one (see identity.websearch's real org discovery
+                  below for the contrast: that one IS a real entity type a
+                  collector can find). Shown once here, clearly labelled as
+                  analyst input, not conflated with a finding. */}
+              <div className="p-3 rounded border border-console-border bg-console-deep flex items-center justify-between">
+                <span className="text-[10px] text-console-label uppercase">Designation / Role</span>
+                <span className="text-sm font-bold text-console-text">
+                  {designation || <NotReported what="not supplied — no automated discovery exists for this field" />}
+                </span>
+              </div>
+
+              {orgEntities.length === 0 ? (
+                <div className="p-6 text-center text-console-label space-y-2">
+                  <div>No corporate or organization affiliations found or specified.</div>
+                  {/* identity.websearch's real reason for finding nothing — e.g.
+                      Readability couldn't extract the top result's article text —
+                      was already computed and silently discarded before this;
+                      "not found" and "not measurable" are different facts and an
+                      analyst should be able to tell them apart. */}
+                  {orgSearchWarnings.length > 0 && (
+                    <div className="text-left text-[9px] font-mono text-console-amber/80 space-y-1 max-w-md mx-auto">
+                      {orgSearchWarnings.map((w, i) => (
+                        <div key={i}>· {w}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                orgEntities.map((e) => {
+                  const isDiscovered = e.source === "identity.websearch";
+                  const confidencePct =
+                    typeof e.confidence.value === "number" ? Math.round(e.confidence.value * 100) : null;
+                  const mention = typeof e.metadata?.mention === "string" ? e.metadata.mention : null;
+                  return (
+                    <div key={e.id} className="p-3 rounded border border-console-border bg-console-deep space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-console-text">{e.displayName}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {confidencePct !== null && (
+                            <Badge variant="outline" className="border-console-green text-console-green text-[9px]">
+                              {confidencePct}% confidence
+                            </Badge>
+                          )}
+                          <Badge
+                            variant="outline"
+                            className={
+                              isDiscovered
+                                ? "border-console-blue text-console-blue text-[9px] uppercase"
+                                : "border-console-label text-console-label text-[9px] uppercase"
+                            }
+                          >
+                            {isDiscovered ? "Discovered — web search" : "Analyst-supplied"}
+                          </Badge>
+                        </div>
+                      </div>
+                      {isDiscovered && mention && (
+                        <p className="text-[9px] italic text-console-muted">
+                          Extracted from: "{mention}"
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 4: News & Articles */}
+          {reportSubTab === "news" && (
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase text-console-blue">Public News & Articles</div>
+              {allEntities.filter((e) => e.type === "article").length === 0 ? (
+                <div className="p-6 text-center text-console-label">No public news articles mentioning the subject were indexed.</div>
+              ) : (
+                allEntities.filter((e) => e.type === "article").map((e) => (
+                  <div key={e.id} className="p-3 rounded border border-console-border bg-console-deep space-y-1">
+                    <div className="font-bold text-console-text">
+                      <Highlight text={e.displayName} query={personName} />
+                    </div>
+                    <div className="text-[9px] text-console-muted">Source: {e.source}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 5: Domains & Infra */}
+          {reportSubTab === "infra" && (
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase text-console-amber">Discovered Domains & Infrastructure</div>
+              {allEntities.filter((e) => ["domain", "ip", "url"].includes(e.type)).length === 0 ? (
+                <div className="p-6 text-center text-console-label">No associated domains or infrastructure entities recorded.</div>
+              ) : (
+                allEntities.filter((e) => ["domain", "ip", "url"].includes(e.type)).map((e) => (
+                  <div key={e.id} className="p-2.5 rounded border border-console-border bg-console-deep flex items-center justify-between">
+                    <span className="font-mono text-console-text">{e.displayName}</span>
+                    <Badge variant="outline" className="border-console-amber text-console-amber text-[9px] uppercase">
+                      {e.type}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 6: Evidence Inspector */}
+          {reportSubTab === "evidence" && (
+            <div className="space-y-2">
+              <div className="text-[11px] font-bold uppercase text-console-purple">Provenanced Evidence Items</div>
+              {poll.evidence.length === 0 ? (
+                <div className="p-6 text-center text-console-label">No raw evidence items recorded.</div>
+              ) : (
+                poll.evidence.slice(0, 30).map((ev, idx) => (
+                  <div key={idx} className="p-2.5 rounded border border-console-border bg-console-deep space-y-1 text-[10px]">
+                    <div className="flex items-center justify-between text-console-muted">
+                      <span className="font-bold text-console-text">Collector: {ev.collector}</span>
+                      <span>{new Date(ev.collectedAt).toLocaleString()}</span>
+                    </div>
+                    {ev.sourceUrl && (
+                      <a href={ev.sourceUrl} target="_blank" rel="noreferrer" className="text-console-cyan hover:underline block truncate">
+                        {ev.sourceUrl}
+                      </a>
+                    )}
+                    <p className="text-console-muted leading-normal">
+                      <Highlight
+                        text={typeof ev.normalizedValue === "string" ? ev.normalizedValue : JSON.stringify(ev.normalizedValue)}
+                        query={personName}
+                      />
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // OSINT Component & Page
 // ============================================================================
 
@@ -718,8 +1626,14 @@ function Page() {
   //   filterText   narrows the already-loaded results, never hits the network
   // Collapsing them meant every keystroke fired five upstream requests, which
   // exhausted GitHub's 60/hour unauthenticated limit within about a minute.
-  const [searchQuery, setSearchQuery] = useState(() => getActiveTarget());
-  const [targetInput, setTargetInput] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); the mount-sync effect further below
+  // (already present, for the sentinel_target_changed listener) sets the
+  // real value client-side, after hydration.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [targetInput, setTargetInput] = useState("");
   const [filterText, setFilterText] = useState("");
   const [activeTab, setActiveTab] = useState("whois");
 
@@ -757,6 +1671,11 @@ function Page() {
 
   // Sync / Load ALL OSINT data on mount & searchQuery change
   useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect below fills in the
+    // real target a moment later, which re-triggers this effect via
+    // [searchQuery]. Firing all seven collectors on "" would waste calls
+    // against several rate-limited free tiers for a query nobody asked for.
+    if (!searchQuery) return;
     let isMounted = true;
     const loadAllOsintData = async () => {
       setIsLoading(true);
@@ -866,107 +1785,129 @@ function Page() {
         description="Public-source search across threat intelligence (IOCs), live conflict databases, Telegram feeds, and news aggregates."
       />
 
+      <div className="mb-6">
+        <NotImplementedPanel
+          gaps={OSINT_NOT_IMPLEMENTED}
+          title="OSINT tools not integrated — and why"
+          description={
+            "Every tab above runs a real, live collector. These do not, and are stated rather " +
+            "than papered over with placeholder data: each entry says what closing the gap would " +
+            "actually require."
+          }
+        />
+      </div>
+
       {/* Tabs list container */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex flex-wrap h-auto gap-0 border border-[#263548] bg-[#111827] p-0 mb-6 justify-start overflow-x-auto rounded-none font-mono">
+        <TabsList className="flex flex-wrap h-auto gap-0 border border-console-border bg-console-surface p-0 mb-6 justify-start overflow-x-auto rounded-none font-mono">
+          <TabsTrigger
+            value="person"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
+          >
+            Person Investigation
+          </TabsTrigger>
           <TabsTrigger
             value="whois"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             WHOIS / DNS Profile
           </TabsTrigger>
           <TabsTrigger
             value="overview"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             Overview
           </TabsTrigger>
           <TabsTrigger
             value="cyber"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             Cyber Threat (IOCs)
           </TabsTrigger>
           <TabsTrigger
             value="telegram"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             Telegram OSINT
           </TabsTrigger>
           <TabsTrigger
             value="geopolitical"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             Geopolitical Security
           </TabsTrigger>
           <TabsTrigger
             value="rss"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             News RSS Aggregator
           </TabsTrigger>
           <TabsTrigger
             value="gpsjam"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             GPS Interference
           </TabsTrigger>
           <TabsTrigger
             value="radiation"
-            className="border-r border-[#263548] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] hover:text-[#F3F4F6] hover:bg-[#1A2332]/50 data-[state=active]:bg-[#1A2332] data-[state=active]:text-[#06B6D4] data-[state=active]:border-b-2 data-[state=active]:border-b-[#06B6D4] transition-colors rounded-none"
+            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
           >
             Radiation Sensors
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="person" className="space-y-4">
+          <PersonInvestigationPanel />
+        </TabsContent>
+
         {/* Tab content 0: WHOIS / DNS Profile */}
         <TabsContent value="whois" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             {/* 1. WHOIS Registration */}
-            <Card className="bg-[#111827] border-[#263548] rounded">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/40 flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#F3F4F6]">
-                  <Globe className="size-4 text-[#3B82F6]" /> WHOIS Registration
+            <Card className="bg-console-surface border-console-border rounded">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/40 flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-text">
+                  <Globe className="size-4 text-console-blue" /> WHOIS Registration
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-3 font-mono text-xs text-[#94A3B8]">
+              <CardContent className="p-3 font-mono text-xs text-console-muted">
                 <Table className="w-full">
                   <TableBody>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">Domain</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">Domain</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.whois?.Domain || searchQuery}
                       </TableCell>
                     </TableRow>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">Registrar</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">Registrar</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.whois?.Registrar || (
-                          <span className="italic text-[#64748B]">not reported</span>
+                          <span className="italic text-console-label">not reported</span>
                         )}
                       </TableCell>
                     </TableRow>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">Created</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">Created</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.whois?.Created || (
-                          <span className="italic text-[#64748B]">not reported</span>
+                          <span className="italic text-console-label">not reported</span>
                         )}
                       </TableCell>
                     </TableRow>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">Expires</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">Expires</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.whois?.Expires || (
-                          <span className="italic text-[#64748B]">not reported</span>
+                          <span className="italic text-console-label">not reported</span>
                         )}
                       </TableCell>
                     </TableRow>
                     <TableRow className="border-0">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">NS</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2 truncate max-w-[200px]">
+                      <TableCell className="text-console-muted font-semibold py-2">NS</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2 truncate max-w-[200px]">
                         {osintProfile?.whois?.NS || (
-                          <span className="italic text-[#64748B]">not reported</span>
+                          <span className="italic text-console-label">not reported</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -976,26 +1917,26 @@ function Page() {
             </Card>
 
             {/* 2. DNS Nameservers */}
-            <Card className="bg-[#111827] border-[#263548] rounded">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/40 flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#F3F4F6]">
-                  <Wifi className="size-4 text-[#06B6D4]" /> DNS Nameservers
+            <Card className="bg-console-surface border-console-border rounded">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/40 flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-text">
+                  <Wifi className="size-4 text-console-cyan" /> DNS Nameservers
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 space-y-4 font-mono text-xs">
                 <div>
-                  <div className="text-[10px] text-[#94A3B8] font-bold uppercase">A</div>
-                  <div className="text-sm font-bold text-[#F3F4F6] mt-0.5">
+                  <div className="text-[10px] text-console-muted font-bold uppercase">A</div>
+                  <div className="text-sm font-bold text-console-text mt-0.5">
                     {osintProfile?.dns?.a || (
-                      <span className="italic text-[#64748B]">not reported</span>
+                      <span className="italic text-console-label">not reported</span>
                     )}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-[#94A3B8] font-bold uppercase">MX</div>
-                  <div className="text-sm font-bold text-[#F3F4F6] mt-0.5">
+                  <div className="text-[10px] text-console-muted font-bold uppercase">MX</div>
+                  <div className="text-sm font-bold text-console-text mt-0.5">
                     {osintProfile?.dns?.mx || (
-                      <span className="italic text-[#64748B]">not reported</span>
+                      <span className="italic text-console-label">not reported</span>
                     )}
                   </div>
                 </div>
@@ -1003,13 +1944,13 @@ function Page() {
             </Card>
 
             {/* 3. GitHub Repositories */}
-            <Card className="bg-[#111827] border-[#263548] rounded">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/40 flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#F3F4F6]">
+            <Card className="bg-console-surface border-console-border rounded">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/40 flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-text">
                   <Github className="size-4 text-purple-400" /> GitHub Repositories
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4 font-mono text-xs text-[#94A3B8]">
+              <CardContent className="p-4 font-mono text-xs text-console-muted">
                 {osintProfile?.github && osintProfile.github.length > 0 ? (
                   <div className="space-y-2">
                     {osintProfile.github.map((repo: any) => (
@@ -1018,15 +1959,15 @@ function Page() {
                         href={repo.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center justify-between p-2 rounded bg-[#0B1220] border border-[#263548] text-[#F3F4F6] hover:border-[#3B82F6]"
+                        className="flex items-center justify-between p-2 rounded bg-console-deep border border-console-border text-console-text hover:border-console-blue"
                       >
                         <span>{repo.name}</span>
-                        <ExternalLink className="size-3 text-[#94A3B8]" />
+                        <ExternalLink className="size-3 text-console-muted" />
                       </a>
                     ))}
                   </div>
                 ) : (
-                  <div className="py-6 text-center text-[#94A3B8]/60">
+                  <div className="py-6 text-center text-console-muted/60">
                     No public repositories found.
                   </div>
                 )}
@@ -1034,38 +1975,38 @@ function Page() {
             </Card>
 
             {/* 4. Corporate Registry */}
-            <Card className="bg-[#111827] border-[#263548] rounded">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/40 flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#F3F4F6]">
-                  <Database className="size-4 text-[#10B981]" /> Corporate Registry
+            <Card className="bg-console-surface border-console-border rounded">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/40 flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-text">
+                  <Database className="size-4 text-console-green" /> Corporate Registry
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-3 font-mono text-xs text-[#94A3B8]">
+              <CardContent className="p-3 font-mono text-xs text-console-muted">
                 <Table className="w-full">
                   <TableBody>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">status</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">status</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.corporate?.status || "Not found"}
                       </TableCell>
                     </TableRow>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">
                         jurisdiction
                       </TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.corporate?.jurisdiction || "Not found"}
                       </TableCell>
                     </TableRow>
-                    <TableRow className="border-[#263548]">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">fileNo</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                    <TableRow className="border-console-border">
+                      <TableCell className="text-console-muted font-semibold py-2">fileNo</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.corporate?.fileNo || "Not found"}
                       </TableCell>
                     </TableRow>
                     <TableRow className="border-0">
-                      <TableCell className="text-[#94A3B8] font-semibold py-2">hq</TableCell>
-                      <TableCell className="text-[#F3F4F6] text-right font-mono py-2">
+                      <TableCell className="text-console-muted font-semibold py-2">hq</TableCell>
+                      <TableCell className="text-console-text text-right font-mono py-2">
                         {osintProfile?.corporate?.hq || "Not found"}
                       </TableCell>
                     </TableRow>
@@ -1075,20 +2016,20 @@ function Page() {
             </Card>
 
             {/* 5. Subdomain & Certificate Transparency Radar */}
-            <Card className="bg-[#111827] border-[#263548] rounded md:col-span-2">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/40 flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#F3F4F6]">
-                  <ShieldCheck className="size-4 text-[#10B981]" /> Subdomain Discovery &
+            <Card className="bg-console-surface border-console-border rounded md:col-span-2">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/40 flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-text">
+                  <ShieldCheck className="size-4 text-console-green" /> Subdomain Discovery &
                   Certificate Logs (crt.sh)
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-[10px] font-mono border-[#10B981]/30 text-[#10B981] bg-[#10B981]/10"
+                  className="text-[10px] font-mono border-console-green/30 text-console-green bg-console-green/10"
                 >
                   {osintProfile?.certificates?.length ?? 0} Discovered Subdomains
                 </Badge>
               </CardHeader>
-              <CardContent className="p-3 font-mono text-xs text-[#94A3B8]">
+              <CardContent className="p-3 font-mono text-xs text-console-muted">
                 {/*
                   Three states, and they must stay distinct. This panel used to
                   fall back to four invented subdomains (api., vpn., auth. and
@@ -1098,14 +2039,14 @@ function Page() {
                   infrastructure, including one host named like a C2 server.
                 */}
                 {osintProfile?.certificatesError ? (
-                  <div className="flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
-                    <AlertTriangle className="size-4 shrink-0 text-[#EF4444]" />
-                    <span className="font-mono text-[11px] leading-relaxed text-[#EF4444]">
+                  <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-3">
+                    <AlertTriangle className="size-4 shrink-0 text-console-red" />
+                    <span className="font-mono text-[11px] leading-relaxed text-console-red">
                       Certificate-transparency lookup failed: {osintProfile.certificatesError}
                     </span>
                   </div>
                 ) : (osintProfile?.certificates?.length ?? 0) === 0 ? (
-                  <div className="rounded border border-[#263548] bg-[#0B1220]/40 p-3 text-[11px] leading-relaxed text-[#94A3B8]">
+                  <div className="rounded border border-console-border bg-console-deep/40 p-3 text-[11px] leading-relaxed text-console-muted">
                     No certificates for this target in the public Certificate Transparency logs.
                     That is a result, not a failure: the target may not be a domain, or it may use
                     no publicly logged certificate.
@@ -1113,29 +2054,29 @@ function Page() {
                 ) : (
                   <Table className="w-full">
                     <TableHeader>
-                      <TableRow className="border-[#263548]">
-                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">
+                      <TableRow className="border-console-border">
+                        <TableHead className="text-console-muted text-[10px] font-bold uppercase">
                           Subdomain / Asset
                         </TableHead>
-                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase">
+                        <TableHead className="text-console-muted text-[10px] font-bold uppercase">
                           CA Issuer
                         </TableHead>
-                        <TableHead className="text-[#94A3B8] text-[10px] font-bold uppercase text-right">
+                        <TableHead className="text-console-muted text-[10px] font-bold uppercase text-right">
                           First Seen
                         </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {osintProfile.certificates.slice(0, 8).map((cert: any, idx: number) => (
-                        <TableRow key={cert.hostname ?? idx} className="border-[#263548]/50">
-                          <TableCell className="text-[#F3F4F6] font-mono py-1.5 font-bold">
+                        <TableRow key={cert.hostname ?? idx} className="border-console-border/50">
+                          <TableCell className="text-console-text font-mono py-1.5 font-bold">
                             {cert.hostname}
                           </TableCell>
                           {/* null = the log record carried no issuer. Never a guessed CA. */}
-                          <TableCell className="text-[#94A3B8] py-1.5">
+                          <TableCell className="text-console-muted py-1.5">
                             {cert.issuer ?? "Not reported"}
                           </TableCell>
-                          <TableCell className="text-[#06B6D4] text-right font-mono py-1.5">
+                          <TableCell className="text-console-cyan text-right font-mono py-1.5">
                             {cert.firstSeen ?? "Not reported"}
                           </TableCell>
                         </TableRow>
@@ -1146,7 +2087,7 @@ function Page() {
 
                 {/* Never cap silently: the badge counts all of them, the table shows 8. */}
                 {(osintProfile?.certificates?.length ?? 0) > 8 && (
-                  <p className="pt-2 text-[10px] text-[#64748B]">
+                  <p className="pt-2 text-[10px] text-console-label">
                     Showing the first 8 of {osintProfile.certificates.length}. The full set is
                     available on the Recon page.
                   </p>
@@ -1158,27 +2099,27 @@ function Page() {
 
         {/* Tab content 1: Overview */}
         <TabsContent value="overview" className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden mb-4">
-            <div className="absolute top-0 left-0 h-0.5 w-full bg-[#3B82F6]" />
+          <Card className="bg-console-surface border-console-border rounded relative overflow-hidden mb-4">
+            <div className="absolute top-0 left-0 h-0.5 w-full bg-console-blue" />
             <CardContent className="p-4">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#94A3B8]" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-console-muted" />
                 <Input
                   placeholder="Analyze domain, email, handle, or wallet..."
                   value={targetInput}
                   onChange={(e) => setTargetInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && commitTarget()}
-                  className="h-10 pl-9 pr-24 font-mono text-xs border-[#263548] bg-[#0B1220] text-[#F3F4F6] placeholder:text-[#94A3B8]/40 focus-visible:ring-[#3B82F6] rounded"
+                  className="h-10 pl-9 pr-24 font-mono text-xs border-console-border bg-console-deep text-console-text placeholder:text-console-muted/40 focus-visible:ring-console-blue rounded"
                 />
                 <Button
                   size="sm"
                   onClick={commitTarget}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 px-4 rounded bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-[#F3F4F6] text-[10px] font-bold uppercase tracking-wider font-mono"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 px-4 rounded bg-console-blue hover:bg-console-blue/90 text-console-text text-[10px] font-bold uppercase tracking-wider font-mono"
                 >
                   Search
                 </Button>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[#94A3B8] font-mono">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-console-muted font-mono">
                 <span>Try:</span>
                 {/*
                   REMOVED: five example-target chips that had no onClick.
@@ -1795,19 +2736,19 @@ function Page() {
 
         {/* Tab content 6: GPS Interference */}
         <TabsContent value="gpsjam" className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] p-4 text-xs font-mono text-[#F3F4F6]">
-            <CardHeader className="p-0 pb-3 border-b border-[#263548] mb-3 flex flex-row items-center justify-between">
+          <Card className="bg-console-surface border-console-border p-4 text-xs font-mono text-console-text">
+            <CardHeader className="p-0 pb-3 border-b border-console-border mb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-bold text-[#F3F4F6] flex items-center gap-2">
-                  <Radio className="size-4 text-[#06B6D4]" /> GPS Interference & ADS-B Jamming Feed
+                <CardTitle className="text-sm font-bold text-console-text flex items-center gap-2">
+                  <Radio className="size-4 text-console-cyan" /> GPS Interference & ADS-B Jamming Feed
                 </CardTitle>
-                <CardDescription className="text-[10px] text-[#94A3B8]">
+                <CardDescription className="text-[10px] text-console-muted">
                   Real-time hex map statistics from ADS-B Exchange reporting aircraft navigation
                   disruption.
                 </CardDescription>
               </div>
               {gpsJamData && (
-                <Badge className="bg-[#06B6D4]/10 text-[#06B6D4] border-[#06B6D4]/30 text-[9px] uppercase">
+                <Badge className="bg-console-cyan/10 text-console-cyan border-console-cyan/30 text-[9px] uppercase">
                   {gpsJamData.stats.totalHexes} Hexes Measured
                 </Badge>
               )}
@@ -1815,21 +2756,21 @@ function Page() {
             <CardContent className="p-0 space-y-4">
               {gpsJamData ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">High Severity Hexes</span>
-                    <span className="text-lg font-bold text-[#EF4444]">
+                  <div className="bg-console-deep border border-console-border p-3 rounded">
+                    <span className="text-console-muted text-[10px] block">High Severity Hexes</span>
+                    <span className="text-lg font-bold text-console-red">
                       {gpsJamData.stats.highCount}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">Medium Severity Hexes</span>
-                    <span className="text-lg font-bold text-[#F59E0B]">
+                  <div className="bg-console-deep border border-console-border p-3 rounded">
+                    <span className="text-console-muted text-[10px] block">Medium Severity Hexes</span>
+                    <span className="text-lg font-bold text-console-amber">
                       {gpsJamData.stats.mediumCount}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">Primary Source</span>
-                    <span className="text-xs font-semibold text-[#F3F4F6] truncate block">
+                  <div className="bg-console-deep border border-console-border p-3 rounded">
+                    <span className="text-console-muted text-[10px] block">Primary Source</span>
+                    <span className="text-xs font-semibold text-console-text truncate block">
                       {gpsJamData.source}
                     </span>
                   </div>
@@ -1847,20 +2788,20 @@ function Page() {
 
         {/* Tab content 7: Radiation Sensors */}
         <TabsContent value="radiation" className="space-y-4">
-          <Card className="bg-[#111827] border-[#263548] p-4 text-xs font-mono text-[#F3F4F6]">
-            <CardHeader className="p-0 pb-3 border-b border-[#263548] mb-3 flex flex-row items-center justify-between">
+          <Card className="bg-console-surface border-console-border p-4 text-xs font-mono text-console-text">
+            <CardHeader className="p-0 pb-3 border-b border-console-border mb-3 flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-bold text-[#F3F4F6] flex items-center gap-2">
-                  <Activity className="size-4 text-[#10B981]" /> Environmental Radiation Sensor
+                <CardTitle className="text-sm font-bold text-console-text flex items-center gap-2">
+                  <Activity className="size-4 text-console-green" /> Environmental Radiation Sensor
                   Network
                 </CardTitle>
-                <CardDescription className="text-[10px] text-[#94A3B8]">
+                <CardDescription className="text-[10px] text-console-muted">
                   Open radiation sensor measurements (Safecast/EURDEP) in microSieverts per hour
                   (µSv/h).
                 </CardDescription>
               </div>
               {radiationData && (
-                <Badge className="bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px] uppercase">
+                <Badge className="bg-console-green/10 text-console-green border-console-green/30 text-[9px] uppercase">
                   {radiationData.totalStations} Active Stations
                 </Badge>
               )}
@@ -1868,17 +2809,17 @@ function Page() {
             <CardContent className="p-0 space-y-4">
               {radiationData ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">
+                  <div className="bg-console-deep border border-console-border p-3 rounded">
+                    <span className="text-console-muted text-[10px] block">
                       Elevated / High Stations
                     </span>
-                    <span className="text-lg font-bold text-[#F59E0B]">
+                    <span className="text-lg font-bold text-console-amber">
                       {radiationData.elevatedCount}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-3 rounded">
-                    <span className="text-[#94A3B8] text-[10px] block">Normal Baseline Range</span>
-                    <span className="text-xs font-semibold text-[#10B981] block">
+                  <div className="bg-console-deep border border-console-border p-3 rounded">
+                    <span className="text-console-muted text-[10px] block">Normal Baseline Range</span>
+                    <span className="text-xs font-semibold text-console-green block">
                       0.05 – 0.20 µSv/h
                     </span>
                   </div>

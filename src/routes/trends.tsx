@@ -43,16 +43,41 @@ export const Route = createFileRoute("/trends")({
   component: Page,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 function Page() {
-  const [target, setTarget] = useState(() => getActiveTarget());
-  const [draft, setDraft] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. A synchronous getActiveTarget()
+  // call here made the server-rendered text differ from the client's first
+  // paint (a React hydration mismatch); the mount effect below now sets the
+  // real value client-side, after hydration.
+  const [target, setTarget] = useState("");
+  const [draft, setDraft] = useState("");
   const [corpus, setCorpus] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const initial = getActiveTarget();
+    setTarget(initial);
+    setDraft(initial);
+
+    // Without this, changing the target via the top-nav search bar while
+    // already on this page did nothing until navigating away and back.
+    const handleTargetChange = (e: any) => {
+      if (e.detail) {
+        setTarget(e.detail);
+        setDraft(e.detail);
+      }
+    };
+    window.addEventListener("sentinel_target_changed", handleTargetChange);
+    return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
+  }, []);
+
+  useEffect(() => {
+    // Skip the empty placeholder — the mount-sync effect above fills in the
+    // real target a moment later, which re-triggers this effect via [target].
+    if (!target) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -117,24 +142,24 @@ function Page() {
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[220px] flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748B]" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
               <Input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && search()}
                 placeholder="Subject to analyse…"
-                className="h-8 border-[#263548] bg-[#0B1220] pl-8 text-[11px] text-white"
+                className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
               />
             </div>
             <Button size="sm" onClick={search} disabled={loading} className="h-8">
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : "Analyse"}
             </Button>
-            <span className="font-mono text-[10px] text-[#64748B]">
+            <span className="font-mono text-[10px] text-console-label">
               {corpus.length} document(s) collected for "{target}"
             </span>
           </div>
 
-          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-[#64748B]">
+          <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-console-label">
             <Info className="mt-px size-3 shrink-0" />
             No growth percentage is shown. That would need a previous collection to compare against
             and nothing stores one — an invented delta is the most convincing-looking number on a
@@ -143,9 +168,9 @@ function Page() {
           </p>
 
           {error && (
-            <div className="mt-3 flex items-start gap-2 rounded border border-[#EF4444]/30 bg-[#EF4444]/5 p-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-[#EF4444]" />
-              <span className="font-mono text-[10px] leading-relaxed text-[#EF4444]">{error}</span>
+            <div className="mt-3 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+              <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+              <span className="font-mono text-[10px] leading-relaxed text-console-red">{error}</span>
             </div>
           )}
         </CardContent>
@@ -154,17 +179,17 @@ function Page() {
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <Card className={CARD}>
           <CardContent className="p-4">
-            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-              <TrendingUp className="size-3.5 text-[#3B82F6]" />
+            <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+              <TrendingUp className="size-3.5 text-console-blue" />
               Dominant terms
             </h3>
 
             {loading ? (
-              <div className="flex items-center gap-2 py-6 text-[11px] text-[#94A3B8]">
+              <div className="flex items-center gap-2 py-6 text-[11px] text-console-muted">
                 <Loader2 className="size-3.5 animate-spin" /> Collecting…
               </div>
             ) : terms.length === 0 ? (
-              <p className="mt-3 text-[11px] leading-relaxed text-[#64748B]">
+              <p className="mt-3 text-[11px] leading-relaxed text-console-label">
                 Not enough collected documents to rank terms. TF-IDF needs at least two documents to
                 have anything to be inverse-frequent against, and a term appearing in only one
                 document says nothing about the collection.
@@ -174,17 +199,17 @@ function Page() {
                 <div className="mt-3 space-y-1.5">
                   {terms.map((t) => (
                     <div key={t.term} className="flex items-center gap-2">
-                      <span className="w-32 shrink-0 truncate font-mono text-[11px] text-[#F3F4F6]">
+                      <span className="w-32 shrink-0 truncate font-mono text-[11px] text-console-text">
                         {t.term}
                       </span>
-                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#0B1220]">
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-console-deep">
                         <div
-                          className="h-full rounded-full bg-[#3B82F6]"
+                          className="h-full rounded-full bg-console-blue"
                           style={{ width: `${(t.documentCount / maxDocs) * 100}%` }}
                         />
                       </div>
                       <span
-                        className="w-24 shrink-0 text-right font-mono text-[10px] text-[#94A3B8]"
+                        className="w-24 shrink-0 text-right font-mono text-[10px] text-console-muted"
                         title={`TF-IDF score ${t.score.toFixed(4)}`}
                       >
                         {t.documentCount}/{corpus.length} docs
@@ -192,7 +217,7 @@ function Page() {
                     </div>
                   ))}
                 </div>
-                <p className="mt-3 text-[10px] leading-relaxed text-[#64748B]">
+                <p className="mt-3 text-[10px] leading-relaxed text-console-label">
                   Ranked by TF-IDF across this collection; the bar shows how many collected
                   documents contain the term, which is the part an analyst can check. Hover a row
                   for the raw score.
@@ -205,12 +230,12 @@ function Page() {
         <div className="space-y-4">
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-white">
-                <Layers className="size-3.5 text-[#8B5CF6]" />
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase text-console-text">
+                <Layers className="size-3.5 text-console-purple" />
                 Widest-reaching stories
               </h3>
               {reachingStories.length === 0 ? (
-                <p className="mt-2 text-[11px] leading-relaxed text-[#64748B]">
+                <p className="mt-2 text-[11px] leading-relaxed text-console-label">
                   {loading
                     ? "Collecting…"
                     : "No story in this collection was carried by more than one independent outlet."}
@@ -218,21 +243,21 @@ function Page() {
               ) : (
                 <div className="mt-2 space-y-2">
                   {reachingStories.slice(0, 6).map((c) => (
-                    <div key={c.id} className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
-                      <p className="line-clamp-2 text-[11px] leading-snug text-[#F3F4F6]">
+                    <div key={c.id} className="rounded border border-console-border bg-console-deep/60 p-2">
+                      <p className="line-clamp-2 text-[11px] leading-snug text-console-text">
                         {c.title}
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge
                           variant="outline"
-                          className="border-[#8B5CF6]/40 bg-[#8B5CF6]/10 text-[9px] font-normal text-[#8B5CF6]"
+                          className="border-console-purple/40 bg-console-purple/10 text-[9px] font-normal text-console-purple"
                         >
                           {c.independentDomains.length} independent sources
                         </Badge>
                         {c.syndicated && (
                           <Badge
                             variant="outline"
-                            className="border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[9px] font-normal text-[#F59E0B]"
+                            className="border-console-amber/40 bg-console-amber/10 text-[9px] font-normal text-console-amber"
                           >
                             {c.syndicatedDomains.length} syndicated collapsed
                           </Badge>
@@ -242,7 +267,7 @@ function Page() {
                   ))}
                 </div>
               )}
-              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                 Reach measured as distinct outlets carrying one story, after collapsing syndicated
                 copies — counting wire pickups separately is how one story is made to look like
                 five.
@@ -252,9 +277,9 @@ function Page() {
 
           <Card className={CARD}>
             <CardContent className="p-4">
-              <h3 className="text-xs font-bold uppercase text-white">Language mix</h3>
+              <h3 className="text-xs font-bold uppercase text-console-text">Language mix</h3>
               {languages.length === 0 ? (
-                <p className="mt-2 text-[11px] text-[#64748B]">Nothing collected yet.</p>
+                <p className="mt-2 text-[11px] text-console-label">Nothing collected yet.</p>
               ) : (
                 <div className="mt-2 space-y-1">
                   {languages.map(([name, count]) => (
@@ -262,13 +287,13 @@ function Page() {
                       key={name}
                       className="flex items-center justify-between font-mono text-[10px]"
                     >
-                      <span className="truncate text-[#94A3B8]">{name}</span>
-                      <span className="shrink-0 tabular-nums text-white">{count}</span>
+                      <span className="truncate text-console-muted">{name}</span>
+                      <span className="shrink-0 tabular-nums text-console-text">{count}</span>
                     </div>
                   ))}
                 </div>
               )}
-              <p className="mt-2 text-[10px] leading-relaxed text-[#64748B]">
+              <p className="mt-2 text-[10px] leading-relaxed text-console-label">
                 Detected from Unicode script ranges — deterministic, no model call. Scripts carrying
                 several languages (Devanagari, Bengali) are reported at script level rather than
                 guessed.

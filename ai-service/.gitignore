@@ -13,3 +13,10 @@ __pycache__/
 # packaging procedure that moves real weights onto the target machine.
 models/*/
 !models/.gitkeep
+
+# Tesseract language data (eng/hin/tam/osd, several MB each) — fetched once
+# locally, same reasoning as models/*/ above. Only needed when the system
+# Tesseract install doesn't already carry these languages (see TESSDATA_PREFIX
+# in .env.example) and system Tesseract itself isn't writable without admin
+# rights (e.g. a winget install under Program Files).
+tessdata/

@@ -115,6 +115,17 @@ interface ChatOptions {
   temperature?: number;
   /** Set for JSON tasks — lowers temperature and asks for raw JSON. */
   json?: boolean;
+  /**
+   * Provider labels (ChatResult.provider from a prior attempt) to skip in the
+   * chain — for a caller-driven retry after a provider returned something
+   * that passed transport-level checks (HTTP 200, finish_reason "stop") but
+   * failed a task-specific correctness check the transport layer cannot see.
+   * translateTranscriptOf is the first user: Sarvam has been observed
+   * returning finish_reason "stop" with the *source* text as `content`,
+   * unchanged, while its own reasoning_content shows it produced the correct
+   * translation internally and simply didn't write it to the answer field.
+   */
+  excludeProviders?: string[];
 }
 
 interface ChatResult {
@@ -232,7 +243,15 @@ export async function chat(prompt: string, opts: ChatOptions = {}): Promise<Chat
     );
   }
 
-  const chain = [primary, fallback].filter(Boolean) as ProviderConfig[];
+  const excluded = new Set(opts.excludeProviders ?? []);
+  const chain = ([primary, fallback].filter(Boolean) as ProviderConfig[]).filter(
+    (cfg) => !excluded.has(cfg.label),
+  );
+  if (chain.length === 0) {
+    throw new LlmUnavailableError(
+      "No provider left to try — every configured provider was excluded by a prior failed attempt.",
+    );
+  }
   const cacheKey = await sha256(`${chain[0].model}::${opts.system ?? ""}::${prompt}`);
 
   const hit = cache.get(cacheKey);
@@ -498,6 +517,36 @@ ${text.slice(0, 6000)}
   return { ...out.value, model: out.model, provider: out.provider, cacheHit: out.cacheHit };
 }
 
+export interface CategorySummary {
+  /** The plurality label, or "mixed" when the top count is tied. */
+  label: string;
+  /** Real percentage of ANALYZED items (the denominator excludes failures). */
+  pct: number;
+}
+
+/**
+ * Reduces a set of real per-item categorical LLM results (sentiment,
+ * threatLevel — anything `analyseContentOf` returns as an enum) to a
+ * plurality label + share. Used by the homepage's Public Sentiment AND
+ * Overall Threat Risk tiles, both tallying results from the SAME real
+ * `analyseContentOf` calls rather than each running its own. Pure and
+ * separated from the route so the tie-handling is unit-testable without a
+ * browser; the LLM call itself stays in the route, which owns the
+ * loading/error state around calling it per article.
+ */
+export function summarizeCategoryCounts(
+  counts: Record<string, number>,
+  analyzedCount: number,
+): CategorySummary | null {
+  if (analyzedCount <= 0) return null;
+  const entries = Object.entries(counts).filter(([, c]) => c > 0);
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => b[1] - a[1]);
+  const [label, count] = entries[0]!;
+  const tied = entries.filter(([, c]) => c === count).length > 1;
+  return { label: tied ? "mixed" : label, pct: Math.round((count / analyzedCount) * 100) };
+}
+
 // ─── Narrative generation ──────────────────────────────────────────────────
 // These return prose rather than JSON, so they are validated only for non-empty
 // content. Task-specific signatures keep raw prompts off the client, which would
@@ -539,8 +588,21 @@ export async function executiveBriefOf(data: { target: string; context: string }
   const prompt = `Write a concise executive intelligence brief.
 
 Cover: Strategic Profile, Known Capabilities, Risk Assessment, Recommended Action.
-Under 250 words, bullet points where useful. Where the supplied context does not
-support a section, say "insufficient collected information" rather than speculating.
+Under 250 words, bullet points where useful.
+
+Synthesize and explain what the collected material indicates — connect related
+facts into a coherent picture. Naming which outlet a fact came from is not the
+same as explaining it; do both.
+
+A shared name is not one identity. If the collected articles describe what look
+like multiple distinct people or organizations rather than one subject, say so
+explicitly and briefly characterize each candidate separately, rather than
+declaring the whole brief unsupported because no single coherent profile fits
+all of them at once.
+
+Only after that: where the supplied context genuinely does not support a
+section, say "insufficient collected information" rather than speculating
+beyond the evidence.
 
 Target: ${data.target}
 Collected context: ${data.context}`;
@@ -566,6 +628,116 @@ ${data.data}`;
   const res = await chat(prompt, { system: NARRATIVE_SYSTEM, maxTokens: 2800 });
   return { text: res.text, model: res.model, provider: res.provider, cacheHit: res.cacheHit };
 }
+
+/**
+ * A dedicated system prompt, not NARRATIVE_SYSTEM — that one is written for
+ * an analyst drawing conclusions from evidence ("never invent figures, dates,
+ * names"); a translator's job is fidelity to the source, a different failure
+ * mode to guard against (summarising, editorialising, or silently dropping
+ * content the source actually contains).
+ */
+const TRANSLATE_SYSTEM =
+  "You are a professional translator. Translate completely and faithfully. Do not summarise, " +
+  "omit, embellish, or add commentary. Output only the translation — no preamble, no notes " +
+  "about the source language, nothing that is not a translation of the supplied text.";
+
+/**
+ * Long transcripts risk the same truncation llm.ts already guards against
+ * elsewhere (max_tokens covers reasoning *and* the answer) — the input is
+ * capped here, with the cut disclosed to the caller, rather than risking a
+ * cut-off *output* that would misrepresent itself as a complete translation.
+ */
+const MAX_TRANSLATE_INPUT_CHARS = 6000;
+
+/**
+ * Translates real, already-collected text (a loaded YouTube transcript is the
+ * first caller) — never a substitute for a caption track that does not
+ * exist. The result is an AI translation, not an official subtitle: callers
+ * must label it as such rather than presenting it as if YouTube supplied it.
+ *
+ * `targetIsLatinScript` — true only for English among this app's 16 offered
+ * languages (the other 15 are all scheduled Indian languages in their own
+ * native, non-Latin scripts: Devanagari, Bengali, Gurmukhi, Tamil, ...). The
+ * caller passes this rather than the function guessing from the label text,
+ * since it already knows it from src/i18n/languages.ts.
+ */
+export async function translateTranscriptOf(data: {
+  text: string;
+  targetLanguage: string;
+  targetIsLatinScript: boolean;
+}) {
+  const truncated = data.text.length > MAX_TRANSLATE_INPUT_CHARS;
+  const source = truncated ? data.text.slice(0, MAX_TRANSLATE_INPUT_CHARS) : data.text;
+
+  const prompt = `Translate the following transcript into ${data.targetLanguage}.
+
+Transcript${truncated ? ` (truncated to the first ${MAX_TRANSLATE_INPUT_CHARS} characters)` : ""}:
+${source}`;
+
+  let res = await chat(prompt, { system: TRANSLATE_SYSTEM, maxTokens: 4000 });
+
+  // Verified live 2026-08-18: Sarvam has returned finish_reason "stop" (not
+  // truncated) with `content` still in the *source* language — once as the
+  // literal source text unchanged, and once (after this check was narrowed
+  // to catch only that) as a same-language *paraphrase*, while its own
+  // reasoning_content showed the correct target-language translation
+  // produced internally and never written to the answer field either time.
+  // HTTP 200, a real non-empty response, nothing the transport layer's own
+  // truncation check catches — this needs a task-specific correctness check,
+  // not a transport-level one. A same-script response is not a translation
+  // regardless of how close it is to the source's exact wording, so this
+  // forces one retry against whichever other provider is configured rather
+  // than returning it.
+  if (isUntranslated(res.text, source, data.targetIsLatinScript)) {
+    res = await chat(prompt, {
+      system: TRANSLATE_SYSTEM,
+      maxTokens: 4000,
+      excludeProviders: [res.provider],
+    });
+    if (isUntranslated(res.text, source, data.targetIsLatinScript)) {
+      throw new LlmUnavailableError(
+        `${res.provider} (${res.model}) did not produce a translation into ${data.targetLanguage} ` +
+          `— the response stayed in the source language on both the primary attempt and the ` +
+          `retry against a different provider.`,
+        { provider: res.provider },
+      );
+    }
+  }
+
+  return {
+    text: res.text,
+    model: res.model,
+    provider: res.provider,
+    cacheHit: res.cacheHit,
+    truncated,
+  };
+}
+
+/**
+ * True when `candidate` does not look like it is actually in the target
+ * script — catches both an exact echo of the source and a same-language
+ * paraphrase, the two failure modes observed live. `\p{Script=Latin}` needs
+ * no hand-maintained Unicode range table for the other 15 languages: every
+ * one of them uses a non-Latin native script, so "not predominantly Latin"
+ * and "expected non-Latin" collapse to the same one check either direction.
+ * Skipped on very short text (under 10 letters) — a two-word title, a name,
+ * or "OK" carries too little signal to judge reliably either way.
+ */
+function isUntranslated(candidate: string, source: string, targetIsLatinScript: boolean): boolean {
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  if (norm(candidate) === norm(source)) return true;
+
+  const letters = candidate.match(/\p{L}/gu) ?? [];
+  if (letters.length < 10) return false;
+  const latinLetters = candidate.match(/\p{Script=Latin}/gu) ?? [];
+  const latinRatio = latinLetters.length / letters.length;
+
+  return targetIsLatinScript ? latinRatio < 0.5 : latinRatio > 0.5;
+}
+
+export const llmTranslateTranscript = createServerFn({ method: "POST" })
+  .validator((data: { text: string; targetLanguage: string; targetIsLatinScript: boolean }) => data)
+  .handler(async ({ data }) => translateTranscriptOf(data));
 
 // ─── Observability ─────────────────────────────────────────────────────────
 

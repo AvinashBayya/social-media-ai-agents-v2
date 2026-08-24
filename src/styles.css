@@ -70,48 +70,149 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --animate-collapsible-down: collapsible-down 300ms ease-out;
+  --animate-collapsible-up: collapsible-up 300ms ease-in;
+}
+
+/*
+ * "Console" tokens — the Defence Command Center dark-console look used
+ * throughout the OSINT-styled routes (osint.tsx, graph.tsx, images.tsx, …)
+ * predates this theme system and was built with ~3000 hardcoded hex
+ * arbitrary-value classes instead of it. These 14 tokens are that
+ * palette's real semantic roles, made theme-reactive. Kept as a SEPARATE
+ * namespace from the 7-slot shadcn palette above (primary/success/warning/
+ * info/destructive) rather than reusing it: shadcn's --info is already
+ * green (#22c55e) while this console design uses cyan for "info/active", a
+ * real conflict, and shadcn has no purple/link-blue/two-tier-muted
+ * equivalents this design actually needs.
+ *
+ * --console-accent-foreground is deliberately NOT theme-reactive (same
+ * value in :root and .dark): it's the dark text color used on top of a
+ * bright accent-colored button/pill/badge, which needs to stay dark in
+ * either theme. console-deep, by contrast, IS theme-reactive because its
+ * dominant role is "deepest background" (light in light mode) — the two
+ * roles happened to share one value by coincidence in a dark-only app and
+ * must not.
+ */
+@theme inline {
+  --color-console-deep: var(--console-deep);
+  --color-console-surface: var(--console-surface);
+  --color-console-elevated: var(--console-elevated);
+  --color-console-border: var(--console-border);
+  --color-console-label: var(--console-label);
+  --color-console-muted: var(--console-muted);
+  --color-console-text: var(--console-text);
+  --color-console-accent-foreground: var(--console-accent-foreground);
+  --color-console-green: var(--console-green);
+  --color-console-cyan: var(--console-cyan);
+  --color-console-purple: var(--console-purple);
+  --color-console-blue: var(--console-blue);
+  --color-console-amber: var(--console-amber);
+  --color-console-red: var(--console-red);
+  --color-console-live: var(--console-live);
+  --color-console-green-hover: var(--console-green-hover);
+}
+
+/* Smoothly animates a Radix Collapsible's real height using the CSS var it
+   exposes on CollapsibleContent (--radix-collapsible-content-height) rather
+   than a fixed max-height guess, so the transition always matches the real
+   content and never clips or leaves a gap. */
+@keyframes collapsible-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+@keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 :root {
+  /* Real light values — previously byte-identical to .dark below (i.e. no
+     real light theme existed at all). Mirrors the console-* palette's own
+     design so the two systems read as one coherent theme rather than two:
+     background hierarchy follows the same "elevated is lightest, deep is
+     darkest of the three neutrals" rule as console-deep/surface/elevated,
+     and primary/destructive/chart colors reuse the same 600/700-step hues
+     as console-green/red/amber for the same white-background-contrast
+     reason documented there. */
   --radius: 4px;
-  --background: #0d0e12;
-  --foreground: #ecfdf5;
-  --card: #13151a;
-  --card-foreground: #ecfdf5;
-  --popover: #13151a;
-  --popover-foreground: #ecfdf5;
-  --primary: #10b981;
-  --primary-foreground: #0d0e12;
-  --secondary: #181b22;
-  --secondary-foreground: #a7f3d0;
-  --muted: #181b22;
-  --muted-foreground: #6ee7b7;
-  --accent: #1a2b23;
-  --accent-foreground: #22c55e;
-  --destructive: #ef4444;
-  --destructive-foreground: #ecfdf5;
-  --border: #22332b;
-  --input: #181b22;
-  --ring: #10b981;
-  --chart-1: #10b981;
-  --chart-2: #22c55e;
-  --chart-3: #10b981;
-  --chart-4: #f59e0b;
-  --chart-5: #ef4444;
-  --success: #10b981;
-  --success-foreground: #ecfdf5;
-  --warning: #f59e0b;
-  --warning-foreground: #ecfdf5;
-  --info: #22c55e;
-  --info-foreground: #ecfdf5;
-  --sidebar: #0f1014;
-  --sidebar-foreground: #6ee7b7;
-  --sidebar-primary: #10b981;
-  --sidebar-primary-foreground: #0d0e12;
-  --sidebar-accent: #181b22;
-  --sidebar-accent-foreground: #ecfdf5;
-  --sidebar-border: #22332b;
-  --sidebar-ring: #10b981;
+  --background: #eef1f6;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #047857;
+  --primary-foreground: #ffffff;
+  --secondary: #f7f9fc;
+  --secondary-foreground: #0f172a;
+  --muted: #f7f9fc;
+  --muted-foreground: #64748b;
+  --accent: #eef1f6;
+  --accent-foreground: #047857;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #d8dfe9;
+  --input: #f7f9fc;
+  --ring: #047857;
+  --chart-1: #047857;
+  --chart-2: #16a34a;
+  --chart-3: #047857;
+  --chart-4: #b45309;
+  --chart-5: #dc2626;
+  --success: #047857;
+  --success-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+  --info: #16a34a;
+  --info-foreground: #ffffff;
+  --sidebar: #f7f9fc;
+  --sidebar-foreground: #334155;
+  --sidebar-primary: #047857;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1f6;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #d8dfe9;
+  --sidebar-ring: #047857;
+
+  /* Console tokens — LIGHT values. See the @theme inline comment above for
+     what each role means. Background hierarchy rule: elevated is always the
+     LIGHTEST of the three neutrals, deep is always the DARKEST of the
+     three, in both themes — so the relative ordering (deep < surface <
+     elevated) stays consistent across the toggle, only the absolute
+     lightness inverts. Accent-as-text values use Tailwind's own 600/700
+     step for each hue (not the 500 step used for dark-mode backgrounds),
+     since a 500-step color's contrast against a white background is too
+     low for text/borders — plain hue-for-hue inversion would be unreadable. */
+  --console-deep: #eef1f6;
+  --console-surface: #f7f9fc;
+  --console-elevated: #ffffff;
+  --console-border: #d8dfe9;
+  --console-label: #475569;
+  --console-muted: #64748b;
+  --console-text: #0f172a;
+  --console-accent-foreground: #0b1220;
+  --console-green: #047857;
+  --console-cyan: #0e7490;
+  --console-purple: #6d28d9;
+  --console-blue: #1d4ed8;
+  --console-amber: #b45309;
+  --console-red: #dc2626;
+  /* A distinct, more vivid green used specifically for "live/online right
+     now" pulse indicators (top-bar status dot, low-risk badges) — kept
+     separate from console-green (the general success/completed color)
+     rather than merged into it, since the two are used side by side for
+     genuinely different meanings, not two shades of the same thing. */
+  --console-live: #16a34a;
+  --console-green-hover: #065f46;
 }
 
 .dark {
@@ -154,6 +255,26 @@
   --sidebar-accent-foreground: #ecfdf5;
   --sidebar-border: #22332b;
   --sidebar-ring: #10b981;
+
+  /* Console tokens — DARK values. Exact current hex, unchanged from every
+     hardcoded arbitrary-value class this migration replaces, so an
+     existing dark-mode user sees zero visual difference. */
+  --console-deep: #0b1220;
+  --console-surface: #111827;
+  --console-elevated: #1a2332;
+  --console-border: #263548;
+  --console-label: #64748b;
+  --console-muted: #94a3b8;
+  --console-text: #f3f4f6;
+  --console-accent-foreground: #0b1220;
+  --console-green: #10b981;
+  --console-cyan: #06b6d4;
+  --console-purple: #8b5cf6;
+  --console-blue: #3b82f6;
+  --console-amber: #f59e0b;
+  --console-red: #ef4444;
+  --console-live: #22c55e;
+  --console-green-hover: #059669;
 }
 
 @layer base {

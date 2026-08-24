@@ -222,14 +222,14 @@ function SubjectsPage() {
               variant="outline"
               size="sm"
               onClick={() => refreshWatchlistsList()}
-              className="font-mono text-xs gap-1.5 border-[#263548] text-[#94A3B8] hover:bg-[#1A2332]"
+              className="font-mono text-xs gap-1.5 border-console-border text-console-muted hover:bg-console-elevated"
             >
               <RefreshCw className="size-3.5" /> Reload Filters
             </Button>
             <Button
               size="sm"
               onClick={() => setShowCreateForm(!showCreateForm)}
-              className="gap-1.5 font-mono text-xs bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white"
+              className="gap-1.5 font-mono text-xs bg-console-blue hover:bg-console-blue/90 text-console-text"
             >
               <Plus className="size-3.5" /> Configure Watchlist
             </Button>
@@ -237,96 +237,96 @@ function SubjectsPage() {
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-[300px_1fr] font-mono text-xs text-[#94A3B8]">
+      <div className="grid gap-4 lg:grid-cols-[300px_1fr] font-mono text-xs text-console-muted">
         {/* Left Side Column: Watchlists & Creation Form */}
         <div className="space-y-4">
           {showCreateForm && (
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#3B82F6]" />
-              <CardHeader className="p-3 border-b border-[#263548] bg-[#0B1220]/20 pb-2">
-                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-[#06B6D4]">
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-blue" />
+              <CardHeader className="p-3 border-b border-console-border bg-console-deep/20 pb-2">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-console-cyan">
                   New Intelligence Filter
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-3">
                 <form onSubmit={handleCreateWatchlist} className="space-y-3 text-[10px]">
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Watchlist Name</label>
+                    <label className="text-console-muted uppercase">Watchlist Name</label>
                     <Input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g. Project-X Monitor"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Description</label>
+                    <label className="text-console-muted uppercase">Description</label>
                     <Textarea
                       value={desc}
                       onChange={(e) => setDesc(e.target.value)}
                       placeholder="Brief monitor scope..."
-                      className="min-h-12 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="min-h-12 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Keywords</label>
+                    <label className="text-console-muted uppercase">Keywords</label>
                     <Input
                       value={kws}
                       onChange={(e) => setKws(e.target.value)}
                       placeholder="leak, surveillance, drone"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Target Organizations</label>
+                    <label className="text-console-muted uppercase">Target Organizations</label>
                     <Input
                       value={orgs}
                       onChange={(e) => setOrgs(e.target.value)}
                       placeholder="Tesla, OpenAI"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Monitored People</label>
+                    <label className="text-console-muted uppercase">Monitored People</label>
                     <Input
                       value={peop}
                       onChange={(e) => setPeop(e.target.value)}
                       placeholder="Musk, Altman"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Focus Countries</label>
+                    <label className="text-console-muted uppercase">Focus Countries</label>
                     <Input
                       value={countries}
                       onChange={(e) => setCountries(e.target.value)}
                       placeholder="Iran, Russia, Germany"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Domains / C2 Server IPs</label>
+                    <label className="text-console-muted uppercase">Domains / C2 Server IPs</label>
                     <Input
                       value={doms}
                       onChange={(e) => setDoms(e.target.value)}
                       placeholder="feodotracker.abuse.ch"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[#94A3B8] uppercase">Social Handles</label>
+                    <label className="text-console-muted uppercase">Social Handles</label>
                     <Input
                       value={socials}
                       onChange={(e) => setSocials(e.target.value)}
                       placeholder="@osint_watch, @OSINTdefender"
-                      className="h-7 text-[10px] border-[#263548] bg-[#0B1220] text-white"
+                      className="h-7 text-[10px] border-console-border bg-console-deep text-console-text"
                     />
                   </div>
                   <div className="flex gap-2 pt-1.5">
                     <Button
                       type="submit"
                       size="sm"
-                      className="h-7 bg-[#3B82F6] hover:bg-[#3B82F6]/90 text-white font-mono text-[9px] uppercase px-2"
+                      className="h-7 bg-console-blue hover:bg-console-blue/90 text-console-text font-mono text-[9px] uppercase px-2"
                     >
                       Save
                     </Button>
@@ -334,7 +334,7 @@ function SubjectsPage() {
                       type="button"
                       onClick={() => setShowCreateForm(false)}
                       variant="outline"
-                      className="h-7 text-[9px] font-mono border-[#263548] text-[#94A3B8] hover:bg-[#1A2332] px-2 uppercase"
+                      className="h-7 text-[9px] font-mono border-console-border text-console-muted hover:bg-console-elevated px-2 uppercase"
                     >
                       Cancel
                     </Button>
@@ -344,10 +344,10 @@ function SubjectsPage() {
             </Card>
           )}
 
-          <Card className="bg-[#111827] border-[#263548] rounded">
-            <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/20">
-              <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#94A3B8]">
-                <Users2 className="size-4 text-[#3B82F6]" /> Watchlist Filters
+          <Card className="bg-console-surface border-console-border rounded">
+            <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/20">
+              <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-muted">
+                <Users2 className="size-4 text-console-blue" /> Watchlist Filters
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5 p-2 max-h-[70vh] overflow-y-auto">
@@ -362,13 +362,13 @@ function SubjectsPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") setSelectedWatchlistId(w.id);
                     }}
-                    className={`w-full rounded border px-3 py-2 text-left transition text-[10px] flex items-center justify-between cursor-pointer ${isActive ? "border-[#3B82F6]/50 bg-[#3B82F6]/10 text-white" : "border-[#263548]/40 bg-[#111827] text-[#94A3B8] hover:bg-[#1A2332]"}`}
+                    className={`w-full rounded border px-3 py-2 text-left transition text-[10px] flex items-center justify-between cursor-pointer ${isActive ? "border-console-blue/50 bg-console-blue/10 text-console-text" : "border-console-border/40 bg-console-surface text-console-muted hover:bg-console-elevated"}`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-white uppercase tracking-wide truncate">
+                      <div className="font-semibold text-console-text uppercase tracking-wide truncate">
                         {w.name}
                       </div>
-                      <div className="text-[8px] text-[#94A3B8]/60 truncate mt-0.5">
+                      <div className="text-[8px] text-console-muted/60 truncate mt-0.5">
                         {w.description}
                       </div>
                     </div>
@@ -391,8 +391,8 @@ function SubjectsPage() {
         {activeWatchlist ? (
           <div className="space-y-4">
             {/* Topbar Info Card */}
-            <Card className="bg-[#111827] border-[#263548] rounded relative overflow-hidden">
-              <div className="absolute top-0 left-0 h-full w-0.5 bg-[#06B6D4]" />
+            <Card className="bg-console-surface border-console-border rounded relative overflow-hidden">
+              <div className="absolute top-0 left-0 h-full w-0.5 bg-console-cyan" />
               <CardContent className="p-4 flex flex-wrap justify-between items-center gap-4">
                 <div className="space-y-1 min-w-[280px]">
                   {/*
@@ -402,18 +402,18 @@ function SubjectsPage() {
                     process between requests to run one in. The match ran once,
                     when this page loaded.
                   */}
-                  <div className="flex items-center gap-2 text-[10px] text-[#94A3B8]/60">
-                    <span className="font-bold text-[#06B6D4]">MATCHED ON PAGE LOAD</span>
+                  <div className="flex items-center gap-2 text-[10px] text-console-muted/60">
+                    <span className="font-bold text-console-cyan">MATCHED ON PAGE LOAD</span>
                     <span>·</span>
                     <span>CREATED: {new Date(activeWatchlist.createdAt).toLocaleDateString()}</span>
                   </div>
-                  <h2 className="text-sm font-bold text-white uppercase tracking-wide">
+                  <h2 className="text-sm font-bold text-console-text uppercase tracking-wide">
                     {activeWatchlist.name}
                   </h2>
-                  <p className="text-[10px] text-[#94A3B8]">{activeWatchlist.description}</p>
+                  <p className="text-[10px] text-console-muted">{activeWatchlist.description}</p>
                 </div>
                 {loadingFeeds && (
-                  <div className="flex items-center gap-1.5 text-[9px] text-[#06B6D4]">
+                  <div className="flex items-center gap-1.5 text-[9px] text-console-cyan">
                     <RefreshCw className="size-3.5 animate-spin" /> CORRELATING LIVE FEEDS...
                   </div>
                 )}
@@ -422,13 +422,13 @@ function SubjectsPage() {
 
             {/* Dashboard Telemetry row */}
             <div className="grid gap-4 sm:grid-cols-4">
-              <Card className="bg-[#111827] border-[#263548] p-3 text-center">
-                <span className="text-[8px] uppercase text-[#94A3B8]">Correlated Matches</span>
-                <div className="text-xl font-bold text-white mt-1 font-mono">{matches.length}</div>
+              <Card className="bg-console-surface border-console-border p-3 text-center">
+                <span className="text-[8px] uppercase text-console-muted">Correlated Matches</span>
+                <div className="text-xl font-bold text-console-text mt-1 font-mono">{matches.length}</div>
               </Card>
-              <Card className="bg-[#111827] border-[#263548] p-3 text-center">
-                <span className="text-[8px] uppercase text-[#EF4444]">Threat Alerts</span>
-                <div className="text-xl font-bold text-[#EF4444] mt-1 font-mono">
+              <Card className="bg-console-surface border-console-border p-3 text-center">
+                <span className="text-[8px] uppercase text-console-red">Threat Alerts</span>
+                <div className="text-xl font-bold text-console-red mt-1 font-mono">
                   {criticalAlerts.length}
                 </div>
               </Card>
@@ -440,23 +440,23 @@ function SubjectsPage() {
                 against, because the match runs once per page load. What CAN be
                 counted is how much of the match set is plottable at all.
               */}
-              <Card className="bg-[#111827] border-[#263548] p-3 text-center">
-                <span className="text-[8px] uppercase text-[#06B6D4]">Dated Matches</span>
-                <div className="text-xl font-bold text-[#06B6D4] mt-1 font-mono">
+              <Card className="bg-console-surface border-console-border p-3 text-center">
+                <span className="text-[8px] uppercase text-console-cyan">Dated Matches</span>
+                <div className="text-xl font-bold text-console-cyan mt-1 font-mono">
                   {timeline.dated}/{timeline.total}
                 </div>
               </Card>
-              <Card className="bg-[#111827] border-[#263548] p-3 text-center">
-                <span className="text-[8px] uppercase text-[#F59E0B]">Risk Index</span>
+              <Card className="bg-console-surface border-console-border p-3 text-center">
+                <span className="text-[8px] uppercase text-console-amber">Risk Index</span>
                 {/*
                   This rendered `{riskScore}/100` unguarded. createWatchlist sets
                   riskScore to null deliberately (the value was once
                   Math.random()), so every analyst-created watchlist displayed
                   the string "null/100".
                 */}
-                <div className="mt-1 font-mono text-xl font-bold text-[#F59E0B]">
+                <div className="mt-1 font-mono text-xl font-bold text-console-amber">
                   {activeWatchlist.riskScore === null ? (
-                    <span className="text-[10px] font-normal text-[#64748B]">not scored</span>
+                    <span className="text-[10px] font-normal text-console-label">not scored</span>
                   ) : (
                     `${activeWatchlist.riskScore}/100`
                   )}
@@ -466,18 +466,18 @@ function SubjectsPage() {
 
             <div className="grid gap-4 lg:grid-cols-3">
               {/* Trend graph */}
-              <Card className="bg-[#111827] border-[#263548] rounded lg:col-span-2">
-                <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/20">
-                  <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#94A3B8]">
-                    <TrendingUp className="size-4 text-[#3B82F6]" /> Matches by publication hour
+              <Card className="bg-console-surface border-console-border rounded lg:col-span-2">
+                <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/20">
+                  <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-muted">
+                    <TrendingUp className="size-4 text-console-blue" /> Matches by publication hour
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="h-64 p-4 pt-6">
                   {timeline.dated - timeline.outsideWindow === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center text-center">
-                      <Activity className="size-7 text-[#263548]" />
-                      <p className="mt-2 text-[11px] text-[#94A3B8]">Nothing to plot.</p>
-                      <p className="mx-auto mt-1 max-w-xs text-[10px] leading-relaxed text-[#64748B]">
+                      <Activity className="size-7 text-console-border" />
+                      <p className="mt-2 text-[11px] text-console-muted">Nothing to plot.</p>
+                      <p className="mx-auto mt-1 max-w-xs text-[10px] leading-relaxed text-console-label">
                         {timeline.total === 0
                           ? "This filter matched nothing in the feeds pulled on load."
                           : timeline.dated === 0
@@ -490,17 +490,17 @@ function SubjectsPage() {
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorMatches" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                            <stop offset="5%" stopColor="var(--console-blue)" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="var(--console-blue)" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#263548" opacity={0.3} />
-                        <XAxis dataKey="hour" stroke="#94A3B8" fontSize={9} />
-                        <YAxis stroke="#94A3B8" fontSize={9} allowDecimals={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--console-border)" opacity={0.3} />
+                        <XAxis dataKey="hour" stroke="var(--console-muted)" fontSize={9} />
+                        <YAxis stroke="var(--console-muted)" fontSize={9} allowDecimals={false} />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: "#111827",
-                            borderColor: "#263548",
+                            backgroundColor: "var(--console-surface)",
+                            borderColor: "var(--console-border)",
                             fontSize: 10,
                           }}
                         />
@@ -508,7 +508,7 @@ function SubjectsPage() {
                           type="monotone"
                           dataKey="matches"
                           name="Matches"
-                          stroke="#3B82F6"
+                          stroke="var(--console-blue)"
                           fillOpacity={1}
                           fill="url(#colorMatches)"
                         />
@@ -527,27 +527,27 @@ function SubjectsPage() {
               </Card>
 
               {/* Activity Timeline */}
-              <Card className="bg-[#111827] border-[#263548] rounded lg:col-span-1">
-                <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/20">
-                  <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#94A3B8]">
-                    <Clock className="size-4 text-[#3B82F6]" /> Activity Timeline
+              <Card className="bg-console-surface border-console-border rounded lg:col-span-1">
+                <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/20">
+                  <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-muted">
+                    <Clock className="size-4 text-console-blue" /> Activity Timeline
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 space-y-3 max-h-60 overflow-y-auto">
                   {matches.slice(0, 4).map((m, idx) => (
-                    <div key={idx} className="relative pl-4 border-l border-[#263548] pb-1">
-                      <span className="absolute left-[-4px] top-1 size-2 rounded-full bg-[#3B82F6]" />
-                      <div className="flex justify-between items-center text-[8px] text-[#94A3B8]/60">
+                    <div key={idx} className="relative pl-4 border-l border-console-border pb-1">
+                      <span className="absolute left-[-4px] top-1 size-2 rounded-full bg-console-blue" />
+                      <div className="flex justify-between items-center text-[8px] text-console-muted/60">
                         <span>
                           {m.date ? new Date(m.date).toLocaleTimeString() : "no date reported"}
                         </span>
                         {m.severity ? (
                           <Tone tone={m.severity} />
                         ) : (
-                          <span className="italic text-[#64748B]">unrated</span>
+                          <span className="italic text-console-label">unrated</span>
                         )}
                       </div>
-                      <p className="text-white text-[9px] mt-0.5 leading-snug truncate">
+                      <p className="text-console-text text-[9px] mt-0.5 leading-snug truncate">
                         Match hit: "{m.matchValue}" in {m.source}
                       </p>
                     </div>
@@ -557,16 +557,16 @@ function SubjectsPage() {
             </div>
 
             {/* Recent Matches */}
-            <Card className="bg-[#111827] border-[#263548] rounded">
-              <CardHeader className="pb-2 border-b border-[#263548] p-3 bg-[#0B1220]/20">
-                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-[#94A3B8]">
-                  <Activity className="size-4 text-[#3B82F6]" /> Recent Matches
+            <Card className="bg-console-surface border-console-border rounded">
+              <CardHeader className="pb-2 border-b border-console-border p-3 bg-console-deep/20">
+                <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase text-console-muted">
+                  <Activity className="size-4 text-console-blue" /> Recent Matches
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-left border-collapse text-[10px]">
                   <thead>
-                    <tr className="border-b border-[#263548] bg-[#0B1220]/40 text-[#94A3B8] font-bold uppercase">
+                    <tr className="border-b border-console-border bg-console-deep/40 text-console-muted font-bold uppercase">
                       <th className="p-3">Trigger Entity</th>
                       <th className="p-3">Trigger Type</th>
                       <th className="p-3">Match Source</th>
@@ -574,34 +574,34 @@ function SubjectsPage() {
                       <th className="p-3 text-right">Severity</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#263548]/30">
+                  <tbody className="divide-y divide-console-border/30">
                     {matches.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center text-[#94A3B8]/40">
+                        <td colSpan={5} className="p-8 text-center text-console-muted/40">
                           No matching search hits found. Ensure target crawler indices are active.
                         </td>
                       </tr>
                     ) : (
                       matches.map((m) => (
-                        <tr key={m.id} className="hover:bg-[#1A2332]/40 text-[#94A3B8]">
-                          <td className="p-3 font-semibold text-white uppercase">{m.matchValue}</td>
+                        <tr key={m.id} className="hover:bg-console-elevated/40 text-console-muted">
+                          <td className="p-3 font-semibold text-console-text uppercase">{m.matchValue}</td>
                           <td className="p-3">
                             <Badge
                               variant="outline"
-                              className="text-[8px] uppercase border-[#263548] bg-[#0B1220]/60 rounded-none h-4"
+                              className="text-[8px] uppercase border-console-border bg-console-deep/60 rounded-none h-4"
                             >
                               {m.matchType}
                             </Badge>
                           </td>
-                          <td className="p-3 text-white">{m.source}</td>
-                          <td className="p-3 max-w-[280px] truncate italic text-white/80">
+                          <td className="p-3 text-console-text">{m.source}</td>
+                          <td className="p-3 max-w-[280px] truncate italic text-console-text/80">
                             "{m.title}"
                           </td>
                           <td className="p-3 text-right">
                             {m.severity ? (
                               <Tone tone={m.severity} />
                             ) : (
-                              <span className="italic text-[#64748B]">unrated</span>
+                              <span className="italic text-console-label">unrated</span>
                             )}
                           </td>
                         </tr>
@@ -613,8 +613,8 @@ function SubjectsPage() {
             </Card>
           </div>
         ) : (
-          <Card className="bg-[#111827] border-[#263548] rounded text-center p-8 text-[#94A3B8]/60 flex flex-col items-center justify-center">
-            <AlertTriangle className="size-8 text-[#F59E0B] mb-2" />
+          <Card className="bg-console-surface border-console-border rounded text-center p-8 text-console-muted/60 flex flex-col items-center justify-center">
+            <AlertTriangle className="size-8 text-console-amber mb-2" />
             No watchlist filters loaded. Add a watchlist filter in the sidebar to begin active
             surveillance scans.
           </Card>

@@ -188,8 +188,13 @@ const INITIAL_REVEAL = 4;
 const REVEAL_MS = 6000;
 
 function Page() {
-  const [searchVal, setSearchVal] = useState(() => getActiveTarget());
-  const [activeQuery, setActiveQuery] = useState(() => getActiveTarget());
+  // Empty on both server and first client render — getActiveTarget() reads
+  // localStorage, unavailable during SSR. The mount effect below (which
+  // already existed for the sentinel_target_changed listener) sets the real
+  // value client-side, after hydration, avoiding the text mismatch a
+  // synchronous getActiveTarget() call here used to cause.
+  const [searchVal, setSearchVal] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [buffer, setBuffer] = useState<any[]>([]);
@@ -347,6 +352,10 @@ function Page() {
   };
 
   useEffect(() => {
+    // Skip the empty placeholder render — the mount-sync effect above fills
+    // in the real target a moment later, which re-triggers this effect.
+    // Fetching on "" would waste a call and briefly show a bogus empty result.
+    if (!activeQuery) return;
     fetchStream(activeQuery);
   }, [activeQuery]);
 

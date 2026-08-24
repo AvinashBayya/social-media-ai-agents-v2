@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownReport } from "@/components/markdown-report";
 import {
   Select,
   SelectContent,
@@ -30,28 +31,46 @@ import {
   ExternalLink,
   ShieldCheck,
   CheckCircle2,
-  MessageSquare,
+  Languages,
+  FileBarChart,
 } from "lucide-react";
 import {
   serverFetchYoutubeMetadata,
   serverFetchYoutubeSubtitles,
   serverDownloadYoutubeVideo,
-  serverFetchYoutubeComments,
   extractYoutubeId,
   isYoutubeUrl,
   type YoutubeMetadata,
   type YoutubeSubtitlesResponse,
   type YoutubeDownloadResponse,
-  type YoutubeCommentsResponse,
   type YoutubeError,
 } from "@/utils/youtube-collector";
+import { llmTranslateTranscript, llmReport } from "@/utils/llm";
+import { LANGUAGES } from "@/i18n/languages";
 
 export const Route = createFileRoute("/youtube")({
   head: () => ({ meta: [{ title: "YouTube Video Intelligence — Sentinel AI" }] }),
+  /**
+   * `?url=` hands one video over from another module — /videos' "Related
+   * YouTube Videos" panel's Analyze button is the first caller. Same
+   * validation convention as /images' own `?url=` hand-off: only an absolute
+   * http(s) URL is accepted, so a crafted `javascript:`/`data:` search param
+   * cannot reach the fetch below.
+   */
+  validateSearch: (search: Record<string, unknown>): { url?: string } => {
+    const raw = typeof search.url === "string" ? search.url.trim() : "";
+    if (!raw) return {};
+    try {
+      const u = new URL(raw);
+      return u.protocol === "http:" || u.protocol === "https:" ? { url: raw } : {};
+    } catch {
+      return {};
+    }
+  },
   component: YoutubePage,
 });
 
-const CARD = "bg-[#111827] border-[#263548]";
+const CARD = "bg-console-surface border-console-border";
 
 function fmtDuration(seconds?: number): string {
   if (!seconds) return "Unknown";
@@ -74,7 +93,34 @@ function YoutubePage() {
   const [metadata, setMetadata] = useState<YoutubeMetadata | null>(null);
   const [subtitles, setSubtitles] = useState<YoutubeSubtitlesResponse | null>(null);
   const [selectedLang, setSelectedLang] = useState("en");
+  // A video can carry both a manual and an auto-generated ("asr") track for
+  // the same language code, so the code alone cannot identify which one is
+  // selected — this tracks that separately rather than conflating the two.
+  const [selectedIsAuto, setSelectedIsAuto] = useState(false);
   const [downloadResult, setDownloadResult] = useState<YoutubeDownloadResponse | null>(null);
+
+  // AI translation of the page's own real, collected text (title,
+  // description, transcript) — a real LLM call, never a substitute for a
+  // caption track YouTube doesn't have. Separate from `subtitles` so it's
+  // impossible to render a translation as if it were an official YouTube track.
+  const [translateTarget, setTranslateTarget] = useState("en");
+  const [translation, setTranslation] = useState<{
+    text: string;
+    model: string;
+    targetLanguage: string;
+    truncated: boolean;
+  } | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+
+  // AI intelligence report over the real, already-collected metadata (and
+  // transcript/translation, when loaded) — reuses reportOf()'s existing
+  // "use ONLY the collected data below, never introduce facts absent from
+  // it" prompt, the same one /reports uses for other intelligence products,
+  // rather than a bespoke prompt with its own honesty guarantees to get right.
+  const [report, setReport] = useState<{ text: string; model: string } | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   // Loading states
   const [fetchingMeta, setFetchingMeta] = useState(false);
@@ -84,9 +130,6 @@ function YoutubePage() {
   // Errors
   const [metaError, setMetaError] = useState<YoutubeError | null>(null);
   const [subsError, setSubsError] = useState<YoutubeError | null>(null);
-  const [comments, setComments] = useState<YoutubeCommentsResponse | null>(null);
-  const [commentsError, setCommentsError] = useState<YoutubeError | null>(null);
-  const [fetchingComments, setFetchingComments] = useState(false);
   const [downloadError, setDownloadError] = useState<YoutubeError | null>(null);
 
   // UI toggle states
@@ -97,8 +140,9 @@ function YoutubePage() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // 1. Fetch Metadata
-  const handleFetchMetadata = async () => {
-    if (!urlInput.trim()) return;
+  const handleFetchMetadata = async (urlOverride?: string) => {
+    const raw = urlOverride ?? urlInput;
+    if (!raw.trim()) return;
     setFetchingMeta(true);
     setMetaError(null);
     setMetadata(null);
@@ -106,10 +150,18 @@ function YoutubePage() {
     setSubsError(null);
     setDownloadResult(null);
     setDownloadError(null);
-    setComments(null);
-    setCommentsError(null);
+    // A prior report or translation was about a *different* video — leaving
+    // either on screen next to fresh metadata would misattribute it. The
+    // translate result now renders independent of the metadata gate (its
+    // trigger moved into the page header), so this reset matters more than
+    // it used to — without it, a stale translation would stay visible
+    // through the entire fetch, not just flash briefly.
+    setReport(null);
+    setReportError(null);
+    setTranslation(null);
+    setTranslationError(null);
 
-    const targetUrl = urlInput.trim();
+    const targetUrl = raw.trim();
     setActiveUrl(targetUrl);
     setIframeActivated(false); // reset poster on new video
 
@@ -120,7 +172,19 @@ function YoutubePage() {
         if (res.data.available_subtitles.length > 0) {
           const hasEn = res.data.available_subtitles.some((s) => s.code === "en");
           if (!hasEn) {
-            setSelectedLang(res.data.available_subtitles[0].code);
+            const first = res.data.available_subtitles[0];
+            setSelectedLang(first.code);
+            setSelectedIsAuto(first.isAuto);
+          } else {
+            // Prefer the manual "en" track over an auto-generated one of the
+            // same code, if both exist — matching the old code's incidental
+            // behavior (tracks.find always returned the first match, which
+            // YouTube lists manual-before-auto), now made deliberate.
+            const manualEn = res.data.available_subtitles.find(
+              (s) => s.code === "en" && !s.isAuto,
+            );
+            const anyEn = manualEn ?? res.data.available_subtitles.find((s) => s.code === "en");
+            setSelectedIsAuto(anyEn?.isAuto ?? false);
           }
         }
       } else {
@@ -133,15 +197,36 @@ function YoutubePage() {
     }
   };
 
+  // Hand-off from another module via ?url= (/videos' "Related YouTube
+  // Videos" panel). Runs once per distinct URL — matching /images' own
+  // ?url= hand-off — so a re-render cannot re-trigger a fetch of the same video.
+  const handoffUrl = Route.useSearch().url;
+  const handledHandoffRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!handoffUrl || handledHandoffRef.current === handoffUrl) return;
+    handledHandoffRef.current = handoffUrl;
+    setUrlInput(handoffUrl);
+    void handleFetchMetadata(handoffUrl);
+    // handleFetchMetadata is a stable-enough closure; depending on it would
+    // re-run this on every one of its identity changes rather than on a new URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffUrl]);
+
   // 2. Fetch Subtitles
-  const handleFetchSubtitles = async (langToFetch?: string) => {
+  const handleFetchSubtitles = async (langToFetch?: string, isAutoToFetch?: boolean) => {
     if (!activeUrl) return;
     const lang = langToFetch || selectedLang;
+    const isAuto = langToFetch === undefined ? selectedIsAuto : (isAutoToFetch ?? false);
     setFetchingSubs(true);
     setSubsError(null);
+    // A prior translation was of a *different* transcript (or the same one,
+    // now being reloaded) — stale AI output left on screen next to a fresh
+    // transcript would misattribute one for the other.
+    setTranslation(null);
+    setTranslationError(null);
 
     try {
-      const res = await serverFetchYoutubeSubtitles({ data: { url: activeUrl, lang } });
+      const res = await serverFetchYoutubeSubtitles({ data: { url: activeUrl, lang, isAuto } });
       if (res.success) {
         setSubtitles(res.data);
       } else {
@@ -153,6 +238,104 @@ function YoutubePage() {
       setSubtitles(null);
     } finally {
       setFetchingSubs(false);
+    }
+  };
+
+  // AI translation of the page's own real, already-collected text — title,
+  // description, and the transcript when one is loaded. Real LLM call over
+  // real content only; never offered before metadata exists, and never
+  // rendered anywhere without an explicit AI-translation label (see the JSX
+  // below) so it can't be mistaken for something YouTube itself supplied.
+  const handleTranslate = async () => {
+    if (!metadata) return;
+    setTranslating(true);
+    setTranslationError(null);
+    setTranslation(null);
+
+    const targetMeta = LANGUAGES.find((l) => l.code === translateTarget);
+    const targetLabel = targetMeta ? `${targetMeta.label} (${targetMeta.native})` : translateTarget;
+    // Only English, among the 16 languages this selector offers, uses Latin
+    // script — the other 15 are all scheduled Indian languages in their own
+    // native scripts (see src/i18n/languages.ts). llm.ts uses this to verify
+    // the model actually switched languages rather than staying in the
+    // source's script.
+    const targetIsLatinScript = translateTarget === "en";
+
+    const parts = [`Title: ${metadata.title}`];
+    if (metadata.description?.trim()) parts.push(`Description:\n${metadata.description.trim()}`);
+    if (subtitles && subtitles.segments.length > 0) {
+      parts.push(`Transcript:\n${subtitles.segments.map((s) => s.text).join(" ")}`);
+    }
+    const fullText = parts.join("\n\n");
+
+    try {
+      const res = await llmTranslateTranscript({
+        data: { text: fullText, targetLanguage: targetLabel, targetIsLatinScript },
+      });
+      setTranslation({
+        text: res.text,
+        model: res.model,
+        targetLanguage: targetLabel,
+        truncated: res.truncated,
+      });
+    } catch (err: any) {
+      setTranslationError(err?.message ?? String(err));
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  // AI intelligence report — synthesizes whatever real data is currently on
+  // screen (metadata always; transcript and its translation only if the
+  // analyst loaded them) into a structured brief. Available as soon as
+  // metadata exists; sections the loaded data can't support come back
+  // honestly labeled "No supporting data collected" by reportOf()'s own
+  // prompt, not silently invented.
+  const handleGenerateReport = async () => {
+    if (!metadata) return;
+    setGeneratingReport(true);
+    setReportError(null);
+    setReport(null);
+
+    const MAX_REPORT_TRANSCRIPT_CHARS = 6000;
+    const parts: string[] = [
+      `Title: ${metadata.title}`,
+      `Channel: ${metadata.uploader}`,
+      `Upload date: ${metadata.upload_date || "not reported"}`,
+      `Duration: ${fmtDuration(metadata.duration)}`,
+      `Views: ${fmtViews(metadata.view_count)}`,
+      `URL: ${metadata.webpage_url}`,
+    ];
+    if (metadata.description?.trim()) {
+      parts.push(`Description:\n${metadata.description.trim()}`);
+    }
+    if (subtitles && subtitles.segments.length > 0) {
+      const full = subtitles.segments.map((s) => s.text).join(" ");
+      const clipped = full.length > MAX_REPORT_TRANSCRIPT_CHARS;
+      parts.push(
+        `Transcript (${subtitles.lang}${subtitles.isAuto ? ", auto-generated" : ", manual"}` +
+          `${clipped ? ", truncated to the first " + MAX_REPORT_TRANSCRIPT_CHARS + " characters" : ""}):\n` +
+          (clipped ? full.slice(0, MAX_REPORT_TRANSCRIPT_CHARS) : full),
+      );
+    }
+    if (translation) {
+      const clipped = translation.text.length > MAX_REPORT_TRANSCRIPT_CHARS;
+      parts.push(
+        `AI translation to ${translation.targetLanguage} of the transcript above (machine ` +
+          `translation, not independently verified${clipped ? ", truncated" : ""}):\n` +
+          (clipped ? translation.text.slice(0, MAX_REPORT_TRANSCRIPT_CHARS) : translation.text),
+      );
+    }
+
+    try {
+      const res = await llmReport({
+        data: { type: "YouTube Video Intelligence", target: metadata.title, data: parts.join("\n\n") },
+      });
+      setReport({ text: res.text, model: res.model });
+    } catch (err: any) {
+      setReportError(err?.message ?? String(err));
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -184,30 +367,6 @@ function YoutubePage() {
     }
   };
 
-  // 4. Comments via the official Data API v3. Requires a YouTube key; metadata
-  // and captions do not, so a missing key must not read as a broken page.
-  const handleFetchComments = async () => {
-    const id = metadata?.id ?? extractYoutubeId(activeUrl || urlInput);
-    if (!id) return;
-    setFetchingComments(true);
-    setCommentsError(null);
-    try {
-      const res = await serverFetchYoutubeComments({ data: { videoId: id, limit: 100 } });
-      if (res.success) {
-        setComments(res.data);
-      } else {
-        setCommentsError({ error: res.error, cause: res.cause });
-        // Cleared so a previous video's comments cannot sit under a new error.
-        setComments(null);
-      }
-    } catch (err: any) {
-      setCommentsError({ error: "CommentsError", cause: err?.message || String(err) });
-      setComments(null);
-    } finally {
-      setFetchingComments(false);
-    }
-  };
-
   // Seek iframe player to segment timestamp
   const seekToSegment = (seconds: number) => {
     if (iframeRef.current && metadata?.id) {
@@ -222,26 +381,100 @@ function YoutubePage() {
       <PageHeader
         title="YouTube Video Intelligence"
         description="Analyst ingestion tool for YouTube video metadata, timestamped subtitle transcripts, and forensic video artifact downloads."
+        actions={
+          metadata ? (
+            <div className="flex items-center gap-2">
+              <Select value={translateTarget} onValueChange={setTranslateTarget}>
+                <SelectTrigger className="h-8 w-40 border-console-border bg-console-deep font-mono text-[10px] text-console-text">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-64 border-console-border bg-console-surface font-mono text-[10px] text-console-text">
+                  {LANGUAGES.map((l) => (
+                    <SelectItem key={l.code} value={l.code}>
+                      {l.label} ({l.native})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleTranslate()}
+                disabled={translating}
+                className="h-8 gap-1.5 font-mono text-[10px]"
+                title={`Translate this video's title and description${
+                  subtitles && subtitles.segments.length > 0 ? ", and the loaded transcript," : ""
+                } into the selected language`}
+              >
+                {translating ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Languages className="size-3.5" />
+                )}
+                Translate Page
+              </Button>
+            </div>
+          ) : undefined
+        }
       />
 
-      <div className="space-y-6 p-6 font-mono text-xs text-[#F3F4F6]">
+      <div className="space-y-6 p-6 font-mono text-xs text-console-text">
+        {/* AI translation result/error — the trigger controls live in the page
+            header, beside the title (on request); this is just where the
+            output lands once requested. */}
+        {(translation || translationError) && (
+          <Card className={`${CARD} border-console-purple/40 p-4`}>
+            {translationError && (
+              <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                <span className="text-[10px] leading-relaxed text-console-red">
+                  Translation unavailable: {translationError}
+                </span>
+              </div>
+            )}
+            {translation && (
+              <div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Languages className="size-3.5 shrink-0 text-console-purple" />
+                  <Badge className="border-console-purple/40 bg-console-purple/10 text-[9px] uppercase text-console-purple">
+                    AI translation · {translation.model}
+                  </Badge>
+                  <span className="font-mono text-[9px] text-console-label">
+                    Not an official YouTube caption — machine-translated to {translation.targetLanguage}
+                    . Verify before treating as evidence.
+                  </span>
+                </div>
+                {translation.truncated && (
+                  <p className="mt-1.5 text-[9px] text-console-amber">
+                    Source text was long and was truncated before translation — this covers the
+                    beginning only.
+                  </p>
+                )}
+                <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-console-text">
+                  {translation.text}
+                </p>
+              </div>
+            )}
+          </Card>
+        )}
+
         {/* Input Bar */}
         <Card className={`${CARD} p-4`}>
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <div className="relative flex-1">
-              <Youtube className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#EF4444]" />
+              <Youtube className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-console-red" />
               <Input
                 placeholder="Paste YouTube Video URL (e.g. https://www.youtube.com/watch?v=...)"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleFetchMetadata()}
-                className="h-10 border-[#263548] bg-[#0B1220] pl-10 pr-4 font-mono text-xs text-[#F3F4F6] placeholder:text-[#64748B] focus-visible:ring-[#06B6D4]"
+                className="h-10 border-console-border bg-console-deep pl-10 pr-4 font-mono text-xs text-console-text placeholder:text-console-label focus-visible:ring-console-cyan"
               />
             </div>
             <Button
-              onClick={handleFetchMetadata}
+              onClick={() => handleFetchMetadata()}
               disabled={fetchingMeta || !urlInput.trim()}
-              className="h-10 rounded bg-[#06B6D4] px-5 font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+              className="h-10 rounded bg-console-cyan px-5 font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90"
             >
               {fetchingMeta ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
@@ -251,7 +484,7 @@ function YoutubePage() {
               Fetch Metadata
             </Button>
           </div>
-          <p className="mt-2 text-[10px] text-[#64748B]">
+          <p className="mt-2 text-[10px] text-console-label">
             Supports standard watch URLs and shortlinks (youtube.com/watch?v=..., youtu.be/...).
             Single-video analyst initiated actions only.
           </p>
@@ -259,10 +492,10 @@ function YoutubePage() {
 
         {/* Error Banner: Video Unavailable */}
         {metaError && (
-          <div className="flex items-start gap-3 rounded border border-[#EF4444]/40 bg-[#EF4444]/10 p-4">
-            <AlertTriangle className="size-5 shrink-0 text-[#EF4444]" />
+          <div className="flex items-start gap-3 rounded border border-console-red/40 bg-console-red/10 p-4">
+            <AlertTriangle className="size-5 shrink-0 text-console-red" />
             <div>
-              <h4 className="font-bold text-[#EF4444]">
+              <h4 className="font-bold text-console-red">
                 {metaError.error === "VideoUnavailable"
                   ? "Video Unavailable"
                   : "Metadata Extraction Error"}
@@ -274,6 +507,7 @@ function YoutubePage() {
 
         {/* Active Analysis View */}
         {metadata && (
+          <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             {/* Left Column: Embed Player & Metadata (7 cols) */}
             <div className="space-y-6 lg:col-span-7">
@@ -307,10 +541,10 @@ function YoutubePage() {
                         alt={metadata.title}
                         className="size-full object-cover opacity-80 group-hover:opacity-60 transition-opacity duration-200"
                       />
-                      <span className="absolute flex size-16 items-center justify-center rounded-full bg-[#EF4444]/90 shadow-lg ring-2 ring-white/20 transition-transform duration-200 group-hover:scale-110">
+                      <span className="absolute flex size-16 items-center justify-center rounded-full bg-console-red/90 shadow-lg ring-2 ring-white/20 transition-transform duration-200 group-hover:scale-110">
                         <Play className="ml-1 size-7 text-white fill-white" />
                       </span>
-                      <span className="absolute bottom-3 left-3 rounded bg-black/70 px-2 py-0.5 text-[10px] font-mono text-[#06B6D4] backdrop-blur-sm">
+                      <span className="absolute bottom-3 left-3 rounded bg-black/70 px-2 py-0.5 text-[10px] font-mono text-console-cyan backdrop-blur-sm">
                         Click to load player
                       </span>
                     </button>
@@ -318,12 +552,12 @@ function YoutubePage() {
                 </div>
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <Badge className="border-[#06B6D4]/30 bg-[#06B6D4]/10 text-[#06B6D4] text-[9px] uppercase">
+                    <Badge className="border-console-cyan/30 bg-console-cyan/10 text-console-cyan text-[9px] uppercase">
                       Privacy-Enhanced Embed (youtube-nocookie.com)
                     </Badge>
-                    <span className="text-[10px] text-[#64748B]">Video ID: {metadata.id}</span>
+                    <span className="text-[10px] text-console-label">Video ID: {metadata.id}</span>
                   </div>
-                  <h2 className="text-sm font-bold leading-tight text-[#F3F4F6]">
+                  <h2 className="text-sm font-bold leading-tight text-console-text">
                     {metadata.title}
                   </h2>
                 </div>
@@ -331,9 +565,9 @@ function YoutubePage() {
 
               {/* Metadata Panel */}
               <Card className={`${CARD} p-4 space-y-4`}>
-                <div className="border-b border-[#263548] pb-3 flex items-center justify-between">
-                  <h3 className="font-bold uppercase text-[#F3F4F6] flex items-center gap-2">
-                    <FileText className="size-4 text-[#06B6D4]" /> Video Metadata
+                <div className="border-b border-console-border pb-3 flex items-center justify-between">
+                  <h3 className="font-bold uppercase text-console-text flex items-center gap-2">
+                    <FileText className="size-4 text-console-cyan" /> Video Metadata
                   </h3>
                   {/* Names the source that actually answered. This asserted
                       "Verified ytdl-core" for anything that was not oEmbed,
@@ -343,8 +577,8 @@ function YoutubePage() {
                   <Badge
                     className={
                       metadata.provenance.model === "yt-oembed-fallback"
-                        ? "bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30 text-[9px]"
-                        : "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30 text-[9px]"
+                        ? "bg-console-amber/10 text-console-amber border-console-amber/30 text-[9px]"
+                        : "bg-console-green/10 text-console-green border-console-green/30 text-[9px]"
                     }
                     title={`Metadata source: ${metadata.provenance.model}`}
                   >
@@ -357,35 +591,35 @@ function YoutubePage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-[11px] md:grid-cols-4">
-                  <div className="bg-[#0B1220] border border-[#263548] p-2.5 rounded">
-                    <span className="text-[#64748B] flex items-center gap-1 text-[9px] uppercase">
-                      <User className="size-3 text-[#06B6D4]" /> Channel
+                  <div className="bg-console-deep border border-console-border p-2.5 rounded">
+                    <span className="text-console-label flex items-center gap-1 text-[9px] uppercase">
+                      <User className="size-3 text-console-cyan" /> Channel
                     </span>
-                    <span className="font-bold text-[#F3F4F6] truncate block mt-0.5">
+                    <span className="font-bold text-console-text truncate block mt-0.5">
                       {metadata.uploader}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-2.5 rounded">
-                    <span className="text-[#64748B] flex items-center gap-1 text-[9px] uppercase">
-                      <Calendar className="size-3 text-[#06B6D4]" /> Upload Date
+                  <div className="bg-console-deep border border-console-border p-2.5 rounded">
+                    <span className="text-console-label flex items-center gap-1 text-[9px] uppercase">
+                      <Calendar className="size-3 text-console-cyan" /> Upload Date
                     </span>
-                    <span className="font-bold text-[#F3F4F6] block mt-0.5">
+                    <span className="font-bold text-console-text block mt-0.5">
                       {metadata.upload_date || "Unknown"}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-2.5 rounded">
-                    <span className="text-[#64748B] flex items-center gap-1 text-[9px] uppercase">
-                      <Clock className="size-3 text-[#06B6D4]" /> Duration
+                  <div className="bg-console-deep border border-console-border p-2.5 rounded">
+                    <span className="text-console-label flex items-center gap-1 text-[9px] uppercase">
+                      <Clock className="size-3 text-console-cyan" /> Duration
                     </span>
-                    <span className="font-bold text-[#F3F4F6] block mt-0.5">
+                    <span className="font-bold text-console-text block mt-0.5">
                       {fmtDuration(metadata.duration)}
                     </span>
                   </div>
-                  <div className="bg-[#0B1220] border border-[#263548] p-2.5 rounded">
-                    <span className="text-[#64748B] flex items-center gap-1 text-[9px] uppercase">
-                      <Eye className="size-3 text-[#06B6D4]" /> Views
+                  <div className="bg-console-deep border border-console-border p-2.5 rounded">
+                    <span className="text-console-label flex items-center gap-1 text-[9px] uppercase">
+                      <Eye className="size-3 text-console-cyan" /> Views
                     </span>
-                    <span className="font-bold text-[#F3F4F6] block mt-0.5">
+                    <span className="font-bold text-console-text block mt-0.5">
                       {fmtViews(metadata.view_count)}
                     </span>
                   </div>
@@ -394,10 +628,10 @@ function YoutubePage() {
                 {/* Description */}
                 {metadata.description && (
                   <div className="space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-[#94A3B8]">
+                    <span className="text-[10px] uppercase font-bold text-console-muted">
                       Description
                     </span>
-                    <div className="rounded border border-[#263548] bg-[#0B1220] p-3 text-[11px] leading-relaxed text-[#94A3B8]">
+                    <div className="rounded border border-console-border bg-console-deep p-3 text-[11px] leading-relaxed text-console-muted">
                       <p className={showFullDescription ? "" : "line-clamp-4"}>
                         {metadata.description}
                       </p>
@@ -406,7 +640,7 @@ function YoutubePage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setShowFullDescription(!showFullDescription)}
-                          className="mt-2 h-6 px-2 text-[10px] text-[#06B6D4] hover:bg-[#06B6D4]/10"
+                          className="mt-2 h-6 px-2 text-[10px] text-console-cyan hover:bg-console-cyan/10"
                         >
                           {showFullDescription ? (
                             <>
@@ -426,15 +660,15 @@ function YoutubePage() {
 
               {/* Analyst Download Action Panel */}
               <Card className={`${CARD} p-4 space-y-3`}>
-                <div className="flex items-center justify-between border-b border-[#263548] pb-2">
-                  <h3 className="font-bold uppercase text-[#F3F4F6] flex items-center gap-2">
-                    <Download className="size-4 text-[#F59E0B]" /> Video Artifact Download
+                <div className="flex items-center justify-between border-b border-console-border pb-2">
+                  <h3 className="font-bold uppercase text-console-text flex items-center gap-2">
+                    <Download className="size-4 text-console-amber" /> Video Artifact Download
                   </h3>
-                  <Badge className="bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30 text-[9px] uppercase">
+                  <Badge className="bg-console-amber/10 text-console-amber border-console-amber/30 text-[9px] uppercase">
                     Analyst Initiated
                   </Badge>
                 </div>
-                <p className="text-[10px] text-[#64748B]">
+                <p className="text-[10px] text-console-label">
                   {/* Said "(720p)". The runtime has no ffmpeg, so only YouTube's
                       muxed format is downloadable as a single file — that is
                       itag 18 at 360p. Higher resolutions exist only as separate
@@ -462,8 +696,8 @@ function YoutubePage() {
                       <div
                         className={`rounded border p-3 text-xs space-y-1 ${
                           isBlocked
-                            ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
-                            : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
+                            ? "border-console-amber/30 bg-console-amber/5 text-console-amber"
+                            : "border-console-red/30 bg-console-red/10 text-console-red"
                         }`}
                       >
                         <span className="font-bold">
@@ -475,18 +709,18 @@ function YoutubePage() {
                   })()}
 
                 {downloadResult ? (
-                  <div className="space-y-3 rounded border border-[#10B981]/30 bg-[#10B981]/10 p-3">
-                    <div className="flex items-center gap-2 text-[#10B981] font-bold">
+                  <div className="space-y-3 rounded border border-console-green/30 bg-console-green/10 p-3">
+                    <div className="flex items-center gap-2 text-console-green font-bold">
                       <CheckCircle2 className="size-4" /> Direct Download URL Retrieved
                     </div>
-                    <div className="text-[10px] text-[#94A3B8] space-y-1 font-mono break-all">
+                    <div className="text-[10px] text-console-muted space-y-1 font-mono break-all">
                       <div>
-                        <span className="text-[#64748B]">Format: </span>
+                        <span className="text-console-label">Format: </span>
                         {downloadResult.format}
                       </div>
                       {downloadResult.filesize && (
                         <div>
-                          <span className="text-[#64748B]">Size: </span>
+                          <span className="text-console-label">Size: </span>
                           {(downloadResult.filesize / 1024 / 1024).toFixed(1)} MB
                         </div>
                       )}
@@ -503,13 +737,13 @@ function YoutubePage() {
                           anchor.click();
                           document.body.removeChild(anchor);
                         }}
-                        className="h-8 flex-1 rounded bg-[#10B981] px-3 text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#10B981]/90"
+                        className="h-8 flex-1 rounded bg-console-green px-3 text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-green/90"
                       >
                         <Download className="mr-1 size-3" /> Save MP4 to Disk
                       </Button>
                       <Button
                         onClick={() => navigate({ to: "/videos" })}
-                        className="h-8 rounded bg-[#263548] px-3 text-[10px] font-bold uppercase tracking-wider text-[#F3F4F6] hover:bg-[#263548]/90"
+                        className="h-8 rounded bg-console-border px-3 text-[10px] font-bold uppercase tracking-wider text-console-text hover:bg-console-border/90"
                       >
                         Run Analysis →
                       </Button>
@@ -519,7 +753,7 @@ function YoutubePage() {
                   <Button
                     onClick={handleDownload}
                     disabled={downloading}
-                    className="h-9 w-full rounded bg-[#F59E0B] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#F59E0B]/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="h-9 w-full rounded bg-console-amber font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-amber/90 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {downloading ? (
                       <Loader2 className="mr-2 size-4 animate-spin" />
@@ -535,13 +769,13 @@ function YoutubePage() {
             {/* Right Column: Subtitles Viewer (5 cols) */}
             <div className="space-y-6 lg:col-span-5">
               <Card className={`${CARD} p-4 space-y-4`}>
-                <div className="border-b border-[#263548] pb-3 flex items-center justify-between">
-                  <h3 className="font-bold uppercase text-[#F3F4F6] flex items-center gap-2">
-                    <Subtitles className="size-4 text-[#06B6D4]" /> Subtitles & Transcripts
+                <div className="border-b border-console-border pb-3 flex items-center justify-between">
+                  <h3 className="font-bold uppercase text-console-text flex items-center gap-2">
+                    <Subtitles className="size-4 text-console-cyan" /> Subtitles & Transcripts
                   </h3>
                   {subtitles && (
                     <Badge
-                      className={`text-[9px] uppercase border ${subtitles.isAuto ? "bg-[#8B5CF6]/10 text-[#8B5CF6] border-[#8B5CF6]/30" : "bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30"}`}
+                      className={`text-[9px] uppercase border ${subtitles.isAuto ? "bg-console-purple/10 text-console-purple border-console-purple/30" : "bg-console-green/10 text-console-green border-console-green/30"}`}
                     >
                       {subtitles.isAuto ? "Auto Captions" : "Manual Subtitles"}
                     </Badge>
@@ -551,24 +785,35 @@ function YoutubePage() {
                 {/* Subtitle controls */}
                 <div className="flex items-center gap-2">
                   <Select
-                    value={selectedLang}
+                    // A video can offer both a manual and an auto-generated
+                    // track for the same language code, so the code alone
+                    // cannot be a unique React/Select key or identify which
+                    // variant is selected — this composite key carries both.
+                    value={`${selectedLang}::${selectedIsAuto ? "auto" : "manual"}`}
                     onValueChange={(val) => {
-                      setSelectedLang(val);
-                      handleFetchSubtitles(val);
+                      const sep = val.lastIndexOf("::");
+                      const code = val.slice(0, sep);
+                      const isAuto = val.slice(sep + 2) === "auto";
+                      setSelectedLang(code);
+                      setSelectedIsAuto(isAuto);
+                      handleFetchSubtitles(code, isAuto);
                     }}
                   >
-                    <SelectTrigger className="h-8 border-[#263548] bg-[#0B1220] font-mono text-xs text-[#F3F4F6]">
+                    <SelectTrigger className="h-8 border-console-border bg-console-deep font-mono text-xs text-console-text">
                       <SelectValue placeholder="Select Language" />
                     </SelectTrigger>
-                    <SelectContent className="bg-[#111827] border-[#263548] font-mono text-xs text-[#F3F4F6]">
+                    <SelectContent className="bg-console-surface border-console-border font-mono text-xs text-console-text">
                       {metadata.available_subtitles.length > 0 ? (
                         metadata.available_subtitles.map((s) => (
-                          <SelectItem key={s.code} value={s.code}>
+                          <SelectItem
+                            key={`${s.code}::${s.isAuto ? "auto" : "manual"}`}
+                            value={`${s.code}::${s.isAuto ? "auto" : "manual"}`}
+                          >
                             {s.name} ({s.code}) {s.isAuto ? "[Auto]" : "[Manual]"}
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="en">English (en)</SelectItem>
+                        <SelectItem value="en::manual">English (en)</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -577,7 +822,7 @@ function YoutubePage() {
                     size="sm"
                     onClick={() => handleFetchSubtitles()}
                     disabled={fetchingSubs}
-                    className="h-8 rounded bg-[#06B6D4] px-3 text-[10px] font-bold uppercase tracking-wider text-[#0B1220] hover:bg-[#06B6D4]/90"
+                    className="h-8 rounded bg-console-cyan px-3 text-[10px] font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90"
                   >
                     {fetchingSubs ? <Loader2 className="size-3 animate-spin" /> : "Load"}
                   </Button>
@@ -585,10 +830,10 @@ function YoutubePage() {
 
                 {/* Subtitle Error Banner */}
                 {subsError && (
-                  <div className="rounded border border-[#EF4444]/30 bg-[#EF4444]/10 p-3 text-[11px] text-[#EF4444]">
+                  <div className="rounded border border-console-red/30 bg-console-red/10 p-3 text-[11px] text-console-red">
                     <span className="font-bold">Subtitles Unavailable: </span>
                     {subsError.cause}
-                    <p className="mt-2 text-[10px] text-[#64748B]">
+                    <p className="mt-2 text-[10px] text-console-label">
                       No captions were returned, and there is no fallback: audio transcription is
                       not implemented — Whisper needs GPU inference this system does not have. You
                       can still download the artifact above and run keyframe extraction, scene-cut
@@ -604,12 +849,12 @@ function YoutubePage() {
                       <div
                         key={idx}
                         onClick={() => seekToSegment(seg.start)}
-                        className="group flex items-start gap-3 rounded border border-[#263548] bg-[#0B1220] p-2.5 hover:border-[#06B6D4] hover:bg-[#1A2332] cursor-pointer transition-colors"
+                        className="group flex items-start gap-3 rounded border border-console-border bg-console-deep p-2.5 hover:border-console-cyan hover:bg-console-elevated cursor-pointer transition-colors"
                       >
-                        <span className="shrink-0 rounded bg-[#06B6D4]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#06B6D4] group-hover:bg-[#06B6D4] group-hover:text-[#0B1220]">
+                        <span className="shrink-0 rounded bg-console-cyan/10 px-1.5 py-0.5 text-[10px] font-bold text-console-cyan group-hover:bg-console-cyan group-hover:text-console-accent-foreground">
                           {fmtDuration(seg.start)}
                         </span>
-                        <p className="text-[11px] leading-relaxed text-[#94A3B8] group-hover:text-[#F3F4F6]">
+                        <p className="text-[11px] leading-relaxed text-console-muted group-hover:text-console-text">
                           {seg.text}
                         </p>
                       </div>
@@ -618,110 +863,77 @@ function YoutubePage() {
                 )}
 
                 {!subtitles && !subsError && !fetchingSubs && (
-                  <div className="py-8 text-center text-[#64748B]">
+                  <div className="py-8 text-center text-console-label">
                     Select language and click Load to view timestamped subtitle transcript.
-                  </div>
-                )}
-              </Card>
-
-              {/* Comments — the collection-policy row for YouTube lists these as
-                  permitted through the official API, and the credential vault
-                  names this panel as the consumer of the YouTube key. Until it
-                  existed, both were claiming a consumer that did not. */}
-              <Card className={`${CARD} space-y-3 p-4`}>
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#263548] pb-3">
-                  <h3 className="flex items-center gap-2 font-bold uppercase text-[#F3F4F6]">
-                    <MessageSquare className="size-4 text-[#06B6D4]" /> Comments
-                  </h3>
-                  <Button
-                    onClick={() => void handleFetchComments()}
-                    disabled={fetchingComments}
-                    className="h-7 rounded bg-[#06B6D4] px-3 text-[10px] font-bold uppercase text-[#0B1220] hover:bg-[#06B6D4]/90"
-                  >
-                    {fetchingComments ? (
-                      <Loader2 className="mr-1.5 size-3 animate-spin" />
-                    ) : (
-                      <MessageSquare className="mr-1.5 size-3" />
-                    )}
-                    Load
-                  </Button>
-                </div>
-
-                <p className="text-[10px] leading-relaxed text-[#64748B]">
-                  Official Data API v3, which needs a YouTube key on the Settings page — metadata
-                  and captions do not. Comments are personal data under the DPDP Act 2023: they are
-                  fetched for review on request and are not retained.
-                </p>
-
-                {commentsError && (
-                  <div
-                    className={`space-y-1 rounded border p-3 ${
-                      commentsError.error === "CommentsDisabled"
-                        ? "border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#F59E0B]"
-                        : "border-[#EF4444]/30 bg-[#EF4444]/10 text-[#EF4444]"
-                    }`}
-                  >
-                    <span className="font-bold">
-                      {commentsError.error === "CommentsDisabled"
-                        ? "Comments disabled by the uploader: "
-                        : commentsError.error === "QuotaExceeded"
-                          ? "Daily quota exhausted: "
-                          : "Comments unavailable: "}
-                    </span>
-                    {commentsError.cause}
-                  </div>
-                )}
-
-                {comments && (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2 text-[9px] text-[#64748B]">
-                      <Badge className="border-[#10B981]/30 bg-[#10B981]/10 text-[9px] text-[#10B981]">
-                        {comments.comments.length} loaded
-                      </Badge>
-                      <span>
-                        {comments.quotaUnitsSpent} quota unit(s) spent · source{" "}
-                        {comments.provenance.model}
-                      </span>
-                      {comments.nextPageToken && <span>· more pages available</span>}
-                    </div>
-                    {comments.comments.length === 0 ? (
-                      <div className="py-6 text-center text-[10px] text-[#64748B]">
-                        The API returned an empty comment list. Comments are enabled on this video
-                        and none matched — this is a result, not a failure.
-                      </div>
-                    ) : (
-                      <div className="max-h-[360px] space-y-2 overflow-y-auto">
-                        {comments.comments.map((c) => (
-                          <div
-                            key={c.id}
-                            className="rounded border border-[#263548] bg-[#0B1220] p-2.5"
-                          >
-                            <div className="flex flex-wrap items-center gap-2 text-[9px] text-[#64748B]">
-                              <span className="font-bold text-[#06B6D4]">{c.author}</span>
-                              <span>{c.publishedAt.slice(0, 10)}</span>
-                              {/* null, not 0 — the API omitting a count is not a
-                                  count of zero. */}
-                              {c.likeCount !== null && <span>· {c.likeCount} likes</span>}
-                              {c.replyCount !== null && <span>· {c.replyCount} replies</span>}
-                            </div>
-                            <p className="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-[#F3F4F6]">
-                              {c.text}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {!comments && !commentsError && !fetchingComments && (
-                  <div className="py-8 text-center text-[#64748B]">
-                    Click Load to fetch comments through the official API.
                   </div>
                 )}
               </Card>
             </div>
           </div>
+
+          {/* AI intelligence report — full width, below both columns, since it
+              synthesizes metadata from the left column with the transcript
+              from the right one. Available once metadata exists; the
+              transcript and its translation are optional inputs, included
+              automatically when loaded. */}
+          <Card className={`${CARD} mt-6 p-4 space-y-3`}>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-console-border pb-3">
+              <h3 className="flex items-center gap-2 font-bold uppercase text-console-text">
+                <FileBarChart className="size-4 text-console-cyan" /> AI Intelligence Report
+              </h3>
+              <Button
+                onClick={() => void handleGenerateReport()}
+                disabled={generatingReport}
+                className="h-7 rounded bg-console-cyan px-3 text-[10px] font-bold uppercase text-console-accent-foreground hover:bg-console-cyan/90"
+              >
+                {generatingReport ? (
+                  <Loader2 className="mr-1.5 size-3 animate-spin" />
+                ) : (
+                  <FileBarChart className="mr-1.5 size-3" />
+                )}
+                Generate Report
+              </Button>
+            </div>
+
+            <p className="text-[10px] leading-relaxed text-console-label">
+              Synthesizes the title, channel, upload date, duration, view count, description
+              {subtitles && subtitles.segments.length > 0 ? ", the loaded transcript" : ""}
+              {translation ? ", and its AI translation" : ""} above into a structured brief. Uses
+              only the collected data shown on this page — where a section isn't supported by it,
+              the report says so rather than inventing anything.
+              {!subtitles && " Load a transcript above first for a fuller report."}
+            </p>
+
+            {reportError && (
+              <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                <span className="text-[11px] leading-relaxed text-console-red">
+                  Report unavailable: {reportError}
+                </span>
+              </div>
+            )}
+
+            {report && (
+              <div className="rounded border border-console-cyan/30 bg-console-cyan/5 p-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge className="border-console-cyan/40 bg-console-cyan/10 text-[9px] uppercase text-console-cyan">
+                    AI-generated · {report.model}
+                  </Badge>
+                  <span className="font-mono text-[9px] text-console-label">
+                    Not verified — an analyst-review starting point, not a finding.
+                  </span>
+                </div>
+                <MarkdownReport text={report.text} className="mt-2 text-[12px] text-console-text" />
+              </div>
+            )}
+
+            {!report && !reportError && !generatingReport && (
+              <div className="py-6 text-center text-[10px] text-console-label">
+                Click Generate Report to compile the data above into a brief.
+              </div>
+            )}
+          </Card>
+          </>
         )}
       </div>
     </AppShell>
