@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState, useEffect, useMemo } from "react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,7 +7,28 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { createServerFn } from "@tanstack/react-start";
-import { Search, Filter, Bookmark, Expand, ExternalLink, RefreshCw } from "lucide-react";
+import { Search, Filter, Bookmark, Expand, ExternalLink, RefreshCw, X } from "lucide-react";
+import {
+  DATE_WINDOWS,
+  DEFAULT_WINDOW_ID,
+  WINDOW_REACH_NOTE,
+  withinWindow,
+} from "@/utils/live-filters";
+import {
+  getBookmarks,
+  isBookmarked,
+  pinnedBookmarks,
+  removeBookmark,
+  saveBookmarks,
+  setBookmarkCase,
+  shortlisted,
+  toggleBookmark as toggleBookmarkIn,
+  type Bookmark as BookmarkRecord,
+} from "@/utils/bookmark-store";
+import { PinButton } from "@/components/pin-button";
+import { getInvestigations, removeEvidence } from "@/utils/investigations-store";
+import { useT } from "@/i18n/i18n-context";
+import { toast } from "sonner";
 
 export const fetchLiveMonitoring = createServerFn({ method: "GET" })
   .validator((data: { q?: string; query?: string } | undefined) => data)
@@ -108,15 +129,12 @@ export const Route = createFileRoute("/live")({
   component: Page,
 });
 
-const examples = [
-  "Tesla",
-  "OpenAI",
-  "India Election",
-  "ISRO",
-  "Narendra Modi",
-  "OPEC",
-  "Vector-17",
-];
+/*
+ * Example queries. "Vector-17" used to sit at the end of this list beside six
+ * real subjects — an invented name that returns nothing from Google News, so
+ * clicking it looked like a broken collector rather than an empty search.
+ */
+const examples = ["Tesla", "OpenAI", "India Election", "ISRO", "Narendra Modi", "OPEC", "NATO"];
 
 /*
  * The "Quick filters" row (Social / News / Images / Videos / OSINT / Forums /
@@ -132,12 +150,11 @@ const examples = [
  * computed from something real.
  */
 
-/** Date-filter windows in hours, keyed by the value of the Date select. */
-const DATE_RANGE_HOURS: Record<string, number> = {
-  "24h": 24,
-  "7d": 24 * 7,
-  "30d": 24 * 30,
-};
+/*
+ * The window table used to live here as `DATE_RANGE_HOURS` with three entries.
+ * It now lives in utils/live-filters.ts alongside the predicate, so both can be
+ * unit tested — a route module cannot be imported by `bun test`.
+ */
 
 /**
  * Relative age, or an explicit absence.
@@ -165,6 +182,11 @@ function initialsOf(author: string | null): string {
   return author ? author.slice(0, 2).toUpperCase() : "??";
 }
 
+/** Cards shown immediately after a fetch, before the reveal interval runs. */
+const INITIAL_REVEAL = 4;
+/** How often one more collected item is revealed. */
+const REVEAL_MS = 6000;
+
 function Page() {
   // Empty on both server and first client render — getActiveTarget() reads
   // localStorage, unavailable during SSR. The mount effect below (which
@@ -176,14 +198,24 @@ function Page() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [buffer, setBuffer] = useState<any[]>([]);
-  const [visibleStreams, setVisibleStreams] = useState<any[]>([]);
-  const [bufferIndex, setBufferIndex] = useState(0);
+  /**
+   * How many of the FILTERED items are on screen.
+   *
+   * This replaces `visibleStreams` + `bufferIndex`, which held their own copy of
+   * the list capped at 8. The filters ran over that copy, so widening the date
+   * window re-filtered at most eight cards while the rest of the collected feed
+   * sat in `buffer` untouched — "Last 30 days" could not show more than "Last 24
+   * hours" no matter how much had been collected. Filtering now happens over the
+   * whole buffer and this only controls the reveal animation.
+   */
+  const [revealCount, setRevealCount] = useState(INITIAL_REVEAL);
 
-  const [selectedDate, setSelectedDate] = useState("24h");
+  const [selectedDate, setSelectedDate] = useState(DEFAULT_WINDOW_ID);
   const [selectedThreat, setSelectedThreat] = useState("Any");
 
-  const [bookmarks, setBookmarks] = useState<string[]>([]);
+  const [bookmarks, setBookmarks] = useState<BookmarkRecord[]>([]);
   const [expandedPost, setExpandedPost] = useState<any | null>(null);
+  const t = useT();
 
   // Sync Live Monitoring state with the global search bar target
   useEffect(() => {
@@ -201,24 +233,101 @@ function Page() {
     return () => window.removeEventListener("sentinel_target_changed", handleTargetChange);
   }, []);
 
+  // Reading happens after mount, and migration from the v1 URL array happens
+  // inside getBookmarks(). See bookmark-store.ts for why nothing is back-filled.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("sentinel_bookmarks");
-      if (saved) setBookmarks(JSON.parse(saved));
-    } catch {
-      // Unreadable or malformed bookmark store: start empty rather than
-      // resurrecting a partial list, matching how parseDemoSession treats a
-      // half-readable record.
-    }
+    setBookmarks(getBookmarks());
   }, []);
 
-  const toggleBookmark = (url: string) => {
+  /**
+   * Shortlist an item, carrying what the feed reported.
+   *
+   * This used to push a bare URL string onto an array no other file read. The
+   * headline, publisher, publication time and body were all discarded at this
+   * point, which is why a bookmark could never become citable evidence.
+   */
+  const toggleBookmark = (item: any) => {
     setBookmarks((prev) => {
-      const updated = prev.includes(url) ? prev.filter((x) => x !== url) : [...prev, url];
-      localStorage.setItem("sentinel_bookmarks", JSON.stringify(updated));
+      const wasSet = isBookmarked(prev, item.url);
+      const updated = toggleBookmarkIn(
+        prev,
+        {
+          url: item.url,
+          title: item.text ?? null,
+          source: item.author ?? null,
+          // Never `?? new Date()`. An undated item stays undated.
+          publishedAt: item.pubDate ?? null,
+          text: item.text ?? null,
+        },
+        new Date().toISOString(),
+      );
+      saveBookmarks(updated);
+      toast.success(wasSet ? "Removed from shortlist." : "Added to shortlist.");
       return updated;
     });
   };
+
+  /** Record that an item reached a case, so the two panels below stay in step. */
+  const notePinned = (item: any, caseId: string) => {
+    setBookmarks((prev) => {
+      const updated = setBookmarkCase(
+        prev,
+        {
+          url: item.url,
+          title: item.text ?? null,
+          source: item.author ?? null,
+          publishedAt: item.pubDate ?? null,
+          text: item.text ?? null,
+        },
+        caseId,
+        new Date().toISOString(),
+      );
+      saveBookmarks(updated);
+      return updated;
+    });
+  };
+
+  const dropBookmark = (url: string) => {
+    setBookmarks((prev) => {
+      const updated = removeBookmark(prev, url);
+      saveBookmarks(updated);
+      return updated;
+    });
+  };
+
+  /**
+   * Unpin from the case AND clear the record here.
+   *
+   * The evidence id is resolved by URL against the live case, because that is
+   * the key `pinToInvestigation` itself de-duplicates on.
+   */
+  const unpin = (b: BookmarkRecord) => {
+    if (!b.caseId) return;
+    const found = getInvestigations().find((c) => c.id === b.caseId);
+    const evidence = found?.evidence.find((e) => e.url === b.url);
+    if (found && evidence) removeEvidence(found.id, evidence.id);
+    setBookmarks((prev) => {
+      const updated = prev.map((x) => (x.url === b.url ? { ...x, caseId: null } : x));
+      saveBookmarks(updated);
+      return updated;
+    });
+    toast.success(found ? `Removed from ${b.caseId}.` : `${b.caseId} no longer exists.`);
+  };
+
+  const payloadFor = (item: any) => ({
+    kind: "news" as const,
+    title: item.text as string,
+    // The feed names no publisher on some items; that absence travels rather
+    // than being replaced by a plausible outlet.
+    source: (item.author as string | null) ?? "",
+    url: item.url as string,
+    publishedAt: (item.pubDate as string | null) ?? "",
+    excerpt: item.text as string,
+    credibility: null,
+    credibilityRationale:
+      "Not scored. /live reads one Google News search feed and runs no Module 1 " +
+      "scoring over it; corroboration and source scoring live on /sources.",
+  });
 
   const fetchStream = async (queryStr: string) => {
     setIsLoading(true);
@@ -227,8 +336,7 @@ function Page() {
       const res = await fetchLiveMonitoring({ data: { query: queryStr, q: queryStr } });
       const fetched = res?.streams || [];
       setBuffer(fetched);
-      setVisibleStreams(fetched.slice(0, 4));
-      setBufferIndex(Math.min(fetched.length, 4));
+      setRevealCount(INITIAL_REVEAL);
     } catch (err: any) {
       // A failed fetch is NOT an empty result. Collapsing the two produced
       // "No live stream signals found... Try another topic." for an outage,
@@ -237,8 +345,7 @@ function Page() {
       console.error(err);
       setLoadError(err?.message ?? String(err));
       setBuffer([]);
-      setVisibleStreams([]);
-      setBufferIndex(0);
+      setRevealCount(INITIAL_REVEAL);
     } finally {
       setIsLoading(false);
     }
@@ -273,35 +380,40 @@ function Page() {
     return () => clearInterval(pollInterval);
   }, [activeQuery]);
 
-  useEffect(() => {
-    if (buffer.length <= bufferIndex || isLoading) return;
-    const interval = setInterval(() => {
-      setVisibleStreams((prev) => {
-        const nextItem = buffer[bufferIndex];
-        setBufferIndex((prevIdx) => prevIdx + 1);
-        return [nextItem, ...prev].slice(0, 8);
-      });
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [buffer, bufferIndex, isLoading]);
-
   const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (searchVal.trim()) setActiveQuery(searchVal.trim());
   };
 
-  const filteredStreams = visibleStreams.filter((item) => {
-    const cutoffHours = DATE_RANGE_HOURS[selectedDate];
-    if (cutoffHours && item.pubDate) {
-      const published = new Date(item.pubDate).getTime();
-      // Undated items are kept rather than silently dropped.
-      if (Number.isFinite(published) && Date.now() - published > cutoffHours * 3600_000) {
-        return false;
-      }
-    }
-    if (selectedThreat !== "Any" && item.threat !== selectedThreat) return false;
-    return true;
-  });
+  /**
+   * Filters run over the WHOLE collected buffer.
+   *
+   * They used to run over an 8-item display copy, which made the date select
+   * close to inert: everything the feed returned beyond the eighth card was
+   * outside the filter's reach, so widening the window changed nothing.
+   */
+  const filteredBuffer = useMemo(() => {
+    const now = Date.now();
+    return buffer.filter((item) => {
+      if (!withinWindow(item.pubDate ?? null, selectedDate, now)) return false;
+      if (selectedThreat !== "Any" && item.threat !== selectedThreat) return false;
+      return true;
+    });
+  }, [buffer, selectedDate, selectedThreat]);
+
+  // Reveal one more collected item at a time, so the page reads as a feed rather
+  // than dumping everything at once. There is no longer a hard cap: the ceiling
+  // is however many items actually passed the filters.
+  useEffect(() => {
+    if (isLoading || revealCount >= filteredBuffer.length) return;
+    const interval = setInterval(
+      () => setRevealCount((n) => Math.min(n + 1, filteredBuffer.length)),
+      REVEAL_MS,
+    );
+    return () => clearInterval(interval);
+  }, [filteredBuffer.length, revealCount, isLoading]);
+
+  const filteredStreams = filteredBuffer.slice(0, revealCount);
 
   return (
     <AppShell>
@@ -352,9 +464,11 @@ function Page() {
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="cursor-pointer rounded border bg-background px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
+                {DATE_WINDOWS.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="flex items-center gap-1 text-[11px]">
@@ -369,7 +483,16 @@ function Page() {
                 <option value="medium">Medium</option>
               </select>
             </div>
+            <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+              showing {filteredStreams.length} of {filteredBuffer.length} matching ·{" "}
+              {buffer.length} collected
+            </span>
           </div>
+
+          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+            {WINDOW_REACH_NOTE} Items the feed published without a date are kept under every
+            window and shown as &ldquo;no date reported&rdquo;.
+          </p>
 
           <p className="mt-3 border-t pt-3 text-[11px] leading-relaxed text-muted-foreground">
             Sentiment and threat are <strong>keyword matches over the headline and snippet</strong>,
@@ -403,8 +526,8 @@ function Page() {
       ) : filteredStreams.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-xs text-muted-foreground">
-            {visibleStreams.length > 0
-              ? "No item matches the current filters."
+            {buffer.length > 0
+              ? `None of the ${buffer.length} collected item(s) match the current filters. Widen the date window or set Threat to Any.`
               : `The feed returned no items for "${activeQuery}".`}
           </CardContent>
         </Card>
@@ -412,7 +535,7 @@ function Page() {
         <div className="grid gap-3 lg:grid-cols-2">
           {filteredStreams.map((r, i) => {
             const timeAgo = formatRelativeTime(r.pubDate);
-            const isBookmarked = bookmarks.includes(r.url);
+            const marked = isBookmarked(bookmarks, r.url);
             return (
               <Card
                 key={`${r.url}-${i}`}
@@ -473,12 +596,24 @@ function Page() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className={`h-8 gap-1.5 text-xs ${isBookmarked ? "bg-amber-500/10 text-amber-500" : ""}`}
-                      onClick={() => toggleBookmark(r.url)}
+                      className={`h-8 gap-1.5 text-xs ${marked ? "bg-amber-500/10 text-amber-500" : ""}`}
+                      onClick={() => toggleBookmark(r)}
+                      title="Shortlist this item on this page"
                     >
-                      <Bookmark className={`size-3.5 ${isBookmarked ? "fill-amber-500" : ""}`} />
-                      {isBookmarked ? "Bookmarked" : "Bookmark"}
+                      <Bookmark className={`size-3.5 ${marked ? "fill-amber-500" : ""}`} />
+                      {marked ? "Shortlisted" : "Shortlist"}
                     </Button>
+                    {/*
+                      /live was the only page with a bookmark-looking control
+                      that did not pin into a case. PinButton is what "bookmark"
+                      means on /news, /social and /images, and what
+                      /investigations tells the analyst to use.
+                    */}
+                    <PinButton
+                      payload={payloadFor(r)}
+                      label="Pin to case"
+                      onPinned={(caseId) => notePinned(r, caseId)}
+                    />
                     <Button
                       asChild
                       size="sm"
@@ -495,6 +630,139 @@ function Page() {
             );
           })}
         </div>
+      )}
+
+      {/*
+        Where a bookmark goes.
+
+        Before this panel existed, `sentinel_bookmarks` had no reader anywhere in
+        the repository — bookmarking wrote a URL into storage and there was no
+        surface, on this page or any other, that could show it again.
+      */}
+      {bookmarks.length > 0 && (
+        <Card className="mt-4">
+          <CardContent className="p-4">
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+              <Bookmark className="size-3.5" /> Shortlist &amp; case evidence
+            </h3>
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Shortlisted ({shortlisted(bookmarks).length})
+                </div>
+                {shortlisted(bookmarks).length === 0 ? (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Nothing shortlisted. The shortlist lives in this browser only and is not
+                    evidence until it is pinned to a case.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5">
+                    {shortlisted(bookmarks).map((b) => (
+                      <li
+                        key={b.url}
+                        className="flex items-start gap-2 rounded border bg-muted/30 p-2 text-[11px]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">
+                            {b.title ?? (
+                              <span className="italic text-muted-foreground">
+                                headline not recorded
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 truncate text-muted-foreground">
+                            {b.source ?? "publisher not reported"} ·{" "}
+                            {formatRelativeTime(b.publishedAt) ?? "no date reported"}
+                          </div>
+                        </div>
+                        <PinButton
+                          payload={{
+                            kind: "news",
+                            title: b.title ?? b.url,
+                            source: b.source ?? "",
+                            url: b.url,
+                            publishedAt: b.publishedAt ?? "",
+                            excerpt: b.text ?? b.title ?? b.url,
+                            credibility: null,
+                            credibilityRationale:
+                              "Not scored. /live runs no Module 1 scoring over this feed.",
+                          }}
+                          onPinned={(caseId) =>
+                            setBookmarks((prev) => {
+                              const updated = prev.map((x) =>
+                                x.url === b.url ? { ...x, caseId } : x,
+                              );
+                              saveBookmarks(updated);
+                              return updated;
+                            })
+                          }
+                        />
+                        <button
+                          onClick={() => dropBookmark(b.url)}
+                          aria-label="Remove from shortlist"
+                          title="Remove from shortlist"
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("Pin to Investigation")} ({pinnedBookmarks(bookmarks).length})
+                </div>
+                {pinnedBookmarks(bookmarks).length === 0 ? (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Nothing pinned yet. Pinning copies the item into a case with its publisher,
+                    URL and publication time, which is what makes it citable in a Module 5
+                    product.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5">
+                    {pinnedBookmarks(bookmarks).map((b) => (
+                      <li
+                        key={b.url}
+                        className="flex items-start gap-2 rounded border border-primary/20 bg-primary/5 p-2 text-[11px]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">
+                            {b.title ?? (
+                              <span className="italic text-muted-foreground">
+                                headline not recorded
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 truncate text-muted-foreground">
+                            {b.source ?? "publisher not reported"} ·{" "}
+                            <Link
+                              to="/investigations"
+                              search={{ case: b.caseId ?? undefined }}
+                              className="font-medium text-primary hover:underline"
+                            >
+                              {b.caseId}
+                            </Link>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => unpin(b)}
+                          aria-label="Unpin from case"
+                          title="Unpin from case"
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {expandedPost && (

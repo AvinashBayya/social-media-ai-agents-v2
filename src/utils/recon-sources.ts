@@ -281,11 +281,20 @@ export const RECON_NOTES: Gap[] = [
   },
   {
     capability: "Automated Google dork execution",
-    requires: "A web-search API. Google Custom Search is keyed and capped at 100 queries/day.",
+    requires:
+      "A self-hosted SearXNG instance, reached via SEARXNG_URL. It is a metasearch engine the " +
+      "operator runs themselves, exposing results at /search?q=...&format=json with no API key " +
+      "and no vendor quota.",
     limitation:
-      "Google blocks automated querying and scraping google.com/search violates its terms and " +
-      "gets the egress IP blocked. Web-scoped dorks are therefore built as query strings for the " +
-      "analyst to run themselves. News-scoped dorks do execute, against Google News RSS.",
+      "Google blocks automated querying, and scraping google.com/search violates its terms and " +
+      "gets the egress IP blocked. **Google Custom Search is no longer an option at all**: as of " +
+      "2026-08-17 it is closed to new customers and is discontinued on 2027-01-01, so this note " +
+      "previously named a remedy nobody can now sign up for. SearXNG replaces it — but because " +
+      "it scrapes the upstream engines, heavy use gets CAPTCHA'd, so it is an analyst-paced tool " +
+      "and not a bulk-mining one. A blocked engine is surfaced as a PARTIAL-results warning, " +
+      "never as an empty result set. Without SEARXNG_URL the web-scoped dorks still build query " +
+      "strings for the analyst to run themselves, which is the pre-existing behaviour and " +
+      "remains the fallback. News-scoped dorks execute against Google News RSS either way.",
   },
   {
     capability: "Scheduled or continuous external monitoring",

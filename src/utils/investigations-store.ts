@@ -91,6 +91,17 @@ export function getInvestigations(): Investigation[] {
   }
 }
 
+/**
+ * Fired after any write to the case store.
+ *
+ * Added because every consumer read `getInvestigations()` once, inside a
+ * mount-only effect. /vault's LINK CASE dropdown was the visible symptom: a case
+ * created on /investigations, or pinned into by PinButton on another page, did
+ * not appear there until a full reload. The pattern mirrors
+ * `sentinel_target_changed` in active-target.ts.
+ */
+export const INVESTIGATIONS_CHANGED_EVENT = "sentinel_investigations_changed";
+
 export function saveInvestigations(list: Investigation[]): void {
   if (typeof window === "undefined") return;
   try {
@@ -98,6 +109,13 @@ export function saveInvestigations(list: Investigation[]): void {
     localStorage.setItem(STORE_VERSION_KEY, STORE_VERSION);
   } catch {
     /* quota — caller's in-memory list is unaffected */
+  }
+  // Dispatched even on a quota failure: the in-memory list the caller holds has
+  // still changed, and a listener that re-reads will simply get the old store.
+  try {
+    window.dispatchEvent(new CustomEvent(INVESTIGATIONS_CHANGED_EVENT));
+  } catch {
+    /* CustomEvent unavailable — listeners fall back to focus/storage */
   }
 }
 
@@ -152,16 +170,33 @@ export interface PinInput {
 }
 
 export function pinToInvestigation(caseId: string, input: PinInput): boolean {
+  return pinToInvestigationWithId(caseId, input) !== null;
+}
+
+/**
+ * Pin, and return the id of the evidence record created.
+ *
+ * Additive superset of `pinToInvestigation`, which keeps its boolean signature
+ * because four call sites and their tests depend on it. The id matters to any
+ * caller holding its own copy of the item — /vault needs it so that deleting a
+ * vault record can also remove the copy inside the case, rather than leaving the
+ * case citing an exhibit that no longer exists.
+ *
+ * Returns null for the two non-success cases the boolean already collapsed: the
+ * case does not exist, or this URL is already pinned to it.
+ */
+export function pinToInvestigationWithId(caseId: string, input: PinInput): string | null {
   const list = getInvestigations();
   const idx = list.findIndex((c) => c.id === caseId);
-  if (idx === -1) return false;
+  if (idx === -1) return null;
 
   // Same URL pinned twice to one case is a duplicate, not two pieces of
   // evidence. Counting it twice would inflate every derived figure below.
-  if (input.url && list[idx].evidence.some((e) => e.url && e.url === input.url)) return false;
+  if (input.url && list[idx].evidence.some((e) => e.url && e.url === input.url)) return null;
 
+  const evidenceId = localId("ev");
   list[idx].evidence.unshift({
-    id: localId("ev"),
+    id: evidenceId,
     pinnedAt: new Date().toISOString(),
     kind: input.kind,
     title: input.title,
@@ -177,7 +212,7 @@ export function pinToInvestigation(caseId: string, input: PinInput): boolean {
   });
 
   saveInvestigations(list);
-  return true;
+  return evidenceId;
 }
 
 export function removeEvidence(caseId: string, evidenceId: string): void {

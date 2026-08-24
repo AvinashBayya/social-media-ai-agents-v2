@@ -8,29 +8,93 @@
 
 ### Current Focus
 
-- **Task:** Full-app QA sweep (2026-08-17/18) at the user's request: every module/page/feature, tested against example targets of different types (person/business/domain), any real bugs found fixed. **Six rounds, all complete**: (1) found and fixed a systemic SSR hydration-mismatch bug across 9 routes plus a `credibility-profiles.ts` client-bundle regression on `/sources`, verified clean across three target-type sweeps (person/company/domain); (2) deep interactive feature testing of the ~18 routes outside the OSINT framework found and fixed five more real bugs (fabricated `/news` timestamps, `/subjects` null-render + a fabricated mock chart, a `/vault` id collision, a `/youtube` caption-track collision, a silent `/agents` button); (3) a user-reported follow-up — the nav-bar target search wasn't syncing on 7 pages while already mounted — traced to an issue explicitly noted but deferred during round (1), now fixed; (4) user-reported: the homepage Executive AI Briefing was never actually grounded in real collected news, now fixed; (5) user-reported: `/news`'s quoted-phrase/boolean search (`"cjp" + "Delhi"`-style queries) returned zero results despite real coverage existing — root-caused to an overly strict local re-filter rejecting Google's own already-relevant results, now fixed; (6) user-reported quality issue — the (now-real) Executive Briefing cited sources without synthesizing them and defaulted to "insufficient information" on a genuinely multi-entity name instead of disambiguating, now fixed via two prompt additions. **Plus two new features, same session**: a "Related YouTube Videos" panel on `/videos` with a working Analyze hand-off to `/youtube`, built on a real, verified-live, keyless InnerTube search integration after an initial Google-News-based approach was tried, live-tested, and found broken (see that entry for why); and, user-reported ("I want more options" on a video with only one real caption track), AI transcript translation on `/youtube` via the existing LLM layer, clearly labeled as an AI translation and never conflated with genuine YouTube-sourced caption tracks. See the milestone entries below for full writeups. Separately this same window: local `.env` set up with a real Sarvam key plus a Groq fallback (`openai/gpt-oss-120b`), both verified live against their `/models` and `/chat/completions` endpoints. **⚠️ Also this window**: an unexplained, unrelated project directory (`social-media-ai-agents--main/`) appeared in the repo root mid-session with a mid-merge-conflict README — not created by any action in this session, flagged to the user, not touched. It currently makes a bare `bun test`/`bun test tests/` segfault Bun's directory scanner — use `bun test tests/*.test.ts` (shell-expanded) until it's resolved. Before this: browser-audit remediation complete. `ai-service/` (teammate's Python vision/forensics backend) merged in from `MERGE_PACKAGE/`; not yet wired to the frontend. OSINT collector framework (`docs/OSINT-INTEGRATION-PLAN.md`): **P1, P2-UI and P2-Reports all fully complete**; **P2-Production 2 of 6 done**; **P3 2 of 5 done, plus one extra item** — `/recon`'s "OSINT Investigation" panel covers investigation start, live progress, collector status, results, evidence inspection, manual collector selection, and now a free keyless full-text web-content collector (Jina Reader); `/graph` renders a real BFS-ring layout from a "View in Graph" hand-off and can export the full entity/relationship set to Maltego (CSV); `/reports` can include real OSINT evidence and relationships as citable, budget-aware sources; the OSINT job store is optionally SQLite-backed (`JOB_STORE_PATH`, in-memory unchanged by default) and `.env.example` documents every real env var. Browser-verified eight times, catching two real "built but never wired up" bugs, one real large-target scale issue, one real token-budget bug, one severe live regression, and one stale UI claim (see below and the milestone entries). Worker Dockerfile/docker-compose/Azure deployment/health checks/error monitoring remain unbuilt, deliberately — no Docker locally, no deployed theHarvester/SpiderFoot worker to containerize, and Azure changes touch real subscription resources not to be written blind. Nmap/full Shodan API/more social providers/continuous monitoring (P3) also unbuilt, each needing either authorization scaffolding, a real API key, or compliance research not yet done — see the 2026-08-17 tool-list research milestone for exactly what was checked and ruled out.
+- **Task:** Full-app QA sweep (2026-08-17/18) at the user's request: every module/page/feature, tested against example targets of different types (person/business/domain), any real bugs found fixed. **Six rounds, all complete**: (1) found and fixed a systemic SSR hydration-mismatch bug across 9 routes plus a `credibility-profiles.ts` client-bundle regression on `/sources`, verified clean across three target-type sweeps (person/company/domain); (2) deep interactive feature testing of the ~18 routes outside the OSINT framework found and fixed five more real bugs (fabricated `/news` timestamps, `/subjects` null-render + a fabricated mock chart, a `/vault` id collision, a `/youtube` caption-track collision, a silent `/agents` button); (3) a user-reported follow-up — the nav-bar target search wasn't syncing on 7 pages while already mounted — traced to an issue explicitly noted but deferred during round (1), now fixed; (4) user-reported: the homepage Executive AI Briefing was never actually grounded in real collected news, now fixed; (5) user-reported: `/news`'s quoted-phrase/boolean search (`"cjp" + "Delhi"`-style queries) returned zero results despite real coverage existing — root-caused to an overly strict local re-filter rejecting Google's own already-relevant results, now fixed; (6) user-reported quality issue — the (now-real) Executive Briefing cited sources without synthesizing them and defaulted to "insufficient information" on a genuinely multi-entity name instead of disambiguating, now fixed via two prompt additions. **Plus two new features, same session**: a "Related YouTube Videos" panel on `/videos` with a working Analyze hand-off to `/youtube`, built on a real, verified-live, keyless InnerTube search integration after an initial Google-News-based approach was tried, live-tested, and found broken (see that entry for why); and, user-reported ("I want more options" on a video with only one real caption track), AI transcript translation on `/youtube` via the existing LLM layer, clearly labeled as an AI translation and never conflated with genuine YouTube-sourced caption tracks. See the milestone entries below for full writeups. Separately this same window: local `.env` set up with a real Sarvam key plus a Groq fallback (`openai/gpt-oss-120b`), both verified live against their `/models` and `/chat/completions` endpoints. **⚠️ Also this window**: an unexplained, unrelated project directory (`social-media-ai-agents--main/`) appeared in the repo root mid-session with a mid-merge-conflict README — not created by any action in this session, flagged to the user, not touched. It currently makes a bare `bun test`/`bun test tests/` segfault Bun's directory scanner — use `bun test tests/*.test.ts` (shell-expanded) until it's resolved. **Also merged in from `origin/main` this same window: security hardening phase 2** — the rate limiter and error sanitiser are wired into a new `functionMiddleware` chain in `src/start.ts` and verified in a real browser; limiter ships in `observe` mode and needs `RATE_LIMIT_MODE=enforce` after confirming the client-key source reads `forwarded` in production. Reddit remains uncollectable for want of credentials — an operator action, not a code gap (`reddit.com/prefs/apps` → script app → `/settings` or env). See the phase-2/phase-0-1/six-defects milestone entries below for the full writeup of that thread. Before this: browser-audit remediation complete. `ai-service/` (teammate's Python vision/forensics backend) merged in from `MERGE_PACKAGE/`; not yet wired to the frontend. OSINT collector framework (`docs/OSINT-INTEGRATION-PLAN.md`): **P1, P2-UI and P2-Reports all fully complete**; **P2-Production 2 of 6 done**; **P3 2 of 5 done, plus one extra item** — `/recon`'s "OSINT Investigation" panel covers investigation start, live progress, collector status, results, evidence inspection, manual collector selection, and now a free keyless full-text web-content collector (Jina Reader); `/graph` renders a real BFS-ring layout from a "View in Graph" hand-off and can export the full entity/relationship set to Maltego (CSV); `/reports` can include real OSINT evidence and relationships as citable, budget-aware sources; the OSINT job store is optionally SQLite-backed (`JOB_STORE_PATH`, in-memory unchanged by default) and `.env.example` documents every real env var. Browser-verified eight times, catching two real "built but never wired up" bugs, one real large-target scale issue, one real token-budget bug, one severe live regression, and one stale UI claim (see below and the milestone entries). Worker Dockerfile/docker-compose/Azure deployment/health checks/error monitoring remain unbuilt, deliberately — no Docker locally, no deployed theHarvester/SpiderFoot worker to containerize, and Azure changes touch real subscription resources not to be written blind. Nmap/full Shodan API/more social providers/continuous monitoring (P3) also unbuilt, each needing either authorization scaffolding, a real API key, or compliance research not yet done — see the 2026-08-17 tool-list research milestone for exactly what was checked and ruled out.
 - **⚠️ Known-fixed regression, worth knowing the shape of:** the persistent-job-storage work (2026-08-14, previous session) statically imported `bun:sqlite` in a module client route components also import, which pulled it into the *browser* bundle and crashed every route ("This page didn't load") — undetected at the time because that session verified it only with `bun test`/`tsc`/direct `bun -e` checks, never an actual browser click-through. **That broken code was pushed to `origin/main`.** Found and fixed 2026-08-17 while browser-testing an unrelated feature (Maltego export) — first real browser launch since. Fixed by loading `SqliteJobStore` via a `typeof window`-guarded `require()` instead of a static import. See the milestone entry below for the exact mechanism. The lesson driving this note: **`bun test`/`tsc` passing is not evidence a route still loads in a browser** — this project's own established discipline, reconfirmed the hard way.
 - **⚠️ Do not build against these, if suggested again:** Agent-Reach, OpenCLI, any "Facebook/Twitter/Reddit/Instagram/LinkedIn via browser adapter" tool — checked directly 2026-08-17, all use cookie-exported/logged-in-browser-session scraping, which is exactly the ToS violation this project already ruled out for Instagram/Facebook and never re-added for Twitter/X. `ArjunPrakash09/linkedin-scraper-mcp` specifically 404s — doesn't exist.
 - **Phase:** PS-18 Pre-selection Demo Integrity & Multi-Source Intelligence
-- **Last Verified:** 2026-08-24 — **1111 unit tests, 1111 passing** (`bun test tests/*.test.ts`, shell-expanded — the unrelated nested `social-media-ai-agents--main/` repo still crashes a bare `bun test`), **`tsc --noEmit` clean** (the same one pre-existing, unrelated `social.tsx` error), **151 core exports verified**, fabrication-check unchanged at the pre-existing ~98-match baseline (confirmed via `git diff` — none of this session's ~3000+ line changes match any of the three patterns). See the Light/Dark/System theme milestone entry below for what changed.
+- **Last Verified:** 2026-08-24 — **1111 unit tests, 1111 passing** (`bun test tests/*.test.ts`, shell-expanded — the unrelated nested `social-media-ai-agents--main/` repo still crashes a bare `bun test`), **`tsc --noEmit` clean** (the same one pre-existing, unrelated `social.tsx` error), **151 core exports verified**, fabrication-check unchanged at the pre-existing ~98-match baseline (confirmed via `git diff` — none of this session's ~3000+ line changes match any of the three patterns). See the Light/Dark/System theme milestone entry below for what changed. **Note: this count predates the `origin/main` merge below** (security hardening phase 0–2) — re-run the full suite after merging to get a true combined count; the two branches' numbers are not simply additive since baselines differ.
 - **Previously verified:** 2026-08-22 — **1088 unit tests, 1088 passing** (`bun test tests/*.test.ts`, shell-expanded — the unrelated nested `social-media-ai-agents--main/` repo still crashes a bare `bun test`; the previously-noted 4 pre-existing failures are now 0 — see the Person Investigation milestone entry below for what was actually wrong and fixed), **`tsc --noEmit` clean** (one pre-existing, unrelated `social.tsx` error from the user's own uncommitted parallel work), **151 core exports verified** (`bun scripts/check-exports.ts`), fabrication-check shows zero new matches from this session's changes (confirmed via `git diff`; the pre-existing ~98 baseline matches elsewhere in the codebase are untouched).
 - **Previously verified:** 2026-08-21 — **1070 unit tests, 1066 passing** (`bun test`, run as two explicit batches via Glob'd file lists — the unrelated nested `social-media-ai-agents--main/` repo still crashes a bare `bun test`; the 4 failures are the pre-existing `PERSON_INVESTIGATION_ENABLED=true`/`.env` conflict noted above, unrelated to this session), **`tsc --noEmit` clean**, **151 core exports verified** (`bun scripts/check-exports.ts`), `fabrication-check` at 95 matches (baseline ~93, the 2 new matches are sanctioned loop-accumulator count tallies, confirmed via `git diff` as the only new matches from this session's change). See the homepage triage-tiles milestone entry below for what changed.
+- **Previously verified:** 2026-08-17 (later pass — security phase 2, `origin/main`) — **1169 unit
+  tests passing** (`bun test`), **`tsc --noEmit` clean**, **210 core exports verified**,
+  `bun run build` green, and a live browser run proving the newly-wired rate limiter denies and
+  reports honestly in both observe and enforce. `bun run smoke` is **red at baseline** (0/31
+  routes, a pre-existing CSP report-only console warning on every route) — verified by reverting
+  `start.ts` to HEAD and re-running; see the phase-2 milestone entry below.
 - **Previously verified:** 2026-08-17 — **895 unit tests passing**, plus eight prior live browser runs of `/recon`/`/graph`/`/reports` against real free APIs (3,461-entity stress case, manual-selection run, Graph hand-off, Reports OSINT-inclusion, Maltego export, Jina Reader), three full live target-sweeps across all 11 active-target routes (person/company/domain, 0 console/page errors each), and a background-agent-driven interactive pass over the remaining ~18 routes exercising each page's primary feature (uploads, forms, exports, live API calls) rather than just page load. `fabrication-check` failed at baseline with 81 pre-existing matches unrelated to any work that session.
 
-### Deployed state — 2026-08-13 ✅ LATEST
+### Deployment — REMOVED 2026-08-20. There is no hosted app.
 
-`sentinel-web` runs **`v26`** / revision **`sentinel-web--0000024`**
-(`RunningAtMaxScale`, 1 replica), at
-`sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`.
-**653 JS/TS unit tests passing**, **`tsc --noEmit` clean**, **151 core exports verified**.
-GitHub `origin/main` is at `e83ffcf`.
+**Azure is gone and must not be used.** The subscription was disabled and then removed. The
+Container Apps environment answered `ManagedClusterSuspended`, `provisioningState` went
+`Failed`, and every route returned nothing. `azure-env.sh` has been deleted; `preflight.sh`
+no longer checks for the Azure CLI. **Do not run `az`, and do not propose Azure.**
 
-> **Always run the check below before trusting this section** — the deploy that produced
-> v26 was tagged from the live value, not from this file:
+The last thing that ever ran there was `v29` / `sentinel-web--0000027`, and it is now
+unreachable. Any statement elsewhere in this file about a live URL, a revision or a
+container image is **historical** and describes something that no longer exists.
+
+**Sentinel runs locally now, and only locally:**
+
+```bash
+bun install
+bun run dev                                  # or: bun run build && node .output/server/index.mjs
+docker compose -f osint-workers/docker-compose.yml up -d   # SpiderFoot, theHarvester, SearXNG, IVRE
+```
+
+`bash preflight.sh` checks the toolchain. Docker is required now, not optional — it used to
+be optional only because builds ran in the cloud.
+
+**The app has no cloud coupling**, which is why this was a documentation cleanup rather than
+a port: the Dockerfile targets plain `node:22-alpine`, and the only Azure reference in `src/`
+was a doc comment. Picking a new host later is a config decision. Do not add one
+speculatively.
+
+**Current state: 1459 tests passing, `tsc --noEmit` clean, 210 core exports verified**,
+verified against the production build under Node (6 routes render, server functions 200,
+15 collectors probed). GitHub `origin/main` is at `a33bb30`.
+
+> **⚠️ `bun:sqlite` STRIKES A SECOND TIME — read before adding ANY cross-module import
+> under `src/utils/` (2026-08-17).** `osint/job-store-sqlite.ts` statically imports
+> `bun:sqlite`. The `typeof window`-guarded `require()` in `jobs.ts` stopped it reaching the
+> *browser* bundle (the earlier regression below), but it still leaves a **static edge** that
+> Rollup can follow. **The runtime image is `node:22-alpine` running
+> `node .output/server/index.mjs`** — Node cannot load a `bun:` specifier at all.
 >
-> ```sh
-> az containerapp show -g rg-sentinel-demo -n sentinel-web >   --query "{image:properties.template.containers[0].image, rev:properties.latestReadyRevisionName}"
-> ```
+> What happened: `collector-health.ts` imported one function from `gps-interference.ts`. That
+> made `gps-interference.ts` a module shared by two chunks, so Rollup hoisted it into a common
+> SSR chunk which transitively reached `job-store-sqlite.ts`. Every `collectorHealth` call then
+> answered **HTTP 500 / `ERR_UNSUPPORTED_ESM_URL_SCHEME`** and `/crawlers` did not render at
+> all — shipped as v28.
+>
+> **`bun test` and `tsc --noEmit` were clean the entire time. This defect exists only in the
+> bundle.** And the first local reproduction *passed*, because `.output` was stale from before
+> the change — **`bun run build` before every local repro of a deploy bug**, or the run proves
+> nothing.
+>
+> Fix pattern: put the shared symbol in a **leaf module with zero imports**
+> (`src/utils/gpsjam-url.ts`). A module with no imports cannot drag anything into a shared
+> chunk. Do NOT solve it by duplicating the value — that is what caused the original bug.
+> Asserted by `tests/collector-health-gpsjam.test.ts`.
+>
+> The underlying landmine is unfixed: `job-store-sqlite.ts` remains statically reachable from
+> `jobs.ts`, so any future re-chunking can re-expose it on the Node runtime. A real fix is
+> either a dynamic `await import()` or dropping `bun:sqlite` for a Node-compatible driver.
+
+**Verified live after deploy, not just from `provisioningState`:** `/`, `/crawlers`, `/settings`
+and `/recon` all return 200 over HTTPS, and — the check that actually matters for this release —
+`/crawlers` driven in a real browser issued `GET /_serverFn/<hash>` and got **HTTP 200 with 15
+collectors probed**. That exercises the new `functionMiddleware` chain (sanitiser + rate limiter)
+on the real ingress; a 200 on the HTML alone would not have, since server functions are a separate
+path. Only console error is the pre-existing CSP report-only warning.
+
+> **A Windows-console finding that outlived Azure, kept because it will recur.** Any CLI that
+> streams build or container logs through Python on this machine dies encoding Vite's `✓`/`➜`
+> to cp1252 (`UnicodeEncodeError`, via colorama re-wrapping stdout). `PYTHONIOENCODING=utf-8`,
+> `[Console]::OutputEncoding = [Text.Encoding]::UTF8` and `chcp 65001` were **all three tested
+> on 2026-08-17 and all three failed**. Do not spend time on them again. The general lesson —
+> which is what made the Azure logs unreadable and cost real time — is: **never conclude a
+> build or a process failed from streamed CLI output alone; verify the artefact.**
 
 #### YouTube Feature Architecture (v23+, rewritten 2026-08-12) — CRITICAL FOR AI TO KNOW
 
@@ -60,16 +124,17 @@ GitHub `origin/main` is at `e83ffcf`.
 - **Verified live 2026-08-12** on `b6g6rDDt9x8`: duration 734s, 4,309,691 views, upload date
   2020-11-10, 347 caption segments from 93,199 bytes, download HEAD 200 `video/mp4` 22,830,807 bytes.
 
-#### Deployment Commands (run from `d:\social_media_research`)
+#### Local run commands (run from `d:\social_media_research`)
 
 ```bash
-# Build image
-az acr build --registry sentinelacr4821 --image sentinel-web:vXX --no-logs .
-# Deploy
-az containerapp update -g rg-sentinel-demo -n sentinel-web --image sentinelacr4821.azurecr.io/sentinel-web:vXX
-# Git push
+bun test && bun scripts/check-exports.ts     # gates
+bun run build && node .output/server/index.mjs
+docker compose -f osint-workers/docker-compose.yml up -d
 git add -A && git commit -m "..." && git push origin main
 ```
+
+**The former `az acr build` / `az containerapp update` pair has been deleted rather than
+commented out.** A commented-out deploy command is one somebody eventually uncomments.
 
 ### Live collection status — verified 2026-08-11
 
@@ -210,6 +275,191 @@ Re-verify with the `/crawlers` probe rather than trusting this table; it is a sn
   **Verified**: `tsc --noEmit` clean, `bun test` 895/895 (unchanged — none of these are unit-testable without a browser or would have needed new fixture data disproportionate to the fix), `bun scripts/check-exports.ts` 151 symbols, and this session's three fabrication-pattern greps re-run against all six touched files — every match is either pre-existing (not on a line this pass touched) or a loop/sort-accumulator use already carved out by the hard constraints themselves. Lint shows only pre-existing `no-explicit-any`/CRLF noise on the touched files, zero new findings.
 
 - [x] **Full-app QA sweep across every route with three target types; found and fixed a systemic SSR hydration-mismatch bug affecting 9 routes, plus one more pre-existing `node:fs`/`node:path`-in-client-bundle regression (2026-08-17)**: User asked for every module/page/feature to be tested with example targets of different types (person, business/company, domain) and any real bugs fixed. Built two Playwright/Chrome scripts (`.qa-sweep.mjs`: one pass over all 30 routes; `.qa-target-sweep.mjs`: sets the target via the top-nav search bar, then sweeps the 11 routes that read the shared active-target — `/`, `/entities`, `/gis`, `/live`, `/osint`, `/recon`, `/reports`, `/sentiment`, `/sources`, `/threats`, `/trends`). **Bug 1, found first**: `/sources` crashed to a full error boundary. Two-layer regression in `credibility-profiles.ts`, the same client-bundle-leak shape as the `bun:sqlite` regression below but never live-browser-tested before now — a static top-level `node:fs/promises` import, and after fixing that, a static top-level `node:path` import (`node:path` gets the identical "externalized for browser compatibility" throw), both leaking into the browser bundle because `sources.tsx` imports this module for its `createServerFn` exports. Fixed by moving to a dynamic `await import("node:fs/promises")` inside the two functions that need it, and replacing `path.join(process.cwd(), ...)` with plain relative string literals — both changes matching `credential-vault.ts`'s own already-proven-working `VAULT_PATH` convention exactly. Grepped the whole `src/` tree afterward for any other static `node:*`/`bun:*` top-level import or bare `process.cwd()` use; none found. **Bug 2, found running the person-target sweep** (`"Sundar Pichai"`): 7 of 11 routes threw a React "Hydration failed because the server rendered text didn't match the client" error — self-healing (React regenerates the tree) but a real bug, not cosmetic. Root cause: `active-target.ts`'s `getActiveTarget()` returns the hardcoded literal `"google.com"` when `typeof window === "undefined"` (SSR has no `localStorage`), but the real stored value client-side — so every route that read it via a synchronous `useState(() => getActiveTarget())` initializer rendered one string on the server and a different one on the client's first paint, the instant the analyst's stored target was anything other than the literal default (i.e., almost always, since setting a target is the app's core interaction). `index.tsx` already had the correct fix in place for its own two target-derived state variables — a fixed literal state default, populated with the real value inside a mount-time `useEffect` — which is what proved the pattern before extending it. Applied the same pattern to the other 8 affected files (`live.tsx`, `entities.tsx`, `sentiment.tsx`, `gis.tsx`, `trends.tsx`, `osint.tsx`, `reports.tsx`, `recon.tsx`) plus `threats.tsx` (a ninth file, worse: it called `getActiveTarget()` directly in the render body every render, no state at all, an even more direct mismatch). Six of these files (`sentiment.tsx`, `gis.tsx`, `trends.tsx`, `reports.tsx`, `entities.tsx`, `osint.tsx`) also had a `useEffect` that fetches from an external API keyed on the now-briefly-empty target state — left unguarded, the placeholder-to-real transition would have fired every one of those fetches TWICE per page load, the first time with an empty/garbage query, wasting calls against APIs this project explicitly documents as rate-limited (GDELT: 1 req/5s; `osint.tsx`'s own code comment already warns "every keystroke fired five upstream requests, which exhausted GitHub's 60/hour limit within about a minute" from an earlier, unrelated fix to the same file). Guarded each of those effects with an early `if (!target) return;`, matching the guard convention `live.tsx` already used in its polling effect. **Verified three ways**: `tsc --noEmit` clean, `bun test` 895/895 passing (unchanged — this bug class is invisible to both, which is exactly why it went undetected; verification is live-browser-only, the same lesson the `bun:sqlite` regression below already taught this project), and three full live target-sweeps — person (`"Sundar Pichai"`), company (`"OpenAI"`), domain (`"github.com"`) — each showing 0 console errors and 0 page errors across all 11 routes, plus a targeted check confirming `/threats` and `/recon` (the two most-rewritten files) actually render the real target text post-hydration rather than getting stuck on the empty placeholder. Also re-confirmed, while investigating, that three previously-audit-flagged dead-handler bugs (`/vault`'s Download button, `/graph`'s eight dead controls, the notification bell's fake permanent unread dot — all named in `CLAUDE.md`'s 2026-08-12 fabrication-audit section) are already fixed from earlier work: `/vault`'s button now honestly exports the record as JSON with a real handler and an explanatory comment, every `/graph` `onClick` calls a real function, and `/alerts` now explicitly discloses the bell is inert with no unread indicator. `scripts/check-exports.ts` passes (151 symbols), lint on the touched files shows only pre-existing CRLF/prettier noise (confirmed present identically on `index.tsx`, untouched this session — a repo-wide line-ending convention mismatch, not a regression). Remaining work from the same user request, not yet done: deeper interactive (not just page-load) feature testing of the ~18 non-OSINT-framework routes, and the final written QA report.
+
+- [x] **Security hardening, phase 2 — the limiter and sanitiser are actually wired (2026-08-17)**:
+  Phase 0–1 left two complete, pure, fully unit-tested modules that **nothing called**.
+  `rate-limit.ts` was imported only by `rate-limit-tiers.ts` (type-only) and its own test — no
+  inbound request was throttled. `operational-error.ts`'s `sanitiseError`/`toClientError` had
+  zero callers. Both are now live in `src/start.ts` via a new **`functionMiddleware`** array
+  (`[sanitiserMiddleware, rateLimitMiddleware]`, order load-bearing: the sanitiser must wrap the
+  limiter or the limiter's own throw escapes unmapped).
+
+  **New module `src/utils/rate-limit-runtime.ts`** — the impure half of the pure/impure split the
+  codebase already uses. Owns the process-wide counter map and parsed config; exports
+  `rateLimitDecision()`, `describeDenial()`, `rateLimitStatus()`, `resetRateLimitRuntime()`.
+  State/config are injectable so `bun test` never touches the singletons. **Two dimensions are
+  checked per call**, not one: a per-tier limit alone lets a caller spend strict + expensive +
+  moderate + loose concurrently (165/min while exceeding no single tier); a global ceiling alone
+  lets 240 credential-vault attempts through.
+
+  **Why the function layer and not the request layer:** re-confirmed against
+  `node_modules/@tanstack/start-client-core` — `RequestServerOptions` declares `serverFnMeta?` but
+  1.168 never populates it; `FunctionMiddlewareServerFnOptions` does. Function middleware has no
+  `request`, so headers come from `getRequestHeaders()`, which this codebase already proves works
+  in that context (`credential-vault.ts`, `settings.tsx`). Note `createMiddleware()` with no
+  argument yields a **request** middleware — `{ type: "function" }` is required.
+
+  **⚠️ A trap recorded in this file is WRONG for 1.168, and was corrected by measurement.** Phase-1
+  trap #1 claimed seroval copies `stack` — "absolute container paths included" — to the browser.
+  It does not. Built the app with the sanitiser REMOVED, threw a real error from a server function,
+  and read the RPC payload in a browser: it is tagged `"c":"$TSR/Error"`, a custom serialiser that
+  emits **`message` and nothing else**. No stack, no path. The corollary matters more than the
+  correction: **none of the fields `toClientError` attaches (`code`, `correlationId`,
+  `retryAfterMs`) reach the client either — do not build UI that reads them off the error.** The
+  leak the sanitiser genuinely closes is through `message`, which crosses verbatim and is routinely
+  built by concatenating upstream text (an undici `ECONNREFUSED 10.0.3.14:8080`, an fs errno with a
+  path, up to 300 chars of a provider's response body).
+
+  **Ships in `observe` mode** (the default when `RATE_LIMIT_MODE` is unset): it logs what it would
+  have denied and denies nothing. Flip to `enforce` only after confirming the observe lines report
+  `Client key source: forwarded` — locally they say `unknown`, which is correct with no proxy, but
+  `unknown` in production means the ingress is not passing `x-forwarded-for` and enforcing would
+  collapse every caller into one bucket. `.env.example` documents all six tiers and every knob.
+
+  **Verified live, in a real browser, not just by `bun test`** — this project's own rule. Booted
+  the built server with `RATE_LIMIT_EXPENSIVE_LIMIT=1` and loaded `/crawlers` three times:
+  `collectorHealth` correctly resolved to the `expensive` tier by name; observe logged two
+  would-have-denied lines and the page rendered normally; enforce denied and the browser showed
+  the authored reason — *"Probe run failed: Rate limit backoff is active for another 16s. Retrying
+  sooner does not extend it."* — through the existing `err.message` call sites, unchanged.
+  **1169 tests passing** (+19, `tests/rate-limit-runtime.test.ts`), `tsc --noEmit` clean,
+  **210 exports verified**, `bun run build` green.
+
+  **`bun run smoke` is red at baseline and this change does not alter that** — 0/31 routes, every
+  one failing on a CSP console warning (`upgrade-insecure-requests` ignored in a report-only
+  policy) emitted by the pre-existing `security-headers.ts`. Confirmed by reverting `start.ts` to
+  HEAD and re-running: identical 0/31, identical React errors on `/gis`, `/news`, `/recon`,
+  `/reports`, `/sources`. **A permanently red gate is one nobody reads** — the same lesson the
+  YouTube export-audit entry below records. Worth fixing separately.
+
+- [x] **Security hardening, phases 0–1 (2026-08-17)**: The analytical layer was mature; the
+  security layer did not exist. No authentication, no rate limiting, and **52 server functions
+  carrying 52 identity validators** — `.validator((d: { text: string }) => d)` is a TypeScript
+  annotation, erased at build, so every handler received whatever JSON the caller posted.
+
+  **P0-1 — unauthenticated credential dump.** `getCredentials` (`routes/settings.tsx`) was a GET
+  server function with no validator that returned `readVault()` VERBATIM: every stored secret in
+  cleartext to anyone who could reach the origin — Bluesky app password, Reddit client secret,
+  YouTube API key, UCDP token, GitHub token, Mastodon access token, both LLM keys. Its sibling
+  `listCredentials` had always redacted; this one never did. The route gate is the disclosed
+  client-side demo session, and **CSRF middleware does not help — it stops a cross-site browser
+  request, not `curl`.** Now redacts. `saveCredentials` (validator: `(data: any) => data`,
+  replaced the WHOLE file) is schema-validated and gated. **No server function returns a stored
+  secret any more; do not add one back.**
+
+  **P0-2 — SSRF with credential forwarding.** `fetchMastodonTag` sanitised a caller-supplied
+  instance with `.replace(/^https?:\/\//,"").replace(/\/.*$/,"")` — scheme and path only, so a
+  port, `@` userinfo and query survived — and never checked the allowlist declared 60 lines
+  above it. `instance: "169.254.169.254:80"` produced a server-side GET against Azure instance
+  metadata with the body returned to the caller. Chained with P0-1 it was worse: write a
+  `mastodon` entry whose identifier is your host, call `verifyCredential`, and the server
+  delivers the stored **Bearer token** to you. Allowlisted in `resolveMastodonHost` **and** in
+  `verifyProviderCredential` next to the fetch that carries the secret — `fetchMastodonTag` is
+  exported, so a validator on the RPC wrapper alone is bypassable.
+  `MASTODON_ALLOWED_HOSTS` is deliberately WIDER than `MASTODON_INSTANCES`: the former is what
+  the guard permits, the latter what the UI offers. `infosec.exchange` 422s anonymous readers,
+  and reporting that refusal *as a refusal* is a distinction this collector is built around.
+
+  **Security headers**, applied in `server.ts` to every response including error pages: nosniff,
+  `X-Frame-Options: DENY`, referrer policy, permissions policy, COOP/CORP, HSTS on HTTPS only
+  (read from `x-forwarded-proto` — behind ACA ingress the container connection is plain HTTP, so
+  `url.protocol` would suppress HSTS on every production response). **CSP ships `report-only`**;
+  a policy tight enough to matter can white-screen the app and that shows up only in a browser.
+  `CSP_MODE=enforce` flips it after a clean console check.
+
+  **New pure modules**, all `bun test`-able with injected clocks and env: `validation.ts`
+  (`validate()` wraps a schema as a plain function — a BARE zod schema hits TanStack's Standard
+  Schema branch and throws `JSON.stringify(issues)` at the browser), `rate-limit.ts`,
+  `client-ip.ts`, `rate-limit-tiers.ts`, `operational-error.ts`, `operator-auth.ts`,
+  `security-headers.ts`.
+
+  **883 tests passing** (+164), `tsc --noEmit` clean, 204 exports verified, `bun run build` green.
+
+  **Two traps recorded for whoever continues this:**
+  1. **`errorMiddleware` in `start.ts` is DEAD CODE for all 52 server functions.**
+     `server-functions-handler.js` catches their throws itself and *returns* a 500 Response, so
+     by the time `await next()` resolves there is nothing to catch. Worse, TanStack serialises
+     the thrown error with seroval at full feature level — which copies **`stack`**, absolute
+     container paths included, to the browser. Sanitising must happen in a global
+     `functionMiddleware`, which is the only layer that sees the throw first.
+  2. **`getRequestIP({ xForwardedFor: true })` must not be used for rate limiting.** Verified at
+     `h3/dist/h3.mjs:651` it takes `split(",")[0]` — the LEFTMOST, entirely caller-supplied,
+     entry. Keyed on that, an attacker rotates the header per request and also evicts real
+     offenders from the bounded map. `client-ip.ts` counts hops from the RIGHT.
+
+  **Still outstanding:** ~40 identity validators still to migrate. (Rate-limit middleware and
+  error sanitisation were the other two items here; both are now wired — see the phase-2 entry
+  immediately below.)
+
+- [x] **Six reported defects + a fresh fabrication sweep (2026-08-17)**: A user driving the UI
+  reported six broken features. **Two of the six premises were factually wrong**, and a sweep
+  with the three CLAUDE.md greps found **seven further live fabrications nobody had reported**
+  — every one of which passed `bun test`, `tsc --noEmit`, the export audit and `smoke:controls`,
+  because no unit test can see a number that is invented at render time.
+
+  **The corrections.** `/live`'s bookmark button was *not* a dead control: it was wired and did
+  persist, but wrote a bare URL array to `sentinel_bookmarks` that **no other file in the
+  repository ever read** — a dead end, not a dead button, and one that discarded the publisher,
+  date and body, so a bookmark could never become citable evidence. And Reddit / Bluesky /
+  Mastodon / GitHub were **already** on `/settings` with vault entries, env overrides, live
+  Verify probes and working collectors; the real problem was that nothing was configured, so
+  every consuming module correctly reported a missing credential and the app read as broken.
+
+  **The seven unreported fabrications.** `/subjects` generated its "Activity Scanner Pulse"
+  series from the loop index — `threats: Math.max(2, Math.round(baseVal * 0.4 + ((idx * 2) % 5)))`
+  and `scans: Math.round(150 + idx * 12 + ((idx * idx * 3) % 25))`, with a floor of 5 so the
+  chart was never empty even with zero matches, and a second series counting an activity this
+  system does not perform. Its own comment said "chart mock trend points". The same page showed
+  a **"Growth Rate"** tile of `matches.length * 1.5` percent (or the literal `8`), and rendered
+  `{riskScore}/100` unguarded, so an analyst-created watchlist displayed **`null/100`**.
+  `watchlist-store.ts` seeded `riskScore: 78` and `42` in the same file where `createWatchlist`
+  was changed to `null` because that score was invented, with `createdAt: new Date()` at module
+  scope so both samples always claimed to be seconds old. `/agents` seeded five fictional
+  entities into its picker with two **pre-selected** and fed to the model as the analysis
+  target, with no sample-data banner. The dashboard badged every watchlist `MONITORING`,
+  contradicting `/watchlists`' own statement that nothing is scheduled. `/osint` substituted
+  `"GDELT"` and `"Google News"` — aggregators — for missing publishers, the same class of error
+  `rss-source.ts` exists to fix.
+
+  **What was built.** Five new pure modules, all tested: `evidence-store.ts` (single owner of
+  `sentinel_evidence`, which had two writers with two independently-declared shapes),
+  `bookmark-store.ts` (v1 URL array → v2 records, migrating **without back-filling a single
+  field**), `live-filters.ts` (the "Any time" window plus a testable predicate),
+  `graph-build.ts` (co-occurrence graph, deterministic Fruchterman–Reingold seeded on a circle
+  — **no `Math.random()`**, no new dependency), and `bucketMatchesByHour` in `watchlist-store.ts`.
+  `/graph` was rewritten from a fixed ten-node topology onto the live entity-extraction pipeline
+  `/entities` already runs; `/network` now draws the CIB clusters it was already computing;
+  `/osint`'s UCDP path was deleted and delegated to `collectConflict()`, which actually sends the
+  token. **719 unit tests passing** (+66), **`tsc --noEmit` clean**, **200 core exports verified**
+  (+49 — the new modules are now guarded), `bun run build` green.
+
+  Full defect list and file:line references: [`ANTIGRAVITY_TASK.md`](file:///d:/social_media_research/ANTIGRAVITY_TASK.md).
+
+  **Three gaps in that work, found and closed the same day.** All three were invisible to every
+  gate, which is the blind spot the original fabrications exploited.
+
+  1. **The watchlist fabrication survived on existing browsers.** Correcting
+     `DEFAULT_WATCHLISTS` to `riskScore: null` was not enough: `getWatchlists()` writes the
+     defaults to storage on first ever load and reads from storage forever after, and it had
+     **no version key**. A fresh browser got `null`; every browser that had already opened the
+     app — a demo machine included — kept the seeded 78 and 42 and went on rendering "78/100"
+     on `/subjects` and `/watchlists`. Fixed with `sentinel_watchlists_version = "2"` and an
+     exported `migrateWatchlists`, which **migrates rather than wipes** and nulls **any**
+     non-null score, not just the two seeded ids — nothing has ever computed one, so every
+     non-null value in storage is by definition invented. **If a fabricated figure is removed
+     from a seed constant, check whether that seed was already persisted.**
+  2. **`entityKey` briefly existed twice** — `graph-build.ts` and `entities.tsx`. It carries a
+     load-bearing fix (the old class covered Devanagari–Sinhala only, so every Urdu name was
+     stripped to an empty key and merged into one node), and `/graph` and `/entities` must key
+     identically or one corpus yields two different merged sets. `entities.tsx` now imports it.
+  3. **`layoutGraph` had no node cap.** O(n² × 300) synchronously inside a `useMemo`; at 400+
+     entities the tab froze. `iterationsFor(n)` now holds the work product roughly constant
+     (300 iterations for small graphs, floor of 60), and `buildEntityGraph` caps at
+     `DEFAULT_MAX_NODES = 250`, highest-degree first. **The cap is reported on screen** —
+     `EntityGraph` carries `totalNodes` and `truncated`, and `/graph` renders "top 250 of 613".
+     A silently truncated graph reads as the whole picture, which is the same defect class in a
+     new costume.
+
 - [x] **OSINT collector framework — evaluated a user-supplied tool list; built Jina Reader, ruled out the rest with a reason on record (2026-08-17)**: Checked each tool directly rather than assuming. **Ruled out**: Agent-Reach, OpenCLI, a Facebook OpenCLI adapter, and Twitter CLI all use cookie-exported/logged-in-browser-session scraping for Twitter/Reddit/Facebook/Instagram/XiaoHongShu — confirmed by reading Agent-Reach's own docs (which self-disclose "using Cookie login... carries account suspension risk") and the Facebook adapter's doc directly (browser automation on a real logged-in session, no ToS warning given at all). Exactly the pattern this project already rejected for Instagram/Facebook and never re-added for Twitter/X. `ArjunPrakash09/linkedin-scraper-mcp` 404s — doesn't exist. GitHub CLI/API and feedparser are redundant (already integrated; `rss-source.ts`+`rss-parser` already covers RSS in TypeScript). yt-dlp would mean subprocessing a Python CLI, the same problem already avoided for theHarvester. Exa has a genuine free tier but needs an API key not available this session — deferred, not built. **Built**: `src/utils/collectors/external/jina-reader.ts` — free, genuinely keyless (`r.jina.ai`, 20 req/min unauthenticated), full-text extraction for `url`-type targets, filling a real gap (article bodies elsewhere in this app are whatever a feed snippet gives). Response shape verified against the LIVE endpoint before writing any parsing code — a real `curl` against a real page, a real 404 target, and a malformed URL. That surfaced a genuine correctness trap: **Jina Reader's own HTTP status is not the target page's status** — a target 404 still comes back as an outer HTTP 200, with the real status at `data.httpStatus`. Naively trusting the outer 200 would have silently presented fallback/cached content as the live page; `normalize()` checks `data.httpStatus` explicitly and warns instead. Produces an `article` entity, a `domain` entity from the hostname, and a `HOSTED_ON` relationship between them. 18 new tests using fixture bodies copied verbatim from the real `curl` responses, not invented shapes. **Verified three ways**: unit tests, a direct live network call (`bun -e` against a real Wikipedia article — real 21,907-character extraction, correct title/entities), and a full live browser run on `/recon` (real investigation of a URL target → `jina-reader` offered and runs → real entities rendered, zero console errors). The first browser-check attempt used the wrong input field (global nav search bar instead of `/recon`'s own target field) and silently investigated a stale target — caught because the collector correctly did NOT offer itself for that domain-type target, exactly right behavior; fixed the test script, re-verified correctly. **Also fixed a stale claim found along the way**: `recon-sources.ts`'s "what external recon does not do" panel still said a Maltego CSV export "is not built yet," false since the previous milestone shipped it — corrected while keeping the still-true explanation of why a *live* Maltego transform endpoint remains architecturally impossible here. Full suite 895/895 passing (18 new), `tsc --noEmit` clean, 151 exports unchanged, `fabrication-check` unchanged at 81, lint clean.
 - [x] **OSINT collector framework — Maltego export (P3), and a severe live regression found and fixed (2026-08-17)**: New `src/utils/maltego-export.ts`, `toMaltegoCsv(entities, relationships)` — a pure function producing an edge-list CSV matching how Maltego's own "Import Graph from Table" wizard builds a graph (one row per relationship, source+target entity columns each side; any entity with zero relationships gets its own standalone row rather than being silently dropped). `MALTEGO_TYPE` maps Sentinel's 13 entity types to Maltego's stock palette — best-effort, explicitly caveated as not verified against a live Maltego install (same honest treatment as the theHarvester/SpiderFoot parsers), mitigated structurally by keeping the real Sentinel type in its own column so a wrong guess is always correctable during Maltego's import wizard, never a silent loss. 13 new tests. Wired into `/graph` as an "Export to Maltego" button exporting the full entity/relationship set, not just the on-screen-capped subset. **While browser-testing this, caught a severe regression already live on `origin/main`**: the previous session's persistent-job-storage work (`jobs.ts`) statically imported `bun:sqlite` in a module client route components also import; since TanStack Start only strips `.handler()` body code from the client bundle, not top-level module code, this pulled `bun:sqlite` into the *browser* bundle, and Vite's externalized stub for a native binding with no browser shim throws the moment the import binding evaluates — every route crashed with "This page didn't load," undetected at the time because that work was verified only with `bun test`/`tsc`/direct `bun -e` checks, never an actual browser launch. Fixed by guarding `createJobStore()` on `typeof window === "undefined"` first (this codebase's existing client/server split convention) and loading `SqliteJobStore` via `require()` instead of a static import — chosen over a guarded dynamic `import()` because a bundler can still discover and bundle a reachable `import()` call inside a dead branch, where `require()` never enters the client bundle's static import graph at all. Verified server-side (`bun -e` against the real singleton, both `JOB_STORE_PATH` states) and, the check that actually matters, a full live browser run: login → real investigation on `/recon` → "View in Graph" → `/graph` renders → "Export to Maltego" produces a real CSV download with real DNS data → zero console errors. Full suite 877/877 passing (13 new), `tsc --noEmit` clean, 151 exports unchanged, `fabrication-check` unchanged at 81, lint clean (one justified `eslint-disable` for the deliberate `require()`).
 - [x] **OSINT collector framework — persistent job storage + `.env.example`, 2 of 6 P2-Production items (2026-08-14)**: `jobs.ts` used to define its job store as one concrete class with no swap point. Extracted with zero behavior change into `src/utils/osint/job-store.ts` (`JobStore` interface + `InMemoryJobStore`, byte-for-byte the original logic under a new name, re-exported from `jobs.ts` so nothing importing `@/utils/osint/jobs` needed to change — the only real call-site fix was `tests/osint-jobs.test.ts`'s 14 `new JobStore()` constructions becoming `new InMemoryJobStore()`). New `src/utils/osint/job-store-sqlite.ts`: `SqliteJobStore implements JobStore` using `bun:sqlite` (a Bun built-in, no new dependency) — three tables, every complex field JSON-encoded, `progress`/`error`/timestamps staying genuine SQL `NULL` and round-tripping as `null`, never defaulted. Wired in behind `JOB_STORE_PATH` exactly like `llm.ts`'s `LLM_BASE_URL` pattern: unset keeps in-memory behavior unchanged, set to a path switches the `jobStore` singleton to SQLite with no other code touched. **Verified two ways**: 16 new unit tests including the one that actually proves persistence (write with one `SqliteJobStore` instance, close it, read with a fresh instance at the same path — literally what "survives a scale-to-zero cold start" means); and a direct manual check against the real singleton (`JOB_STORE_PATH` unset → `jobStore.constructor.name === "InMemoryJobStore"`; set → `"SqliteJobStore"`, with a real investigation immediately visible via `hasInvestigation()`). Also built `.env.example` — did not exist anywhere despite several load-bearing env vars — from a real audit of every `process.env.*` read in `src/` (including `llm.ts`'s dynamic `${prefix}_BASE_URL` construction, which a literal grep alone would have missed) cross-checked against `credential-vault.ts`'s `CREDENTIAL_PROVIDERS` registry. Every value in the file is empty; it documents names only. Added a `!.env.example` negation to `.gitignore` (the existing `.env.*` rule would otherwise have swallowed it — confirmed fixed via `git check-ignore`) and a `data/jobs.sqlite*` entry for the new optional local store. **Deliberately not attempted in the same pass**: Worker Dockerfile, local docker-compose, Azure configuration (no Docker locally, no deployed theHarvester/SpiderFoot worker to containerize, and Azure changes touch real subscription resources) and health checks (ambiguous scope against the already-existing `collector-health.ts`). Full suite 864/864 passing (16 new), `tsc --noEmit` clean, 151 exports unchanged, `fabrication-check` unchanged at 81, lint clean with zero new findings on every touched/new file.
@@ -403,6 +653,22 @@ This registry lists key files and their exported symbols. When adding features, 
   - `attestedCaptureToMediaAsset` **throws** when `phash` is null rather than inventing one — a synthesised perceptual hash matches nothing, which renders as "no near-duplicates found", a finding from a value never measured.
 - **[evidence.ts](file:///d:/social_media_research/src/utils/evidence.ts)**: `sha256OfFile` extracted from `routes/vault.tsx` so the vault and the capture panel hash identically. Refuses rather than falling back when SubtleCrypto is unavailable — this digest was once 64 random hex characters.
   - Exports: `EvidenceIntegrityError`, `sha256OfFile`, `bytesToHex`, `isSha256`, `HASH_MEANING`.
+- **[evidence-store.ts](file:///d:/social_media_research/src/utils/evidence-store.ts)**: The single owner of `sentinel_evidence`. That key had TWO writers with two independently-declared shapes — `routes/vault.tsx` (inlining the literal three times) and `components/manual-capture-panel.tsx`, whose own comment admitted it: *"Local mirror of vault.tsx's stored shape."* Same duplication `evidence.ts` was extracted to prevent for hashing.
+  - Exports: `EVIDENCE_KEY`, `EvidenceRecord`, `withoutSeeded`, `getEvidence`, `saveEvidence`, `appendEvidence`, `deleteEvidence`, `setEvidenceCase`, `nextEvidenceId`.
+  - **`withoutSeeded` drops only `seeded: true` rows.** The three that shipped carried `caseId: "INV-2041"` / `"INV-2038"` — ids `createInvestigation` can never mint, since it numbers from INV-1001 up — so every one rendered a bold blue case reference resolving to nothing. It **migrates rather than wipes**: the same key holds real analyst uploads and attested manual captures.
+  - **`nextEvidenceId` never reuses an id.** The route computed `EVID-0${400 + list.length + 1}`, so deleting one record and adding another produced two exhibits under one identifier — in the one store whose purpose is identifying exhibits.
+- **[bookmark-store.ts](file:///d:/social_media_research/src/utils/bookmark-store.ts)**: The `/live` shortlist. v1 was a bare `string[]` of URLs that **no file in the repo ever read back**, discarding publisher, date, headline and body — so a bookmark could never be reconstituted into `PinnedEvidence`.
+  - Exports: `BOOKMARK_KEY`, `Bookmark`, `BookmarkInput`, `migrateBookmarks`, `getBookmarks`, `saveBookmarks`, `isBookmarked`, `toggleBookmark`, `removeBookmark`, `setBookmarkCase`, `shortlisted`, `pinnedBookmarks`.
+  - **Migration back-fills NOTHING.** A v1 record keeps its URL and reports every other field as `null`, because v1 genuinely did not store them. Inventing a headline or date at migration time would manufacture provenance.
+- **[live-filters.ts](file:///d:/social_media_research/src/utils/live-filters.ts)**: The `/live` date window, extracted so the predicate is testable — a route module calls `createFileRoute` at load and cannot be imported by `bun test`.
+  - Exports: `DATE_WINDOWS`, `DEFAULT_WINDOW_ID`, `DateWindow`, `windowHours`, `withinWindow`, `WINDOW_REACH_NOTE`.
+  - **An undated item passes every window**, deliberately — dropping it would delete real reporting over a field the publisher never supplied. **An unknown window id fails open.** "Any time" is `hours: null`, a real window rather than a missing key the predicate happened to no-op on.
+- **[graph-build.ts](file:///d:/social_media_research/src/utils/graph-build.ts)**: Module 2's entity co-occurrence graph. Replaces a fixed ten-node topology written into `routes/graph.tsx` with literal x/y coordinates.
+  - Exports: `ENTITY_TYPES`, `normaliseEntityType`, `entityKey`, `buildEntityGraph`, `degreeCentrality`, `shortestPath`, `layoutGraph`, `nodeRadius`, `COOCCURRENCE_CAVEAT`, plus the `GraphNode` / `GraphEdge` / `EntityGraph` / `PositionedNode` types.
+  - **`layoutGraph` is deterministic** — Fruchterman–Reingold seeded **on a circle by index**, never randomly. A graph that reshuffles between renders cannot be cited, and `Math.random()` is banned in this layer. Hand-written rather than adding d3-force or cytoscape, the same call as the DCT hash in `imaging.ts`.
+  - **`entityKey` moved here from `entities.tsx` unchanged.** Read its comment before touching it: the old class covered U+0900–U+0DFF only, so every Urdu name (Arabic script) was stripped to an empty key and merged into one node.
+  - **No betweenness, no modularity, no "avg. degree".** Degree over a graph we built is computable and is shown; modularity needs a walked follow graph this system does not have. `network.tsx:372-377` records what happened last time one was printed anyway.
+  - `COOCCURRENCE_CAVEAT` must stay on screen: an edge means two entities were named in the same article, and **nothing more**. A node-edge diagram is very good at making a weak claim look strong.
 - **[social.ts](file:///d:/social_media_research/src/utils/social.ts)**: Module 3 collection & monitors.
   - Exports: `eventToPost`, `monitorMatches`, `assessSpike`, `bucketise`, `readMonitor`, `fetchProfile`, `fetchProfiles`, `fetchAuthorFeed`, `redditCredentials`, `resolveRedditCredentials`, `resetRedditToken`, `fetchRedditSearch`, `fetchTelegramChannel`, `fetchBlueskySearch`, `resetBlueskySession`, `fetchMastodonTag`, `mastodonStatusToPost`, `fetchMastodonSearch`, `stripMastodonHtml`, `mastodonLinks`, `MASTODON_INSTANCES`, `MASTODON_DEFAULT_INSTANCE`, `socialMastodon`, `socialBlueskySearch`, `socialMastodonSearch`, `socialCredentials`, `PLATFORM_NOTES`, `SocialUnavailableError`, `blueskyMediaFromRecord`, `blueskyMediaFromView`, `redditMediaFrom`, `telegramMediaFrom`, `mastodonMediaFrom`, `splitTelegramMessages`, `telegramBlockToPost`, `SocialMedia`.
   - **`SocialPost.media`: `undefined` = NOT COLLECTED, `[]` = collected and none.** Load bearing; do not collapse. Media is collected as **URLs only, never bytes** — re-hosting is redistribution and these are images of identifiable people under the DPDP Act.

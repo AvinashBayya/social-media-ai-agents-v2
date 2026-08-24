@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,13 @@ import {
 import {
   socialProfile,
   socialAuthorFeed,
+  socialCredentials,
   type BlueskyProfile,
   type SocialPost,
 } from "@/utils/social";
+import { CredentialNotice } from "@/components/credential-notice";
 import { accountMaturity, analyseCib, CIB_CAVEAT, type CibCluster } from "@/utils/cib";
+import { buildEntityGraph, layoutGraph } from "@/utils/graph-build";
 
 /**
  * Network Analysis — Module 3.
@@ -82,6 +85,22 @@ function Page() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [clusters, setClusters] = useState<CibCluster[] | null>(null);
+  /**
+   * Which credentials the deployment actually holds. Booleans only.
+   *
+   * Without this the page could not tell an analyst which of its capabilities
+   * were switched off, so a missing app password read as the feature simply not
+   * existing.
+   */
+  const [creds, setCreds] = useState<{ bluesky: boolean } | null>(null);
+
+  useEffect(() => {
+    socialCredentials()
+      .then((c: any) => setCreds({ bluesky: Boolean(c?.bluesky) }))
+      // A failed capability probe must not itself be reported as "no
+      // credential" — leaving it null hides the notice rather than asserting one.
+      .catch(() => setCreds(null));
+  }, []);
 
   const add = async () => {
     const actor = handle.trim().replace(/^@/, "");
@@ -151,6 +170,43 @@ function Page() {
 
   const totalPosts = subjects.reduce((n, s) => n + s.posts.length, 0);
 
+  /**
+   * The detected clusters, as a graph.
+   *
+   * `analyseCib` already returned these and the page rendered them only as
+   * prose. Reusing `buildEntityGraph` treats one cluster exactly like one
+   * article and one account exactly like one entity — co-occurrence, and only
+   * co-occurrence. Nothing new is asserted by drawing it.
+   */
+  const coordinationGraph = useMemo(() => {
+    if (!clusters || clusters.length === 0) {
+      return { nodes: [], edges: [], articleCount: 0, totalNodes: 0, truncated: false };
+    }
+    return buildEntityGraph(
+      clusters.map((c) => ({
+        id: c.id,
+        source: c.id,
+        credibility: null,
+        entities: c.accounts.map((handle) => ({
+          entity: handle,
+          type: "PERSON",
+          confidence: 1,
+        })),
+      })),
+    );
+  }, [clusters]);
+
+  const coordinationPositions = useMemo(
+    () =>
+      new Map(
+        layoutGraph(coordinationGraph, { width: 800, height: 360, padding: 40 }).map((n) => [
+          n.id,
+          n,
+        ]),
+      ),
+    [coordinationGraph],
+  );
+
   return (
     <AppShell>
       <PageHeader
@@ -209,6 +265,16 @@ function Page() {
               recent posts are fetched from the public AppView. Follower counts, account age and
               post volume come from the platform; nothing here is estimated or modelled.
             </p>
+            {creds !== null && !creds.bluesky && (
+              <div className="mx-auto mt-4 max-w-lg text-left">
+                <CredentialNotice
+                  provider="Bluesky app password"
+                  envVars={["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD"]}
+                  unlocks="Historical keyword search (app.bsky.feed.searchPosts), which returns 403 unauthenticated."
+                  stillWorks="Everything on this page still works without it: profiles, follower counts, account age and recent posts all come from the keyless public AppView. Only searching for accounts by keyword needs the credential."
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -323,6 +389,58 @@ function Page() {
               </p>
             ) : (
               <div className="mt-3 space-y-2">
+                {/*
+                  The clusters were computed and then rendered only as text. This
+                  draws them, using the same deterministic layout as the Module 2
+                  knowledge graph — an edge here means the two accounts share at
+                  least one detected cluster, and nothing more.
+                */}
+                {coordinationGraph.nodes.length > 0 && (
+                  <div className="rounded border border-[#263548] bg-[#0B1220]/60 p-2">
+                    <svg viewBox="0 0 800 360" className="h-64 w-full">
+                      {coordinationGraph.edges.map((e) => {
+                        const a = coordinationPositions.get(e.a);
+                        const b = coordinationPositions.get(e.b);
+                        if (!a || !b) return null;
+                        return (
+                          <line
+                            key={`${e.a}|${e.b}`}
+                            x1={a.x}
+                            y1={a.y}
+                            x2={b.x}
+                            y2={b.y}
+                            stroke="#EF4444"
+                            strokeOpacity={0.5}
+                            strokeWidth={Math.min(5, 1 + e.weight)}
+                          >
+                            <title>{`${a.label} — ${b.label}: co-occur in ${e.weight} cluster(s)`}</title>
+                          </line>
+                        );
+                      })}
+                      {[...coordinationPositions.values()].map((n) => (
+                        <g key={n.id}>
+                          <circle cx={n.x} cy={n.y} r={12} fill="#111827" stroke="#8B5CF6" strokeWidth={2} />
+                          <text
+                            x={n.x}
+                            y={n.y + 24}
+                            textAnchor="middle"
+                            fontSize="10"
+                            fill="#94A3B8"
+                          >
+                            {n.label.length > 20 ? `${n.label.slice(0, 19)}…` : n.label}
+                          </text>
+                          <title>{`${n.label} · in ${n.degree} co-cluster relationship(s)`}</title>
+                        </g>
+                      ))}
+                    </svg>
+                    <p className="mt-1 text-[9px] leading-relaxed text-[#64748B]">
+                      An edge means the two accounts appear in the same detected cluster. Degree is
+                      computed over the edges drawn here and is the only structural figure shown —
+                      see the note at the bottom of this page for why there is no modularity.
+                    </p>
+                  </div>
+                )}
+
                 {clusters.slice(0, 8).map((c) => (
                   <div
                     key={c.id}

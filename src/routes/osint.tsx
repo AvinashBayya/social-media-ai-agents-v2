@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { Highlight } from "@/utils/highlight";
@@ -71,8 +71,24 @@ function CollectorAbsence({
   return <div className="py-8 text-center text-console-muted">{emptyLabel}</div>;
 }
 
+/**
+ * Is this failure specifically "no UCDP token"?
+ *
+ * Matched on the message `collectConflict` produces rather than on a status
+ * code, because the error crosses a server-function boundary as a string. A
+ * missing credential and a network fault need different things from the analyst,
+ * so they must not render the same.
+ */
+function isMissingUcdpToken(error: string | null): boolean {
+  return Boolean(error && error.includes("UCDP requires an API token"));
+}
+
 import { createServerFn } from "@tanstack/react-start";
 import { fetchOSINT } from "./news";
+// The canonical Telegram collector. This route had its own copy, which carried a
+// misattribution bug already fixed here and swallowed failures into an empty
+// array — see the note above `fetchTelegramOSINT`.
+import { fetchTelegramChannel } from "@/utils/social";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -310,53 +326,59 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     const channels = ["VahidOnline", "abualiexpress", "BNONews", "OSINTdefender", "vxunderground"];
     let allPosts: any[] = [];
 
-    const scrapeTelegramChannel = async (handle: string) => {
-      try {
-        const res = await fetch(`https://t.me/s/${handle}`, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-          signal: AbortSignal.timeout(2500),
-        });
-        if (!res.ok) return [];
-        const html = await res.text();
+    /*
+     * DUPLICATE COLLECTOR REMOVED, 2026-08-17.
+     *
+     * A second Telegram scraper lived here and was strictly worse than
+     * `fetchTelegramChannel` in social.ts, in three ways:
+     *
+     *  1. It reintroduced a MISATTRIBUTION BUG that had already been found and
+     *     fixed in the other copy. It scanned the page into parallel `texts` and
+     *     `times` arrays and zipped them by index — so any message without a
+     *     text block (every photo-only post) shifted all later text up one slot
+     *     and rendered post N's words under post N+1's timestamp. Confirmed live
+     *     on t.me/s/durov, where durov/522 is media-only. social.ts fixed this
+     *     with `splitTelegramMessages`, which slices on `data-post="` boundaries
+     *     so every field of a message stays together.
+     *  2. It used a 2,500 ms timeout against t.me, which is why the dev server
+     *     logged `TimeoutError` for BNONews and vxunderground. The canonical
+     *     collector allows 8,000 ms and caches the result.
+     *  3. **A failed fetch returned `[]`** — from both the `!res.ok` branch and
+     *     the catch. A channel that timed out was therefore indistinguishable
+     *     from a channel that had posted nothing. That is the exact error this
+     *     module's own comment below warns about, one layer up.
+     *
+     * Failures are now collected per channel and returned alongside the posts,
+     * so a partial collection is reported as partial instead of as a complete
+     * picture of a quiet day.
+     */
+    const settled = await Promise.allSettled(
+      channels.map(async (handle) => ({
+        handle,
+        posts: await fetchTelegramChannel(handle, 30),
+      })),
+    );
 
-        const posts: any[] = [];
-        const textRegex = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
-        const timeRegex = /<time class="time" datetime="([^"]*)"/g;
-
-        const texts: string[] = [];
-        let match;
-        while ((match = textRegex.exec(html)) !== null) {
-          const rawText = match[1].replace(/<[^>]*>/g, "").trim();
-          texts.push(rawText);
-        }
-
-        const times: string[] = [];
-        while ((match = timeRegex.exec(html)) !== null) {
-          times.push(match[1]);
-        }
-
-        for (let i = 0; i < Math.min(texts.length, times.length); i++) {
-          posts.push({
-            id: `${handle}-${i}`,
-            channel: handle,
-            text: texts[texts.length - 1 - i],
-            date: times[times.length - 1 - i] || null,
-          });
-        }
-        return posts;
-      } catch (err) {
-        console.error(`Scrape failed for telegram channel ${handle}:`, err);
-        return [];
+    const failures: { channel: string; reason: string }[] = [];
+    settled.forEach((outcome, i) => {
+      if (outcome.status === "fulfilled") {
+        allPosts = allPosts.concat(
+          outcome.value.posts.map((p, idx) => ({
+            id: p.id || `${outcome.value.handle}-${idx}`,
+            channel: outcome.value.handle,
+            text: p.text,
+            // Already null-safe upstream: an undated message stays undated
+            // rather than being stamped with the moment of collection.
+            date: p.createdAt || null,
+            url: p.url,
+          })),
+        );
+      } else {
+        const reason = outcome.reason?.message ?? String(outcome.reason);
+        console.error(`Telegram collection failed for ${channels[i]}:`, reason);
+        failures.push({ channel: channels[i], reason });
       }
-    };
-
-    const results = await Promise.all(channels.map((ch) => scrapeTelegramChannel(ch)));
-    for (const posts of results) {
-      allPosts = allPosts.concat(posts);
-    }
+    });
 
     // Undated posts sort last rather than being coerced to the epoch, which
     // would have ranked them as the oldest content in the feed.
@@ -371,7 +393,12 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
     // at a border, a named ransomware group — each attributed to a REAL channel
     // that had not said any of it. Fabricated intelligence carrying a genuine
     // source name is the worst failure mode this system has.
-    return allPosts;
+    //
+    // `failures` travels with the posts so the panel can say which channels did
+    // not answer. Zero posts and five failed channels is a collection outage;
+    // zero posts and five successful channels is a quiet day. They must not
+    // render the same.
+    return { posts: allPosts, failures, attempted: channels.length };
   });
 
 /**
@@ -414,44 +441,45 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const query = data?.query || data?.q || "";
 
-    // 1. Fetch UCDP GED events
+    /*
+     * 1. UCDP GED events.
+     *
+     * This used to be an independent second copy of the collector that hit
+     * ucdpapi.pcr.uu.se with ONLY a User-Agent header — no
+     * `x-ucdp-access-token`, no `resolveCredential("ucdp")`. UCDP has been
+     * token-gated since before 2026-08-04 and answers 401 on every dataset
+     * version without one, so this path failed unconditionally EVEN WHEN A
+     * TOKEN WAS CONFIGURED. An analyst could add the token on /settings, watch
+     * it verify against the live API, and see no change here.
+     *
+     * It also re-implemented the casualty null-handling that geo.ts:319-325
+     * warns was "fixed in osint.tsx's UCDP handler while this copy was missed" —
+     * the duplication had already caused one divergence.
+     *
+     * It now delegates to `collectConflict()`, which resolves the token
+     * environment-first-then-vault, records the credential use, maps through the
+     * single `fromUcdpEvent`, and returns an explicit missing-credential message
+     * rather than an empty array.
+     */
     const fetchUcdp = async () => {
-      try {
-        const res = await fetch("https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=30", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const list = data.Result || [];
-          return list.map((e: any) => ({
-            id: e.id,
-            country: e.country,
-            // An event with NO casualty figures reported is not an event with
-            // zero casualties. Only sum the fields UCDP actually supplied;
-            // null means unreported and renders as such.
-            deaths: [e.deaths_a, e.deaths_b, e.deaths_civilians].some(
-              (v: unknown) => v !== null && v !== undefined && v !== "",
-            )
-              ? Number(e.deaths_a || 0) + Number(e.deaths_b || 0) + Number(e.deaths_civilians || 0)
-              : null,
-            latitude: e.latitude,
-            longitude: e.longitude,
-            date: e.date_start,
-            // null, not "State Conflict" — that invented a conflict
-            // classification for any event whose id UCDP did not supply.
-            conflict: e.conflict_new_id || null,
-          }));
-        }
-      } catch (err) {
-        console.error("UCDP fetch failed:", err);
-        // Rethrow so the caller can name the cause. Returning [] here rendered
-        // "No conflict events found." for what is usually a 401 - UCDP GED
-        // requires an access token, and a missing credential was being shown to
-        // the analyst as an absence of armed conflict.
-        throw err;
-      }
-      return [];
+      const { collectConflict } = await import("@/utils/geo-sources");
+      const layer = await collectConflict();
+      if (layer.error) throw new Error(layer.error);
+      return layer.records.map((r) => ({
+        id: r.id,
+        // detail.country is UCDP's own country field. `locates` describes the
+        // coordinate's precision, not the place.
+        country: (r.detail as any)?.country ?? "country not reported",
+        // Already null-vs-zero correct in fromUcdpEvent: null means UCDP
+        // reported no casualty figure, which is not the same as zero deaths.
+        deaths: r.magnitude,
+        latitude: r.lat,
+        longitude: r.lon,
+        date: r.timestamp,
+        // The parties, or UCDP's conflict name. Never a substituted
+        // "State Conflict" label for an event UCDP did not classify.
+        conflict: r.title,
+      }));
     };
 
     // 2. Fetch GDELT Doc API
@@ -471,7 +499,12 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
             id: idx,
             title: a.title,
             url: a.url,
-            source: a.source || "GDELT",
+            // Was `|| "GDELT"`. GDELT is the aggregator that returned the
+            // article, not the outlet that published it — naming it as the
+            // source attributes the reporting to the wrong organisation. This
+            // is the same class of error rss-source.ts exists to fix, where
+            // every Google News redirect was scored as news.google.com.
+            source: a.source || "publisher not reported",
             date: a.seendate || null,
           }));
         }
@@ -489,10 +522,13 @@ export const fetchGeopoliticalSecurity = createServerFn({ method: "GET" })
               id: idx,
               title: item.title,
               url: item.link,
+              // `|| "Google News"` named the aggregator as the publisher. Every
+              // item here is a Google News redirect to some other outlet, so
+              // that attributed the reporting to the wrong organisation.
               source:
                 typeof item.source === "object"
                   ? (item.source as any).text
-                  : item.source || "Google News",
+                  : item.source || "publisher not reported",
               date: item.pubDate || null,
             }));
           } catch (rssErr) {
@@ -604,10 +640,11 @@ export const fetchRSSAggregator = createServerFn({ method: "GET" })
           // carried no date invents a publication time, and the RSS panel sorts
           // and displays that value as though the outlet reported it.
           pubDate: item.pubDate ?? null,
+          // Same as above: the aggregator is not the publisher.
           source:
             typeof item.source === "object"
               ? (item.source as any).text
-              : item.source || "Google News",
+              : item.source || "publisher not reported",
         }));
       } catch (err) {
         console.error("Failed to parse dynamic incident RSS feed:", err);
@@ -1619,6 +1656,16 @@ function Page() {
   const [cyberError, setCyberError] = useState<string | null>(null);
   // null = not collected yet; [] = collected and genuinely empty.
   const [telegramLoadFailed, setTelegramLoadFailed] = useState(false);
+  /**
+   * Channels that did not answer this run.
+   *
+   * Previously every per-channel failure was swallowed into an empty array, so
+   * three of five channels timing out looked identical to three of five having
+   * nothing to say. The panel now names them.
+   */
+  const [telegramFailures, setTelegramFailures] = useState<{ channel: string; reason: string }[]>(
+    [],
+  );
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1649,8 +1696,9 @@ function Page() {
         if (isMounted) {
           if (profRes) setOsintProfile(profRes);
           if (cyberRes) setCyberThreats(cyberRes);
-          setTelegramPosts(tgRes ?? []);
+          setTelegramPosts(tgRes?.posts ?? []);
           setTelegramLoadFailed(tgRes === null);
+          setTelegramFailures(tgRes?.failures ?? []);
           if (geoRes) setGeopoliticalData(geoRes);
           if (rssRes) setRssFeeds(rssRes);
           setGpsJamData(gpsRes?.data ?? null);
@@ -2238,6 +2286,32 @@ function Page() {
                 />
               </div>
 
+              {/*
+                Partial collection is reported as partial. A channel that timed
+                out is not a channel that said nothing, and this banner renders
+                whether or not any posts came back — the danger case is a feed
+                that looks full while two of its five sources are missing.
+              */}
+              {!isLoading && telegramFailures.length > 0 && (
+                <div className="mb-3 rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-2 text-[10px] leading-relaxed">
+                  <span className="font-bold uppercase text-[#F59E0B]">
+                    {telegramFailures.length} of 5 channels did not answer
+                  </span>
+                  <span className="text-[#94A3B8]">
+                    {" "}
+                    — anything they posted is missing from this feed. This is a collection
+                    failure, not a quiet period.
+                  </span>
+                  <ul className="mt-1 space-y-0.5 text-[#64748B]">
+                    {telegramFailures.map((f) => (
+                      <li key={f.channel}>
+                        <span className="font-mono text-[#94A3B8]">@{f.channel}</span> — {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {isLoading ? (
                 <div className="flex justify-center py-20">
                   <RefreshCw className="size-8 animate-spin text-primary" />
@@ -2247,7 +2321,9 @@ function Page() {
                   error={
                     telegramLoadFailed
                       ? "The Telegram collector did not return. Channel previews are scraped from t.me and can fail per channel; a failure here is not a finding that the channels were quiet."
-                      : null
+                      : telegramFailures.length > 0
+                        ? `All ${telegramFailures.length} channel(s) attempted failed to respond. No posts were collected — this is a collection failure, not a finding that the channels were quiet.`
+                        : null
                   }
                   loading={isLoading}
                   emptyLabel="Channel previews returned no posts."
@@ -2356,11 +2432,57 @@ function Page() {
                     <RefreshCw className="size-6 animate-spin text-primary" />
                   </div>
                 ) : filteredUcdp.length === 0 ? (
-                  <CollectorAbsence
-                    error={geopoliticalData?.ucdpError ?? null}
-                    loading={isLoading}
-                    emptyLabel="UCDP answered; no conflict events matched."
-                  />
+                  isMissingUcdpToken(geopoliticalData?.ucdpError ?? null) ? (
+                    /*
+                      A missing credential is not a collection failure and is
+                      certainly not a finding that no armed conflict occurred.
+                      It has one specific remedy, so it gets its own panel that
+                      names the variable and links to where the token is entered.
+                    */
+                    <div className="rounded border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-4 text-[10px]">
+                      <div className="font-bold uppercase text-[#F59E0B]">
+                        UCDP access token not configured
+                      </div>
+                      <p className="mt-1 leading-relaxed text-[#94A3B8]">
+                        UCDP GED returns HTTP 401 without one, so no events could be requested.
+                        <strong className="text-[#F59E0B]">
+                          {" "}
+                          This is a missing credential, not a finding that no conflicts occurred.
+                        </strong>
+                      </p>
+                      <ul className="mt-2 space-y-1 text-[#64748B]">
+                        <li>
+                          Set <code className="text-[#06B6D4]">UCDP_API_TOKEN</code> in the
+                          deployment environment (the durable path), or
+                        </li>
+                        <li>
+                          add a UCDP token on{" "}
+                          <Link to="/settings" className="text-[#3B82F6] hover:underline">
+                            Settings
+                          </Link>{" "}
+                          and press Verify — the provider and its live probe already exist there.
+                        </li>
+                        <li>
+                          Request a token at{" "}
+                          <a
+                            href="https://ucdp.uu.se/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#3B82F6] hover:underline"
+                          >
+                            ucdp.uu.se
+                          </a>
+                          .
+                        </li>
+                      </ul>
+                    </div>
+                  ) : (
+                    <CollectorAbsence
+                      error={geopoliticalData?.ucdpError ?? null}
+                      loading={isLoading}
+                      emptyLabel="UCDP answered; no conflict events matched."
+                    />
+                  )
                 ) : (
                   filteredUcdp.map((event: any, idx: number) => (
                     <div

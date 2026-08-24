@@ -100,6 +100,76 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "isSha256",
     "HASH_MEANING",
   ],
+  // The single owner of the `sentinel_evidence` key. Two files used to write it
+  // with two independently-declared shapes; if either half of this is dropped,
+  // that duplication comes straight back.
+  "src/utils/evidence-store.ts": [
+    "EVIDENCE_KEY",
+    "withoutSeeded",
+    "getEvidence",
+    "saveEvidence",
+    "appendEvidence",
+    "deleteEvidence",
+    "setEvidenceCase",
+    "nextEvidenceId",
+  ],
+  "src/utils/investigations-store.ts": [
+    "INVESTIGATIONS_CHANGED_EVENT",
+    "getInvestigations",
+    "saveInvestigations",
+    "createInvestigation",
+    "deleteInvestigation",
+    "pinToInvestigation",
+    "pinToInvestigationWithId",
+    "removeEvidence",
+    "updateAnalystNotes",
+    "caseMetrics",
+    "sourcesFromEvidence",
+  ],
+  "src/utils/bookmark-store.ts": [
+    "BOOKMARK_KEY",
+    "migrateBookmarks",
+    "getBookmarks",
+    "saveBookmarks",
+    "isBookmarked",
+    "toggleBookmark",
+    "removeBookmark",
+    "setBookmarkCase",
+    "shortlisted",
+    "pinnedBookmarks",
+  ],
+  "src/utils/live-filters.ts": [
+    "DATE_WINDOWS",
+    "DEFAULT_WINDOW_ID",
+    "windowHours",
+    "withinWindow",
+    "WINDOW_REACH_NOTE",
+  ],
+  // Module 2's graph layer. `layoutGraph` must stay deterministic and
+  // `COOCCURRENCE_CAVEAT` must stay on screen — see the module header.
+  "src/utils/graph-build.ts": [
+    "ENTITY_TYPES",
+    "normaliseEntityType",
+    "entityKey",
+    "buildEntityGraph",
+    "degreeCentrality",
+    "shortestPath",
+    "layoutGraph",
+    "iterationsFor",
+    "nodeRadius",
+    "DEFAULT_MAX_NODES",
+    "COOCCURRENCE_CAVEAT",
+  ],
+  "src/utils/watchlist-store.ts": [
+    "WATCHLIST_KEY",
+    "migrateWatchlists",
+    "getWatchlists",
+    "saveWatchlists",
+    "createWatchlist",
+    "deleteWatchlist",
+    "getWatchlistMatches",
+    "bucketMatchesByHour",
+  ],
   "src/utils/credential-vault.ts": [
     "CREDENTIAL_PROVIDERS",
     "CredentialVaultError",
@@ -194,6 +264,18 @@ const REQUIRED_EXPORTS: Record<string, string[]> = {
     "parseVttSegments",
     "parseTimedTextXml",
     "parseSubtitleBody",
+  ],
+  // Added 2026-08-17 when the limiter was wired into the server-function chain.
+  // These are the only path by which any inbound request is throttled, so a
+  // deletion here silently removes the control rather than breaking a feature —
+  // exactly the failure mode this audit exists to catch.
+  "src/utils/rate-limit-runtime.ts": [
+    "rateLimitDecision",
+    "describeDenial",
+    "rateLimitConfig",
+    "rateLimitState",
+    "rateLimitStatus",
+    "resetRateLimitRuntime",
   ],
 };
 

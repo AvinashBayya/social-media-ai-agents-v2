@@ -47,6 +47,15 @@ export interface WatchlistMatch {
   severity: "low" | "medium" | "high" | "critical" | null;
 }
 
+/**
+ * Fixed creation date for the seeded filters.
+ *
+ * This was `new Date().toISOString()` evaluated at MODULE SCOPE, so both sample
+ * watchlists always claimed to have been created the moment the page loaded —
+ * a demonstration record asserting it was made seconds ago, every single load.
+ */
+const SEED_CREATED_AT = "2026-08-06T00:00:00.000Z";
+
 const DEFAULT_WATCHLISTS: Watchlist[] = [
   {
     id: "wl-1",
@@ -63,8 +72,11 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
       hashtags: ["#ElectionIntegrity", "#OSINT", "#cybersecurity"],
       socialAccounts: ["@osint_watch", "@OSINTdefender"],
     },
-    riskScore: 78,
-    createdAt: new Date().toISOString(),
+    // Was 78. Nothing computes a watchlist risk score — `createWatchlist` sets
+    // null for exactly that reason — so a seeded 78 asserted a measurement the
+    // system has no way to produce.
+    riskScore: null,
+    createdAt: SEED_CREATED_AT,
   },
   {
     id: "wl-2",
@@ -82,20 +94,69 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
       hashtags: ["#AsterMotors", "#FintechBreach"],
       socialAccounts: ["@AsterMotors"],
     },
-    riskScore: 42,
-    createdAt: new Date().toISOString(),
+    // Was 42, for the same reason as above.
+    riskScore: null,
+    createdAt: SEED_CREATED_AT,
   },
 ];
 
+export const WATCHLIST_KEY = "sentinel_watchlists";
+
+/**
+ * Bumped when the shape changes. v2 removes the invented risk scores.
+ *
+ * Changing `DEFAULT_WATCHLISTS` alone was NOT enough, and this is why: the
+ * defaults are written to storage on the first ever load and read back from
+ * storage on every load after. So a fresh browser picked up the corrected
+ * `riskScore: null`, while every browser that had already opened the app — the
+ * demo machine included — kept the seeded 78 and 42 and went on rendering
+ * "78/100" and "42/100" on /subjects and /watchlists. The fabrication survived
+ * exactly where it mattered.
+ */
+const WATCHLIST_VERSION_KEY = "sentinel_watchlists_version";
+const WATCHLIST_VERSION = "2";
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Bring stored watchlists onto v2.
+ *
+ * **Migrates, never wipes** — analyst-created watchlists live under the same key
+ * and must survive. The only field touched is `riskScore`, and it is nulled
+ * unconditionally rather than only for the two seeded ids: nothing in this
+ * system has ever computed a watchlist risk score, so any non-null value in
+ * storage is by definition invented, whatever record it sits on.
+ *
+ * Exported so the migration is testable without a browser, matching
+ * `withoutSeeded` in evidence-store.ts and `migrateBookmarks` in
+ * bookmark-store.ts.
+ */
+export function migrateWatchlists(raw: unknown): Watchlist[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((w): w is Watchlist => isRecord(w) && typeof w.id === "string")
+    .map((w) => (w.riskScore === null ? w : { ...w, riskScore: null }));
+}
+
 export function getWatchlists(): Watchlist[] {
   if (typeof window === "undefined") return DEFAULT_WATCHLISTS;
-  const store = localStorage.getItem("sentinel_watchlists");
+  const store = localStorage.getItem(WATCHLIST_KEY);
   if (!store) {
-    localStorage.setItem("sentinel_watchlists", JSON.stringify(DEFAULT_WATCHLISTS));
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(DEFAULT_WATCHLISTS));
+    localStorage.setItem(WATCHLIST_VERSION_KEY, WATCHLIST_VERSION);
     return DEFAULT_WATCHLISTS;
   }
   try {
-    return JSON.parse(store);
+    const parsed = JSON.parse(store);
+    if (localStorage.getItem(WATCHLIST_VERSION_KEY) !== WATCHLIST_VERSION) {
+      const migrated = migrateWatchlists(parsed);
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(migrated));
+      localStorage.setItem(WATCHLIST_VERSION_KEY, WATCHLIST_VERSION);
+      return migrated;
+    }
+    return Array.isArray(parsed) ? parsed : DEFAULT_WATCHLISTS;
   } catch {
     return DEFAULT_WATCHLISTS;
   }
@@ -103,7 +164,8 @@ export function getWatchlists(): Watchlist[] {
 
 export function saveWatchlists(list: Watchlist[]) {
   if (typeof window !== "undefined") {
-    localStorage.setItem("sentinel_watchlists", JSON.stringify(list));
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+    localStorage.setItem(WATCHLIST_VERSION_KEY, WATCHLIST_VERSION);
   }
 }
 
@@ -271,4 +333,86 @@ export function getWatchlistMatches(
     return Number.isFinite(t) ? t : -Infinity;
   };
   return matches.sort((a, b) => ts(b.date) - ts(a.date));
+}
+
+// ─── Match timeline ────────────────────────────────────────────────────────
+
+export interface MatchHourBucket {
+  /** ISO timestamp of the start of this hour. */
+  hourStart: string;
+  /** Axis label, e.g. "14:00". */
+  label: string;
+  /** Matches whose reported publication time falls in this hour. */
+  matches: number;
+}
+
+export interface MatchTimeline {
+  buckets: MatchHourBucket[];
+  /** Matches carrying a parseable date. Only these can be plotted. */
+  dated: number;
+  /** Matches with no reported date. They appear in no bucket, by design. */
+  undated: number;
+  /** Dated, but published outside the plotted window. */
+  outsideWindow: number;
+  total: number;
+}
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * Real hourly distribution of watchlist matches.
+ *
+ * This replaces a fabricated series. The previous chart was seven fixed labels
+ * ("12:00" … "18:00") whose values came from the loop index —
+ * `threats: Math.max(2, Math.round(baseVal * 0.4 + ((idx * 2) % 5)))` and
+ * `scans: Math.round(150 + idx * 12 + ((idx * idx * 3) % 25))` — with a floor of
+ * 5 so the chart never rendered empty even when nothing had matched. Its own
+ * comment called it "chart mock trend points". Nothing in this system performs
+ * "scans", so that second series measured nothing at all.
+ *
+ * Here every column is a count of real matches at the time the upstream reported
+ * publishing them. Matches with no reported date are counted separately and
+ * plotted nowhere — an unreported time is not a time.
+ */
+export function bucketMatchesByHour(
+  matches: WatchlistMatch[],
+  nowMs: number,
+  hours = 24,
+): MatchTimeline {
+  const span = Math.max(1, Math.floor(hours));
+  // Align to the top of the hour containing `now` so bucket edges are stable
+  // across renders within the same hour.
+  const end = Math.floor(nowMs / HOUR_MS) * HOUR_MS + HOUR_MS;
+  const start = end - span * HOUR_MS;
+
+  const counts = new Array<number>(span).fill(0);
+  let dated = 0;
+  let undated = 0;
+  let outsideWindow = 0;
+
+  for (const m of matches) {
+    const t = m.date ? new Date(m.date).getTime() : NaN;
+    if (!Number.isFinite(t)) {
+      undated += 1;
+      continue;
+    }
+    dated += 1;
+    const idx = Math.floor((t - start) / HOUR_MS);
+    if (idx < 0 || idx >= span) {
+      outsideWindow += 1;
+      continue;
+    }
+    counts[idx] += 1;
+  }
+
+  const buckets: MatchHourBucket[] = counts.map((n, i) => {
+    const at = new Date(start + i * HOUR_MS);
+    return {
+      hourStart: at.toISOString(),
+      label: `${String(at.getHours()).padStart(2, "0")}:00`,
+      matches: n,
+    };
+  });
+
+  return { buckets, dated, undated, outsideWindow, total: matches.length };
 }

@@ -20,3 +20,10 @@ data/
 # (~650MB when populated) to the ACR build service on every frontend deploy, the
 # same class of mistake data/credentials.json made before it was excluded above.
 ai-service/
+
+# osint-workers/ is the self-hosted OSINT tool stack (SpiderFoot, theHarvester,
+# SearXNG, IVRE). It runs locally in WSL via its own docker-compose, on its own
+# host, and is never part of the frontend image — same reason ai-service/ and
+# data/ are excluded above. Without this, `COPY . .` would upload the whole
+# stack into the ACR build service on every frontend deploy.
+osint-workers/

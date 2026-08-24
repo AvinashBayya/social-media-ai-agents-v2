@@ -43,22 +43,29 @@ function TasksPage() {
   const [selfTestLog, setSelfTestLog] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
 
+  /*
+   * These four inputs shipped prefilled with invented material — "TASS News", a
+   * paragraph about a "Vector-17 cyber operative cluster" near a Moscow
+   * spaceport, "@disinfo_pulse" and "capture_drone_exif.jpg". None of it exists.
+   * This is the page an evaluator opens to check PS-18 compliance, so fictional
+   * subjects sitting in the boxes are the last thing it should carry. They are
+   * now empty, with the format shown as a placeholder instead.
+   */
+
   // Module 1 state
-  const [mod1Source, setMod1Source] = useState("TASS News");
+  const [mod1Source, setMod1Source] = useState("");
   const [mod1Result, setMod1Result] = useState<any>(null);
 
   // Module 2 state
-  const [mod2Text, setMod2Text] = useState(
-    "Security breach detected near Moscow spaceport nodes by Vector-17 cyber operative cluster. Technical reports suggest malware coordinates linked to C2 blocklists.",
-  );
+  const [mod2Text, setMod2Text] = useState("");
   const [mod2Result, setMod2Result] = useState<any>(null);
 
   // Module 3 state
-  const [mod3Handle, setMod3Handle] = useState("@disinfo_pulse");
+  const [mod3Handle, setMod3Handle] = useState("");
   const [mod3Result, setMod3Result] = useState<any>(null);
 
   // Module 4 state
-  const [mod4FileName, setMod4FileName] = useState("capture_drone_exif.jpg");
+  const [mod4FileName, setMod4FileName] = useState("");
   const [mod4Result, setMod4Result] = useState<any>(null);
 
   /**
@@ -451,6 +458,7 @@ function TasksPage() {
                   <Input
                     value={mod1Source}
                     onChange={(e) => setMod1Source(e.target.value)}
+                    placeholder="e.g. reuters.com"
                     className="h-8 text-[11px] border-console-border bg-console-deep text-console-text rounded"
                   />
                 </div>
@@ -540,13 +548,15 @@ function TasksPage() {
                   <Textarea
                     value={mod2Text}
                     onChange={(e) => setMod2Text(e.target.value)}
+                    placeholder="Paste real open-source reporting to analyse. This box shipped prefilled with an invented incident; it now starts empty."
                     className="min-h-20 text-[10.5px] border-console-border bg-console-deep text-console-text rounded font-mono"
                   />
                 </div>
 
                 <Button
                   onClick={evaluateModule2}
-                  className="h-7 bg-console-cyan hover:bg-console-cyan/90 text-console-text font-mono text-[9px] uppercase px-3 rounded"
+                  disabled={!mod2Text.trim()}
+                  className="h-7 bg-console-cyan hover:bg-console-cyan/90 text-console-text font-mono text-[9px] uppercase px-3 rounded disabled:opacity-40"
                 >
                   Analyze Text
                 </Button>

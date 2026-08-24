@@ -20,6 +20,9 @@ import { fetchNews } from "./news";
 import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
 import { clusterStories, type Article } from "@/utils/analysis";
 import { bandFor, defaultFactors, scoreCorpus, type CredibilityScore } from "@/utils/credibility";
+// Single source for the merge key. /graph and this page must key entities
+// identically, or one corpus produces two different merged sets on two pages.
+import { entityKey } from "@/utils/graph-build";
 
 /**
  * Entity Explorer — Module 2, entity extraction over the live corpus.
@@ -83,20 +86,19 @@ interface AggregatedEntity {
   bestCredibility: number | null;
 }
 
-/** Case- and punctuation-insensitive key, so "IAF" and "I.A.F." merge. */
-function entityKey(name: string): string {
-  // Unicode property escapes rather than a hand-rolled range. The previous class
-  // was `[^a-z0-9<U+0900>-<U+0DFF>]`, which had two problems: it opened on a
-  // combining mark that renders as an invisible or dotted-circle glyph in source
-  // and so could not be verified by eye, and the range covers Devanagari through
-  // Sinhala only. Urdu is written in Arabic script (U+0600-U+06FF) and is one of
-  // this application's 15 supported languages, so every Urdu entity name was
-  // stripped to an empty key and silently merged with every other one.
-  //
-  // \p{L}\p{N} keeps letters and digits in ANY script and drops punctuation,
-  // which is exactly what "case- and punctuation-insensitive" was meant to say.
-  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-}
+/*
+ * `entityKey` moved to utils/graph-build.ts and is imported above.
+ *
+ * It briefly existed in both places — here and there — which is the exact
+ * duplication-drift the evidence store work removed elsewhere in the same
+ * session. It matters more than most: the function carries a load-bearing fix
+ * (the old character class covered Devanagari through Sinhala only, so every
+ * Urdu name, written in Arabic script, was stripped to an empty key and merged
+ * into one node). Two copies means one of them eventually loses that fix.
+ *
+ * /graph and /entities must key entities identically or the same corpus
+ * produces two different sets of merged entities on two pages.
+ */
 
 function Page() {
   // Empty on both server and first client render — getActiveTarget() reads

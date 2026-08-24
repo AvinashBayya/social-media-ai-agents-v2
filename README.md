@@ -9,7 +9,7 @@ sponsored by the Indian Air Force. Stage: **pre-selection demo**.
 
 ## Deployed state
 
-- **Live URL**: `sentinel-web.livelyfield-6aea41cd.centralindia.azurecontainerapps.io`
+- **Runs locally.** There is no hosted deployment — Azure was removed 2026-08-20.
 - **Version**: `v25` / revision `sentinel-web--0000023`
 - **Tests**: 653 JS/TS unit tests passing · `tsc --noEmit` clean · 151 core exports verified
 - **Git**: `origin/main` at `1e944d4`
@@ -19,7 +19,7 @@ sponsored by the Indian Air Force. Stage: **pre-selection demo**.
 - TanStack Start 1.168 (SSR), React 19, TypeScript, Vite 8, Bun
 - Tailwind 4, shadcn/ui
 - 33 routes under `src/routes/`, i18n across 15 Indian languages
-- Deployed to Azure Container Apps (Central India) as a Node server container
+- Runs as a Node server container (`node:22-alpine`); no cloud coupling in the app
 
 ## PS-18 Modules
 
@@ -94,26 +94,33 @@ bun scripts/fabrication-check.ts  # must exit 0 (no invented data)
 Copy the LLM variables above into `.env` (gitignored) before running. Without them the AI
 features report "AI unavailable" rather than returning fabricated output.
 
-## Container / Azure deployment
+## Running it
+
+There is no hosted deployment. **Azure was removed 2026-08-20** — the subscription was
+disabled, the Container Apps environment suspended, and every Azure resource is gone. Do not
+run `az`.
 
 ```sh
-# Build image in Azure Container Registry (no local Docker required)
-az acr build --registry sentinelacr4821 --image sentinel-web:vXX --no-logs .
+bun install
+bun run dev                                # dev server
 
-# Deploy
-az containerapp update -g rg-sentinel-demo -n sentinel-web \
-  --image sentinelacr4821.azurecr.io/sentinel-web:vXX
-
-# Push source
-git add -A && git commit -m "..." && git push origin main
+# or the production build, which is what the container runs
+bun run build && node .output/server/index.mjs
 ```
 
-> ⚠️ The Azure CLI crashes while streaming build logs on Windows (`cp1252` encoding error).
-> This is client-side log streaming only — the remote build still completes.
-> Always verify with:
-> `az acr repository show -n sentinelacr4821 --image sentinel-web:<tag> --query createdTime`
+The OSINT tool stack (SpiderFoot, theHarvester, SearXNG, IVRE) runs beside it:
 
-The image runs on `node:22-alpine`, serving `.output/server/index.mjs` on port 3000.
-`data/` is excluded from the build context (`.dockerignore`) and is not a mounted volume —
-vault credentials do not survive a replica restart; use Key Vault `secretref:` env vars
-for anything that must persist.
+```sh
+docker compose -f osint-workers/docker-compose.yml up -d
+```
+
+`bash preflight.sh` checks the toolchain. Docker is required — it used to be optional only
+because builds ran in the cloud.
+
+**The app has no cloud coupling.** The Dockerfile targets plain `node:22-alpine` serving
+`.output/server/index.mjs` on port 3000, and the only Azure reference that was ever in `src/`
+was a doc comment. Choosing a host later is a config decision, not a port.
+
+`data/`, `ai-service/` and `osint-workers/` are excluded from the Docker build context
+(`.dockerignore`) — the build stage does `COPY . .`, and `data/credentials.json` is an
+operator credential store in cleartext.
