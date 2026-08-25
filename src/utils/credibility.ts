@@ -334,7 +334,7 @@ function computeDomainTier(article: Article, options?: FactorOptions): FactorRes
   }
   return {
     score: TIER_SCORES[entry.tier],
-    evidence: `${domain} is listed as ${entry.tier.replace("_", " ")} (${entry.type}), scoring ${TIER_SCORES[entry.tier].toFixed(2)}.`,
+    evidence: `${domain} is listed as ${entry.tier.replace("_", " ")} (${entry.type}), scoring ${Math.round(TIER_SCORES[entry.tier] * 100)}%.`,
     confidence: 0.9,
   };
 }
@@ -631,9 +631,9 @@ export function defaultFactors(): CredibilityFactor[] {
       id: "custom_keyword",
       name: "Custom criterion",
       description:
-        "Analyst-defined keyword lists that raise or lower the score, e.g. lower on 'unconfirmed' or 'sources say'. Ships empty and disabled — define your own criterion in the panel.",
+        "Analyst-defined keyword lists that raise or lower the score. Ships enabled with a starter hedging-language list (lower on 'unconfirmed', 'sources say', 'reportedly', 'rumour') — edit or clear it in the panel to define your own criterion. With no keywords at all this returns no value rather than a score.",
       weight: 0.1,
-      enabled: false,
+      enabled: true,
       requiresLlm: false,
       compute: (a, c, o) => computeCustomKeyword(a, c, o),
     },
@@ -760,7 +760,7 @@ function explain(
     ? ` ${skipped.length} factor${skipped.length === 1 ? "" : "s"} skipped.`
     : "";
   const body = clauses.length ? `: ${clauses.join(", ")}` : "";
-  return `${band.charAt(0).toUpperCase() + band.slice(1)} credibility (${score.toFixed(2)})${body}.${skippedNote}`;
+  return `${band.charAt(0).toUpperCase() + band.slice(1)} credibility (${Math.round(score * 100)}%)${body}.${skippedNote}`;
 }
 
 export function scoreArticle(
@@ -877,7 +877,10 @@ export function builtinProfiles(): WeightProfile[] {
       id: "default",
       name: "Default",
       settings: settingsFrom(base),
-      customKeywords: { raise: [], lower: [] },
+      // Same starter hedging-language list "Breaking news" already ships —
+      // promoted here too so custom_keyword (enabled by default above) has
+      // real criteria to score against out of the box, not an empty list.
+      customKeywords: { raise: [], lower: ["unconfirmed", "sources say", "reportedly", "rumour"] },
       builtin: true,
     },
     {
@@ -891,7 +894,7 @@ export function builtinProfiles(): WeightProfile[] {
         citation_depth: { weight: 0.05, enabled: true },
         recency: { weight: 0.25, enabled: true },
         source_diversity: { weight: 0.15, enabled: true },
-        custom_keyword: { weight: 0.1, enabled: false },
+        custom_keyword: { weight: 0.1, enabled: true },
         linguistic_markers: { weight: 0.15, enabled: false },
       },
       customKeywords: { raise: [], lower: ["unconfirmed", "sources say", "reportedly", "rumour"] },
@@ -907,10 +910,10 @@ export function builtinProfiles(): WeightProfile[] {
         citation_depth: { weight: 0.35, enabled: true },
         recency: { weight: 0.05, enabled: true },
         source_diversity: { weight: 0.15, enabled: true },
-        custom_keyword: { weight: 0.1, enabled: false },
+        custom_keyword: { weight: 0.1, enabled: true },
         linguistic_markers: { weight: 0.15, enabled: false },
       },
-      customKeywords: { raise: [], lower: [] },
+      customKeywords: { raise: [], lower: ["unconfirmed", "sources say", "reportedly", "rumour"] },
       builtin: true,
     },
   ];
