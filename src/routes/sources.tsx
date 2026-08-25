@@ -352,6 +352,12 @@ function SourcesPage() {
     if (kwSide === "raise") setKeywordsRaise((p) => Array.from(new Set([...p, k])));
     else setKeywordsLower((p) => Array.from(new Set([...p, k])));
     setKwDraft("");
+    // Mirrors handleRunToneAssessment's auto-enable of linguistic_markers: a
+    // defined keyword that never gets switched on is scoring that looks partial
+    // for no reason the analyst can see.
+    setFactors((prev) =>
+      prev.map((f) => (f.id === "custom_keyword" ? { ...f, enabled: true } : f)),
+    );
   };
 
   const disabled = factors.filter((f) => !f.enabled);
@@ -361,7 +367,7 @@ function SourcesPage() {
     <AppShell>
       <PageHeader
         title="Source Credibility"
-        description="PS-18 Module 1 — credibility scored on analyst-defined factors. Every score carries a per-factor breakdown; nothing is computed by an LLM in this view."
+        description="PS-18 Module 1 — credibility scored on analyst-defined factors. Every score carries a per-factor breakdown; six factors are deterministic, and Linguistic markers is model-backed, computed only when you explicitly run it on this corpus."
       />
 
       <div className="grid gap-4 p-6 lg:grid-cols-[360px_1fr]">
@@ -394,7 +400,7 @@ function SourcesPage() {
                   </span>
                   <div className="flex items-center gap-2">
                     <span className={`font-mono text-[10px] ${f.enabled ? MUTED : DIM}`}>
-                      {f.weight.toFixed(2)}
+                      {Math.round(f.weight * 100)}%
                     </span>
                     <Switch
                       checked={f.enabled}
@@ -445,6 +451,11 @@ function SourcesPage() {
                 onClick={() => {
                   setFactors(defaultFactors());
                   setActiveProfileId("default");
+                  // Reset previously left keywords untouched — a stale custom
+                  // criterion silently surviving a "reset to Default" click.
+                  const def = builtinProfiles().find((p) => p.id === "default");
+                  setKeywordsRaise(def?.customKeywords.raise ?? []);
+                  setKeywordsLower(def?.customKeywords.lower ?? []);
                 }}
                 className="h-7 flex-1 rounded bg-console-elevated font-mono text-[9px] text-console-muted hover:bg-console-border"
               >
@@ -508,7 +519,7 @@ function SourcesPage() {
                     <div className="font-mono text-[9px] text-console-text">
                       <span className="font-bold">{domainKey}</span>{" "}
                       <span className={DIM}>
-                        · {entry.tier} ({TIER_SCORES[entry.tier].toFixed(2)})
+                        · {entry.tier} ({Math.round(TIER_SCORES[entry.tier] * 100)}%)
                       </span>
                     </div>
                     <Button
@@ -559,8 +570,10 @@ function SourcesPage() {
           <Card className={`${CARD} space-y-2 p-4`}>
             <span className="font-mono text-xs font-bold text-console-text">Custom criterion</span>
             <p className={`font-mono text-[9px] leading-relaxed ${DIM}`}>
-              PS-18 asks for user-defined criteria. Define keywords that raise or lower the score.
-              The factor stays skipped until at least one keyword exists.
+              PS-18 asks for user-defined criteria. Starts with a default hedging-language list
+              (lower on "unconfirmed", "sources say", "reportedly", "rumour") — remove, edit, or
+              add to it below to define your own. Clearing every keyword returns this factor to
+              no value rather than a score.
             </p>
             <div className="flex gap-1">
               <select
@@ -621,12 +634,25 @@ function SourcesPage() {
           {disabled.length > 0 && (
             <Card className={`${CARD} flex items-start gap-2 p-3`}>
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-console-amber" />
-              <span className="font-mono text-[10px] leading-relaxed text-console-amber">
-                <span className="font-bold">Partial scoring.</span> {disabled.length} factor
-                {disabled.length === 1 ? " is" : "s are"} disabled (
-                {disabled.map((f) => f.name).join(", ")}). Scores below are computed from the
-                remaining factors only.
-              </span>
+              <div className="space-y-1 font-mono text-[10px] leading-relaxed text-console-amber">
+                <span>
+                  <span className="font-bold">Partial scoring.</span> {disabled.length} factor
+                  {disabled.length === 1 ? " is" : "s are"} disabled. Scores below are computed
+                  from the remaining factors only.
+                </span>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {disabled.map((f) => (
+                    <li key={f.id}>
+                      <span className="font-bold">{f.name}:</span>{" "}
+                      {f.id === "linguistic_markers"
+                        ? 'run "Analyze Tone with AI" below to enable it.'
+                        : f.id === "custom_keyword"
+                          ? "add a raise or lower keyword below — it enables itself on the first one."
+                          : "switch it on in the factor panel to include it."}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </Card>
           )}
 
@@ -688,7 +714,7 @@ function SourcesPage() {
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <Badge className={`text-[10px] ${TONE[band.tone]}`}>
-                      {s.score === null ? "—" : s.score.toFixed(2)} {band.label}
+                      {s.score === null ? "—" : `${Math.round(s.score * 100)}%`} {band.label}
                     </Badge>
                     <div className="h-1 w-20 overflow-hidden rounded bg-console-deep">
                       <div
@@ -697,7 +723,7 @@ function SourcesPage() {
                       />
                     </div>
                     <span className={`font-mono text-[9px] ${DIM}`}>
-                      conf {s.confidence.toFixed(2)}
+                      conf {Math.round(s.confidence * 100)}%
                     </span>
                   </div>
                 </button>
@@ -714,9 +740,9 @@ function SourcesPage() {
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-mono text-[10px] text-console-text">{b.name}</span>
                           <span className={`font-mono text-[9px] ${MUTED}`}>
-                            raw {b.rawScore.toFixed(2)} × weight {b.weight.toFixed(2)} ={" "}
+                            raw {Math.round(b.rawScore * 100)}% × weight {Math.round(b.weight * 100)}% ={" "}
                             <span className="font-bold text-console-cyan">
-                              {b.contribution.toFixed(3)}
+                              {(b.contribution * 100).toFixed(1)}%
                             </span>
                           </span>
                         </div>

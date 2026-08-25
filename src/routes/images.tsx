@@ -60,6 +60,7 @@ import {
   type AiOcrVlmResult,
 } from "@/utils/ai-service-client";
 import { PinButton } from "@/components/pin-button";
+import { takeFileHandoff } from "@/utils/file-handoff";
 import { aiExtractEntities, type AnalysisEntity } from "@/utils/analysis-llm";
 import { getActiveTarget } from "@/utils/active-target";
 import {
@@ -465,6 +466,16 @@ function Page() {
       if (analysis?.previewUrl.startsWith("blob:")) URL.revokeObjectURL(analysis.previewUrl);
     };
   }, [analysis?.previewUrl]);
+
+  // A file dropped on the global search bar's "Continue in Image
+  // Intelligence" action hands off here — see file-handoff.ts. In-memory
+  // only (a File can't be persisted to localStorage), so this only fires
+  // once, right after that navigation.
+  useEffect(() => {
+    const handoff = takeFileHandoff();
+    if (handoff) analyse(handoff.file, handoff.file.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const analyse = useCallback(async (source: File | Blob | string, name: string) => {
     setError("");

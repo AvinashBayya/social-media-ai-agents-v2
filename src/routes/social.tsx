@@ -27,6 +27,7 @@ import {
   Tag,
   KeyRound,
   Sparkles,
+  Gauge,
 } from "lucide-react";
 import {
   JetstreamClient,
@@ -53,7 +54,18 @@ import {
   MIN_OBSERVATION_MINUTES,
   type CibCluster,
 } from "@/utils/cib";
-import { assessSocialCorpus } from "@/utils/social-credibility";
+import {
+  assessSocialCorpus,
+  buildSocialContext,
+  postsToArticles,
+  socialFactors,
+} from "@/utils/social-credibility";
+import {
+  scoreCorpus,
+  defaultFactors,
+  bandFor,
+  type CredibilityScore,
+} from "@/utils/credibility";
 import { PinButton } from "@/components/pin-button";
 import { ManualCapturePanel } from "@/components/manual-capture-panel";
 import { CredentialNotice } from "@/components/credential-notice";
@@ -101,6 +113,14 @@ function loadMonitors(): Monitor[] {
 
 const CARD = "bg-console-surface border-console-border";
 
+/** Matches sources.tsx's own credibility-badge tone convention, for the same visual language across both pages. */
+const SCORE_TONE: Record<string, string> = {
+  high: "border-console-green/30 bg-console-green/10 text-console-green",
+  medium: "border-console-amber/30 bg-console-amber/10 text-console-amber",
+  low: "border-console-red/30 bg-console-red/10 text-console-red",
+  unknown: "border-console-label/30 bg-console-label/10 text-console-muted",
+};
+
 function Sparkline({ values }: { values: number[] }) {
   const shown = values.slice(-40);
   const max = Math.max(1, ...shown);
@@ -141,6 +161,12 @@ function SocialPage() {
   const [cibError, setCibError] = useState("");
   const [openCluster, setOpenCluster] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<BlueskyProfile[]>([]);
+  // Module 1's account_maturity/cib_signals factors (social-credibility.ts)
+  // were fully implemented but never actually invoked anywhere — computed
+  // in the same pass as CIB clustering below, since both need the same
+  // resolved profiles.
+  const [socialScores, setSocialScores] = useState<CredibilityScore[] | null>(null);
+  const [openScoredPost, setOpenScoredPost] = useState<string | null>(null);
 
   const [pullTarget, setPullTarget] = useState("");
   const [pullBusy, setPullBusy] = useState<"reddit" | "telegram" | "mastodon" | null>(null);
@@ -502,9 +528,24 @@ function SocialPage() {
       setCibClusters(
         [...withProfiles].sort((a, b) => (b.compositeScore ?? -1) - (a.compositeScore ?? -1)),
       );
+
+      // Module 1 credibility scoring for these same posts, using the
+      // cluster/profile pass just computed above rather than re-fetching
+      // anything. domain_tier is bypassed for social posts (the platform is
+      // a host, not a publisher) and account_maturity/cib_signals — real
+      // factors that existed in social-credibility.ts but were never wired
+      // into an actual scoring call anywhere — take its place.
+      const socialContext = buildSocialContext(window_, withProfiles, fetched, Date.now());
+      const socialArticles = postsToArticles(window_);
+      setSocialScores(
+        scoreCorpus(socialArticles, [...defaultFactors(), ...socialFactors()], {
+          social: socialContext,
+        }),
+      );
     } catch (err: any) {
       setCibError(err?.message ?? String(err));
       setCibClusters(null);
+      setSocialScores(null);
     } finally {
       setCibBusy(false);
     }
@@ -1459,6 +1500,112 @@ function SocialPage() {
                     <p className="mt-2 text-[10px] text-console-label">
                       {cibClusters.length - 12} further cluster(s) not shown; they scored below
                       those listed.
+                    </p>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className={CARD}>
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Gauge className="size-4 text-console-cyan" />
+                <h3 className="text-xs font-bold uppercase text-console-text">
+                  Module 1 credibility scoring
+                </h3>
+              </div>
+              <p className="mt-1 text-[10px] leading-relaxed text-console-label">
+                Same weighted scoring engine as Source Credibility, computed for these posts.
+                Domain reputation is bypassed for social sources — the platform is a host, not a
+                publisher — and replaced by real Account maturity and Coordination signal factors,
+                from the same profile/cluster pass "Analyse last {CIB_WINDOW}" above just ran.
+                Click that button to (re)compute.
+              </p>
+
+              {socialScores === null && (
+                <p className="mt-3 text-[11px] leading-relaxed text-console-label">
+                  Not yet run — click "Analyse last {CIB_WINDOW}" above. Scoring reuses that same
+                  pass rather than firing a second one.
+                </p>
+              )}
+
+              {socialScores !== null && socialScores.length === 0 && (
+                <p className="mt-3 text-[11px] text-console-label">
+                  No posts with usable text in the analysed window.
+                </p>
+              )}
+
+              {socialScores !== null && socialScores.length > 0 && (
+                <>
+                  <p className="mt-3 text-[10px] text-console-label">
+                    {socialScores.length} post(s) scored ·{" "}
+                    {socialScores.filter((s) => s.score !== null && s.score < 0.45).length} Low ·{" "}
+                    {profiles.length} profile(s) resolved for account maturity.
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {socialScores.slice(0, 12).map((s) => {
+                      const band = bandFor(s.score);
+                      const open = openScoredPost === s.article.id;
+                      return (
+                        <div
+                          key={s.article.id}
+                          className="rounded border border-console-border bg-console-deep/60 p-2"
+                        >
+                          <button
+                            onClick={() => setOpenScoredPost(open ? null : s.article.id)}
+                            className="flex w-full items-start gap-2 text-left"
+                          >
+                            {open ? (
+                              <ChevronDown className="mt-0.5 size-3.5 shrink-0 text-console-label" />
+                            ) : (
+                              <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-console-label" />
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-console-text">
+                              {s.article.source}: "{s.article.title}"
+                            </span>
+                            <Badge
+                              className={`shrink-0 text-[9px] font-normal ${SCORE_TONE[band.tone]}`}
+                            >
+                              {s.score === null ? "—" : `${Math.round(s.score * 100)}%`} {band.label}
+                            </Badge>
+                          </button>
+
+                          {open && (
+                            <div className="mt-2 space-y-1.5 pl-5">
+                              {s.breakdown.map((b) => (
+                                <div
+                                  key={b.id}
+                                  className="rounded border border-console-border bg-console-surface p-1.5"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold text-console-text">
+                                      {b.name}
+                                    </span>
+                                    <span className="font-mono text-[9px] text-console-cyan">
+                                      raw {Math.round(b.rawScore * 100)}% · contributes{" "}
+                                      {(b.contribution * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                  <p className="mt-0.5 text-[9px] leading-relaxed text-console-muted">
+                                    {b.evidence}
+                                  </p>
+                                </div>
+                              ))}
+                              {s.skipped.length > 0 && (
+                                <p className="text-[9px] text-console-label">
+                                  Skipped: {s.skipped.map((sk) => sk.name).join(", ")}.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {socialScores.length > 12 && (
+                    <p className="mt-2 text-[10px] text-console-label">
+                      {socialScores.length - 12} further post(s) scored, not shown.
                     </p>
                   )}
                 </>

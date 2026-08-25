@@ -24,6 +24,8 @@
  *     into Module 5's citation validator.
  */
 
+import type { ContainerIdentity, FileProvenanceKind, ProvenanceField, ProvenanceTimestamp } from "./file-provenance";
+
 export const EVIDENCE_KEY = "sentinel_evidence";
 
 /**
@@ -65,6 +67,19 @@ export interface EvidenceRecord {
    * writes it any more.
    */
   seeded?: true;
+  /**
+   * Extracted embedded file metadata (PDF/Word/image/video provenance).
+   * Never the file's bytes — see file-provenance.ts. Optional and additive:
+   * old records simply lack it, and this store does no schema validation on
+   * read, so no version bump was needed to add it.
+   */
+  provenance?: StoredFileProvenance | null;
+  /**
+   * When provenance extraction ran. null/absent means it never ran — a
+   * different thing from "it ran and the file carried nothing embedded" —
+   * so the two must stay distinguishable rather than both reading as blank.
+   */
+  provenanceExtractedAt?: string | null;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -152,4 +167,83 @@ export function nextEvidenceId(list: EvidenceRecord[]): string {
     .filter((n) => Number.isFinite(n));
   const next = used.length > 0 ? Math.max(...used) + 1 : 401;
   return `EVID-${String(next).padStart(4, "0")}`;
+}
+
+/**
+ * A JSON-safe, persistable slice of a FileProvenanceReport.
+ *
+ * Deliberately excludes `raw` (the XMP packet / core.xml dumps) — those can
+ * run to tens of KB and localStorage's ~5MB budget is already shared across
+ * this whole app (image hashes, investigations, graph snapshot, watchlists).
+ * The raw dump is view-only at analysis time; only its label and byte length
+ * survive into storage, and the UI says so (`rawOmitted: true`).
+ */
+export interface StoredFileProvenance {
+  kind: FileProvenanceKind;
+  container: ContainerIdentity;
+  fields: ProvenanceField[];
+  timestamps: ProvenanceTimestamp[];
+  rawOmitted: { label: string; byteLength: number }[];
+  errors: string[];
+  method: string;
+}
+
+export function toStoredFileProvenance(report: {
+  kind: FileProvenanceKind;
+  container: ContainerIdentity;
+  fields: ProvenanceField[];
+  timestamps: ProvenanceTimestamp[];
+  raw: { label: string; text: string }[];
+  errors: string[];
+  method: string;
+}): StoredFileProvenance {
+  return {
+    kind: report.kind,
+    container: report.container,
+    fields: report.fields,
+    timestamps: report.timestamps,
+    rawOmitted: report.raw.map((r) => ({ label: r.label, byteLength: new TextEncoder().encode(r.text).length })),
+    errors: report.errors,
+    method: report.method,
+  };
+}
+
+/**
+ * Build a real evidence record for an uploaded file, reused by both the
+ * search bar's file-provenance Sheet and (already) vault.tsx's own drop
+ * zone — one shared builder, so the two write paths can't diverge the way
+ * this store's own header documents `sentinel_evidence` once did.
+ */
+export function buildFileEvidenceRecord(input: {
+  fileName: string;
+  fileSize: number;
+  hash: string | null;
+  provenance: StoredFileProvenance | null;
+  provenanceExtractedAt: string | null;
+  typeLabel: string;
+  source: string;
+  existing: EvidenceRecord[];
+}): EvidenceRecord {
+  return {
+    id: nextEvidenceId(input.existing),
+    title: input.fileName,
+    type: input.typeLabel,
+    timestamp: new Date().toISOString(),
+    source: input.source,
+    hash: input.hash,
+    geo: "not recorded",
+    entities: [],
+    caseId: "",
+    risk: null,
+    tags: [],
+    fileSize: formatBytes(input.fileSize),
+    provenance: input.provenance,
+    provenanceExtractedAt: input.provenanceExtractedAt,
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

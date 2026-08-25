@@ -24,7 +24,7 @@
  * assessed is an invented measurement.
  */
 
-import { assessLanguageOf, LlmUnavailableError, type LanguageAssessment } from "./llm";
+import { llmAssessLanguage, LlmUnavailableError, type LanguageAssessment } from "./llm";
 import type { Article } from "./analysis";
 
 /**
@@ -68,7 +68,16 @@ export async function assessArticleLanguage(article: Article): Promise<LanguageA
         `so this is a collection limit rather than a property of the article.`,
     );
   }
-  return assessLanguageOf({ text });
+  // Must go through the createServerFn wrapper, not the raw assessLanguageOf:
+  // this module is imported by sources.tsx (a client route), and the plain
+  // function reads process.env for LLM credentials — undefined in the
+  // browser. Calling it directly here always failed with "No LLM provider
+  // configured", regardless of what was actually in .env, because it was
+  // running client-side, not on the server. Found 2026-08-24 while
+  // live-verifying Linguistic Markers actually completing on real corpora —
+  // llmAssessLanguage already existed and was even registered in
+  // rate-limit-tiers.ts, just never called from anywhere.
+  return llmAssessLanguage({ data: { text } });
 }
 
 /**

@@ -34,6 +34,9 @@ import {
   CircleUser,
   FolderLock,
   Radar,
+  Youtube,
+  UserCircle,
+  Paperclip,
 } from "lucide-react";
 import {
   Sidebar,
@@ -71,59 +74,96 @@ import {
 } from "@/utils/active-target";
 import { getInvestigations } from "@/utils/investigations-store";
 import { readGraphSnapshot } from "@/utils/graph-store";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { FileProvenanceReportList, type FileProvenanceItem } from "@/components/file-provenance-report";
+import { readFileProvenance, FILE_PROVENANCE_ACCEPT, FileProvenanceError } from "@/utils/file-provenance-client";
+import { setFileHandoff } from "@/utils/file-handoff";
+import {
+  getEvidence,
+  appendEvidence,
+  buildFileEvidenceRecord,
+  toStoredFileProvenance,
+} from "@/utils/evidence-store";
+import { sha256OfFile } from "@/utils/evidence";
+import { toast } from "sonner";
 import { getWatchlists } from "@/utils/watchlist-store";
 
+/**
+ * Grouped by the 5 PS-18 modules themselves (§6.1-6.5 — credibility, OSINT
+ * content analysis, social content analysis, image/video analysis, report+GIS
+ * output), not by build order. The previous "Module 1..5" labels were purely
+ * chronological (Dashboard/Settings/Tasks landed first, so they were "Module
+ * 1") and never actually corresponded to the problem statement's own module
+ * numbering — sources.tsx's own PageHeader already says "PS-18 Module 1",
+ * which is the real Module 1, and it was sitting in the old nav's "Module 2"
+ * bucket. Every page that existed before still exists; only the grouping and
+ * two previously-orphaned routes changed — see the two entries marked below.
+ *
+ * "Platform" holds what genuinely isn't module-specific: the landing
+ * dashboard, session/account pages, the compliance console, and Subjects
+ * (defines WHO/WHAT to investigate — an input to every module, not an
+ * analysis of one specific content type).
+ */
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Module 1",
+    label: "Platform",
     items: [
       { title: "Dashboard", to: "/", icon: LayoutDashboard },
-      { title: "Tasks", to: "/tasks", icon: ListChecks },
+      { title: "PS-18 Compliance", to: "/tasks", icon: ListChecks },
       { title: "Subjects", to: "/subjects", icon: Users },
-      { title: "Data Sources", to: "/sources", icon: Database },
-      { title: "AI Agents", to: "/agents", icon: Bot },
+      { title: "AI Assistant", to: "/agents", icon: Bot },
+      { title: "Alert Centre", to: "/alerts", icon: Bell },
+      // Previously reachable only by direct URL — no sidebar entry existed.
+      { title: "Operator Profile", to: "/profile", icon: UserCircle },
       { title: "Settings", to: "/settings", icon: SettingsIcon },
     ],
   },
   {
-    label: "Module 2",
+    label: "Module 1 — Source Credibility",
+    items: [
+      { title: "Source Credibility", to: "/sources", icon: Database },
+    ],
+  },
+  {
+    label: "Module 2 — Open-Source Content",
     items: [
       { title: "OSINT Intelligence", to: "/osint", icon: Globe2 },
       { title: "Recon & Dorks", to: "/recon", icon: Radar },
       { title: "News Intelligence", to: "/news", icon: Newspaper },
-      { title: "Knowledge Graph", to: "/graph", icon: Network },
-      { title: "Network Analysis", to: "/network", icon: GitBranch },
-      { title: "Timeline Explorer", to: "/timeline", icon: Clock },
       { title: "Entity Explorer", to: "/entities", icon: UserSearch },
+      { title: "Timeline Explorer", to: "/timeline", icon: Clock },
+      { title: "Trend Analytics", to: "/trends", icon: TrendingUp },
+      { title: "Sentiment Analytics", to: "/sentiment", icon: LineChart },
+      { title: "Threat Intel", to: "/threats", icon: ShieldAlert },
     ],
   },
   {
-    label: "Module 3",
+    label: "Module 3 — Social Media Content",
     items: [
       { title: "Social Intelligence", to: "/social", icon: Share2 },
       { title: "Live Monitoring", to: "/live", icon: Radio },
       { title: "Watchlists", to: "/watchlists", icon: Bookmark },
+      { title: "Network Analysis", to: "/network", icon: GitBranch },
       { title: "Crawler Status", to: "/crawlers", icon: Cpu },
-      { title: "Sentiment", to: "/sentiment", icon: LineChart },
-      { title: "Trends", to: "/trends", icon: TrendingUp },
     ],
   },
   {
-    label: "Module 4",
+    label: "Module 4 — Image & Video Analysis",
     items: [
       { title: "Image Intelligence", to: "/images", icon: ImageIcon },
       { title: "Video Intelligence", to: "/videos", icon: Video },
+      // Previously reachable only by direct URL — no sidebar entry existed.
+      { title: "YouTube Intelligence", to: "/youtube", icon: Youtube },
     ],
   },
   {
-    label: "Module 5",
+    label: "Module 5 — Report & GIS Output",
     items: [
-      { title: "GIS Intelligence", to: "/gis", icon: Map },
+      { title: "Report Generator", to: "/reports", icon: FileBarChart },
+      { title: "GIS Command Map", to: "/gis", icon: Map },
+      { title: "Knowledge Graph", to: "/graph", icon: Network },
       { title: "AI Investigations", to: "/investigations", icon: Search },
       { title: "Evidence Vault", to: "/vault", icon: FolderLock },
-      { title: "Reports", to: "/reports", icon: FileBarChart },
-      { title: "Alert Center", to: "/alerts", icon: Bell },
-      { title: "Threat Intel", to: "/threats", icon: ShieldAlert },
       { title: "Exports", to: "/exports", icon: Download },
     ],
   },
@@ -243,9 +283,74 @@ function TopBar() {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const t = useT();
   const navigate = useNavigate();
   const { session, signOut } = useDemoSession();
+
+  // File provenance forensics — a Sheet, not a route, so it works from every
+  // page with no File-serialization problem (localStorage can't hold a File).
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
+  const [provenanceItems, setProvenanceItems] = useState<FileProvenanceItem[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [vaultSavedIds, setVaultSavedIds] = useState<Set<string>>(new Set());
+  const provenanceOpenRef = useRef(false);
+  provenanceOpenRef.current = provenanceOpen;
+
+  const runFileProvenance = async (files: File[]) => {
+    if (files.length === 0) return;
+    setProvenanceOpen(true);
+    const newItems: FileProvenanceItem[] = files.map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+      file,
+      status: "pending",
+      report: null,
+      error: null,
+    }));
+    setProvenanceItems((prev) => [...newItems, ...prev]);
+
+    for (const item of newItems) {
+      setProvenanceItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: "running" } : p)));
+      try {
+        const report = await readFileProvenance(item.file);
+        setProvenanceItems((prev) =>
+          prev.map((p) => (p.id === item.id ? { ...p, status: "done", report } : p)),
+        );
+      } catch (err: any) {
+        const message =
+          err instanceof FileProvenanceError ? err.message : (err?.message ?? String(err));
+        setProvenanceItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: "failed", error: message } : p)));
+      }
+    }
+  };
+
+  const handleContinueInImageIntelligence = (item: FileProvenanceItem) => {
+    setFileHandoff(item.file, "Global search bar — file provenance");
+    setProvenanceOpen(false);
+    navigate({ to: "/images" });
+  };
+
+  const handleAddProvenanceToVault = async (item: FileProvenanceItem) => {
+    try {
+      const hash = await sha256OfFile(item.file).catch(() => null);
+      const existing = getEvidence();
+      const record = buildFileEvidenceRecord({
+        fileName: item.file.name,
+        fileSize: item.file.size,
+        hash,
+        provenance: item.report ? toStoredFileProvenance(item.report) : null,
+        provenanceExtractedAt: item.report?.extractedAt ?? null,
+        typeLabel: item.report?.kind === "unsupported" ? "Document" : (item.report?.kind ?? "Document"),
+        source: "Global search bar — file provenance forensics",
+        existing,
+      });
+      appendEvidence(record);
+      setVaultSavedIds((prev) => new Set(prev).add(item.id));
+      toast.success(`Saved to Evidence Vault as ${record.id}. Bytes are not stored — only the hash and extracted metadata.`);
+    } catch (err: any) {
+      toast.error(`Could not save to Evidence Vault: ${err?.message ?? String(err)}`);
+    }
+  };
 
   const handleSignOut = () => {
     signOut();
@@ -273,6 +378,11 @@ function TopBar() {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Read via a ref, not a state dependency: this effect registers its
+      // listeners once ([] deps) and adding provenanceOpen here would mean
+      // re-subscribing on every open/close instead of just reading current
+      // state at fire time.
+      if (provenanceOpenRef.current) return; // the Sheet owns focus while it's open
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         inputRef.current?.focus();
@@ -431,7 +541,7 @@ function TopBar() {
       </div>
 
       {/* Global Target Acquisition Search Bar */}
-      <div ref={searchBoxRef} className="flex items-center gap-1.5 flex-1 max-w-xl mx-2">
+      <div ref={searchBoxRef} className="flex items-center gap-1.5 flex-1 max-w-2xl mx-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -472,7 +582,42 @@ function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="relative w-full flex items-center">
+        <button
+          type="button"
+          title="Attach a file — read its embedded provenance metadata. The file is never uploaded."
+          onClick={() => fileInputRef.current?.click()}
+          className="hidden sm:flex h-8 shrink-0 items-center justify-center rounded border border-console-border bg-console-surface px-2 text-console-muted hover:border-console-green hover:text-console-green"
+        >
+          <Paperclip className="size-3.5" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={FILE_PROVENANCE_ACCEPT}
+          className="sr-only"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = ""; // allow re-selecting the same file next time
+            runFileProvenance(files);
+          }}
+        />
+
+        <div
+          className={`relative w-full flex items-center ${dragOver ? "ring-2 ring-console-green rounded" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDragOver(false);
+            runFileProvenance(Array.from(e.dataTransfer.files));
+          }}
+        >
           <Search className="absolute left-2.5 size-3.5 text-console-green" />
           <Input
             ref={inputRef}
@@ -671,6 +816,26 @@ function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Sheet open={provenanceOpen} onOpenChange={setProvenanceOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto bg-console-deep p-0 sm:max-w-2xl">
+          <SheetHeader className="border-b border-console-border p-4 text-left">
+            <SheetTitle className="flex items-center gap-2 text-console-text">
+              <Paperclip className="size-4" /> File provenance forensics
+            </SheetTitle>
+            <SheetDescription className="text-console-label">
+              PDF, Word, image and video files analysed entirely in this browser tab. Nothing is
+              uploaded anywhere.
+            </SheetDescription>
+          </SheetHeader>
+          <FileProvenanceReportList
+            items={provenanceItems}
+            onContinueInImageIntelligence={handleContinueInImageIntelligence}
+            onAddToVault={handleAddProvenanceToVault}
+            vaultSavedIds={vaultSavedIds}
+          />
+        </SheetContent>
+      </Sheet>
     </header>
   );
 }
