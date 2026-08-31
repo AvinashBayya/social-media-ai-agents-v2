@@ -131,6 +131,19 @@ export const theHarvesterCollector: Collector<TheHarvesterRaw> = {
   /** Rule 5: "If theHarvester is unavailable, Sentinel must still work." No worker deployed by default — see the file header. */
   isOptional: true,
 
+  capability: {
+    sourceId: "theharvester",
+    name: "theHarvester",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: true,
+    notes:
+      "Aggregates passive sources behind a self-hosted HTTP worker. Reports unavailable until THEHARVESTER_WORKER_URL is set — no worker is deployed by default.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<TheHarvesterRaw>> {
     const clock = startExecution();
     const workerUrl = workerUrlFromEnv();

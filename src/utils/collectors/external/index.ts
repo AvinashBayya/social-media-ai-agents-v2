@@ -18,12 +18,14 @@ import { collectorRegistry } from "../registry";
 import { ivreCollector } from "./ivre";
 import { jinaReaderCollector } from "./jina-reader";
 import { searxngCollector } from "./searxng";
+import { sherlockCollector } from "./sherlock";
 import { spiderFootCollector } from "./spiderfoot";
 import { theHarvesterCollector } from "./theharvester";
 
 export { ivreCollector } from "./ivre";
 export { jinaReaderCollector } from "./jina-reader";
 export { searxngCollector } from "./searxng";
+export { sherlockCollector } from "./sherlock";
 export { spiderFootCollector } from "./spiderfoot";
 export { theHarvesterCollector } from "./theharvester";
 
@@ -33,6 +35,7 @@ export const EXTERNAL_COLLECTORS = [
   jinaReaderCollector,
   searxngCollector,
   ivreCollector,
+  sherlockCollector,
 ];
 
 export function registerExternalCollectors(registry: CollectorRegistry = collectorRegistry): void {

@@ -46,6 +46,21 @@ function stubCollector(
     supportedTargetTypes,
     requiresCredentials: false,
     isOptional: false,
+    // These tests are about merge/dedup behaviour, not the passive-only gate —
+    // every stub declares a compliant capability by default so
+    // `assertPassiveCollector()` in the orchestrator never rejects one of these
+    // as an unrelated side effect of what's actually under test here.
+    capability: {
+      sourceId: id,
+      name: id,
+      collectionMode: "PASSIVE_API",
+      activeCapable: false,
+      allowed: true,
+      requiresAuth: false,
+      requiresManualAction: false,
+      apiAvailable: true,
+      notes: "Test stub.",
+    },
     async execute(_target: CollectorTarget) {
       return { execution: result.execution, raw: {} };
     },

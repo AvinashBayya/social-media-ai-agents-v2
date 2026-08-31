@@ -33,6 +33,19 @@ export const newsCollector: Collector<NewsRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "news",
+    name: "News / GDELT",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes:
+      "GDELT DOC search. Rate limited to 1 request / 5 seconds. sourcecountry is the PUBLISHER's country, not the event location — plotted at country precision and labelled as such.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<NewsRaw>> {
     const clock = startExecution();
     const query = (target.value || "").trim();
@@ -43,6 +56,16 @@ export const newsCollector: Collector<NewsRaw> = {
 
     const result = await collectNewsGeo(query);
     if (result.error) {
+      // A Google News RSS fallback used to run here on GDELT failure, but RSS
+      // items carry no real coordinate, credibility score or reliable
+      // timestamp — GeoRecord.lat/lon are non-nullable, so the only way to
+      // force RSS results into that shape was to fabricate them: every
+      // article was stamped with India's geographic centroid (20.5937,
+      // 78.9629) as if that were its real location, a flat invented 0.8
+      // credibility, and `new Date()` when pubDate was missing. That is
+      // exactly CLAUDE.md's three fabrication patterns at once. GDELT's own
+      // failure is now reported honestly instead — a real, if less
+      // convenient, absence of data.
       const classified = classifyError("news", new Error(result.error));
       return { execution: finishExecution(clock, "failed", 0, classified.toInfo()), raw: null };
     }

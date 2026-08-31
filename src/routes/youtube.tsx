@@ -33,16 +33,19 @@ import {
   CheckCircle2,
   Languages,
   FileBarChart,
+  MessageSquare,
 } from "lucide-react";
 import {
   serverFetchYoutubeMetadata,
   serverFetchYoutubeSubtitles,
   serverDownloadYoutubeVideo,
+  serverFetchYoutubeComments,
   extractYoutubeId,
   isYoutubeUrl,
   type YoutubeMetadata,
   type YoutubeSubtitlesResponse,
   type YoutubeDownloadResponse,
+  type YoutubeCommentsResponse,
   type YoutubeError,
 } from "@/utils/youtube-collector";
 import { llmTranslateTranscript, llmReport } from "@/utils/llm";
@@ -132,6 +135,11 @@ function YoutubePage() {
   const [subsError, setSubsError] = useState<YoutubeError | null>(null);
   const [downloadError, setDownloadError] = useState<YoutubeError | null>(null);
 
+  // Comments — official Data API v3, needs a YouTube key (metadata/captions don't).
+  const [comments, setComments] = useState<YoutubeCommentsResponse | null>(null);
+  const [commentsError, setCommentsError] = useState<YoutubeError | null>(null);
+  const [fetchingComments, setFetchingComments] = useState(false);
+
   // UI toggle states
   const [showFullDescription, setShowFullDescription] = useState(false);
   // Click-to-load iframe — prevents browser Tracking Prevention noise on page load
@@ -160,6 +168,8 @@ function YoutubePage() {
     setReportError(null);
     setTranslation(null);
     setTranslationError(null);
+    setComments(null);
+    setCommentsError(null);
 
     const targetUrl = raw.trim();
     setActiveUrl(targetUrl);
@@ -364,6 +374,30 @@ function YoutubePage() {
       setDownloadError({ error: "DownloadError", cause: err?.message || String(err) });
     } finally {
       setDownloading(false);
+    }
+  };
+
+  // Comments via the official Data API v3. Requires a YouTube key; metadata
+  // and captions do not, so a missing key must not read as a broken page.
+  const handleFetchComments = async () => {
+    const id = metadata?.id ?? extractYoutubeId(activeUrl || urlInput);
+    if (!id) return;
+    setFetchingComments(true);
+    setCommentsError(null);
+    try {
+      const res = await serverFetchYoutubeComments({ data: { videoId: id, limit: 100 } });
+      if (res.success) {
+        setComments(res.data);
+      } else {
+        setCommentsError({ error: res.error, cause: res.cause });
+        // Cleared so a previous video's comments cannot sit under a new error.
+        setComments(null);
+      }
+    } catch (err: any) {
+      setCommentsError({ error: "CommentsError", cause: err?.message || String(err) });
+      setComments(null);
+    } finally {
+      setFetchingComments(false);
     }
   };
 
@@ -930,6 +964,97 @@ function YoutubePage() {
             {!report && !reportError && !generatingReport && (
               <div className="py-6 text-center text-[10px] text-console-label">
                 Click Generate Report to compile the data above into a brief.
+              </div>
+            )}
+          </Card>
+
+          {/* Comments — official Data API v3. Separate from the AI report
+              above; not synthesized into it, since a comment is the
+              platform's own data, not something to summarize away. */}
+          <Card className={`${CARD} mt-6 space-y-3 p-4`}>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-console-border pb-3">
+              <h3 className="flex items-center gap-2 font-bold uppercase text-console-text">
+                <MessageSquare className="size-4 text-console-cyan" /> Comments
+              </h3>
+              <Button
+                onClick={() => void handleFetchComments()}
+                disabled={fetchingComments}
+                className="h-7 rounded bg-console-cyan px-3 text-[10px] font-bold uppercase text-console-accent-foreground hover:bg-console-cyan/90"
+              >
+                {fetchingComments ? (
+                  <Loader2 className="mr-1.5 size-3 animate-spin" />
+                ) : (
+                  <MessageSquare className="mr-1.5 size-3" />
+                )}
+                Load
+              </Button>
+            </div>
+
+            <p className="text-[10px] leading-relaxed text-console-label">
+              Official Data API v3, which needs a YouTube key on the Settings page — metadata
+              and captions do not. Comments are personal data under the DPDP Act 2023: they are
+              fetched for review on request and are not retained.
+            </p>
+
+            {commentsError && (
+              <div
+                className={`space-y-1 rounded border p-3 ${
+                  commentsError.error === "CommentsDisabled"
+                    ? "border-console-amber/30 bg-console-amber/5 text-console-amber"
+                    : "border-console-red/30 bg-console-red/10 text-console-red"
+                }`}
+              >
+                <span className="font-bold">
+                  {commentsError.error === "CommentsDisabled"
+                    ? "Comments disabled by the uploader: "
+                    : commentsError.error === "QuotaExceeded"
+                      ? "Daily quota exhausted: "
+                      : "Comments unavailable: "}
+                </span>
+                {commentsError.cause}
+              </div>
+            )}
+
+            {comments && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-[9px] text-console-label">
+                  <Badge className="border-console-green/30 bg-console-green/10 text-[9px] text-console-green">
+                    {comments.comments.length} loaded
+                  </Badge>
+                  <span>
+                    {comments.quotaUnitsSpent} quota unit(s) spent · source {comments.provenance.model}
+                  </span>
+                  {comments.nextPageToken && <span>· more pages available</span>}
+                </div>
+                {comments.comments.length === 0 ? (
+                  <div className="py-6 text-center text-[10px] text-console-label">
+                    The API returned an empty comment list. Comments are enabled on this video
+                    and none matched — this is a result, not a failure.
+                  </div>
+                ) : (
+                  <div className="max-h-[360px] space-y-2 overflow-y-auto">
+                    {comments.comments.map((c) => (
+                      <div key={c.id} className="rounded border border-console-border bg-console-deep p-2.5">
+                        <div className="flex flex-wrap items-center gap-2 text-[9px] text-console-label">
+                          <span className="font-bold text-console-cyan">{c.author}</span>
+                          <span>{c.publishedAt.slice(0, 10)}</span>
+                          {/* null, not 0 — the API omitting a count is not a count of zero. */}
+                          {c.likeCount !== null && <span>· {c.likeCount} likes</span>}
+                          {c.replyCount !== null && <span>· {c.replyCount} replies</span>}
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-console-text">
+                          {c.text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!comments && !commentsError && !fetchingComments && (
+              <div className="py-8 text-center text-[10px] text-console-label">
+                Click Load to fetch comments through the official API.
               </div>
             )}
           </Card>

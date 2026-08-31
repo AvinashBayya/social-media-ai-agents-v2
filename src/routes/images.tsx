@@ -75,6 +75,11 @@ import { serverSearchYoutubeVideos, type YoutubeSearchResult } from "@/utils/you
 import { socialReddit } from "@/utils/social";
 import type { SocialMedia } from "@/utils/social";
 import { buildPlainQuery, parseQuery } from "@/utils/search";
+import { GeoIntPanel } from "@/components/geoint-panel";
+import type { ImageMatch } from "@/utils/geoint/image-match";
+import type { LocationHypothesis } from "@/utils/geoint/geolocation-hypothesis";
+import { attachGeointToCase, type AttachOutcome } from "@/utils/cases/case-geoint";
+import { listCases } from "@/utils/cases/case-runs";
 
 /**
  * Image Intelligence — Module 4 analysis workbench (PS-18 §6.4).
@@ -255,6 +260,31 @@ function Page() {
   const [ocrVlm, setOcrVlm] = useState<AiOcrVlmResult | null>(null);
   const [ocrVlmError, setOcrVlmError] = useState("");
   const [ocrVlmLoading, setOcrVlmLoading] = useState(false);
+
+  // ── GEOINT — LIFTED out of GeoIntPanel. `Section` (below) renders
+  // `{open && children}`, so state held inside a `defaultOpen={false}` card's
+  // own component was destroyed on every collapse. Held here in `Page`, it
+  // survives.
+  const [geoMatches, setGeoMatches] = useState<ImageMatch[]>([]);
+  const [geoHypotheses, setGeoHypotheses] = useState<LocationHypothesis[]>([]);
+  const [geoCaseId, setGeoCaseId] = useState("");
+  const [geoAttachment, setGeoAttachment] = useState<AttachOutcome | null>(null);
+  // Frozen per analysed image, not read per render — see the comment in
+  // geoint-panel.tsx. Re-reading `new Date().toISOString()` in a render body
+  // would make `retrievedAt`, and therefore `collectedAt` on every evidence
+  // record, change on every keystroke in the case-select or match/hypothesis
+  // forms.
+  const [geoRetrievedAt, setGeoRetrievedAt] = useState("");
+  const [geoCases, setGeoCases] = useState<{ id: string; label: string }[]>([]);
+
+  useEffect(() => {
+    setGeoCases(
+      listCases().map((c) => ({
+        id: c.id,
+        label: `${c.caseNumber !== null ? `${c.caseNumber} · ` : ""}${c.title}`,
+      })),
+    );
+  }, []);
 
   // Empty on both server and first client render — getActiveTarget() reads
   // localStorage, unavailable during SSR. The mount+listener effect below
@@ -486,6 +516,16 @@ function Page() {
     setOcrVlm(null);
     setOcrVlmError("");
     setAnalysis(null);
+    // GEOINT records describe ONE image. Carrying them across an analyse()
+    // would attribute photo A's findings to photo B.
+    setGeoMatches([]);
+    setGeoHypotheses([]);
+    setGeoAttachment(null);
+    // The CASE SELECTION resets too, and that is the load-bearing half — the
+    // same reason applies: a case chosen for photo A must not silently carry
+    // over and receive photo B's evidence.
+    setGeoCaseId("");
+    setGeoRetrievedAt(new Date().toISOString());
     setBusy("Decoding image");
 
     try {
@@ -1379,6 +1419,47 @@ function Page() {
                 </p>
               </Section>
             )}
+
+            {/* ── GEOINT ──────────────────────────────────────────────────────
+                Open by default and named in the subtitle so the case
+                attachment (the "Case association" block, first inside the
+                panel) is discoverable rather than hidden behind a collapsed
+                section. No GEOINT logic here — the OBSERVED-metadata vs
+                HYPOTHESIS-location distinction lives entirely inside the
+                panel. */}
+            <Section
+              icon={<Globe2 className="size-3.5 text-console-amber" />}
+              title="GEOINT"
+              subtitle="attach to case · metadata (OBSERVED) · image match · location hypotheses (HYPOTHESIS)"
+              defaultOpen
+            >
+              <GeoIntPanel
+                imageRef={analysis.name}
+                exif={analysis.exif}
+                duplicates={analysis.duplicates}
+                manualMatches={geoMatches}
+                onAddMatch={(m) => setGeoMatches((prev) => [...prev, m])}
+                hypotheses={geoHypotheses}
+                onAddHypothesis={(h) => setGeoHypotheses((prev) => [...prev, h])}
+                // Always set: `analyse()` stamps it before `setAnalysis`, and
+                // `setAnalysis` is reachable from nowhere else.
+                retrievedAt={geoRetrievedAt}
+                cases={geoCases}
+                caseId={geoCaseId}
+                onSelectCase={(id) => {
+                  setGeoCaseId(id);
+                  // The previous outcome described a different case. Keeping
+                  // it on screen would read as this case's state.
+                  setGeoAttachment(null);
+                }}
+                onAttach={(graph) =>
+                  setGeoAttachment(
+                    attachGeointToCase(geoCaseId, analysis.name, graph, new Date().toISOString()),
+                  )
+                }
+                attachment={geoAttachment}
+              />
+            </Section>
 
             {/* ── OCR ─────────────────────────────────────────────────────── */}
             <Section

@@ -48,6 +48,19 @@ export const contactHibpCollector: Collector<ContactHibpRaw> = {
   requiresCredentials: true,
   isOptional: true,
 
+  capability: {
+    sourceId: "contact.hibp",
+    name: "Contact — HaveIBeenPwned",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: true,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes:
+      "Breach-exposure check, key-gated (no free tier). Discards everything except an exposure flag and a breach count — never breach names or dates.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<ContactHibpRaw>> {
     const clock = startExecution();
     const email = target.value.trim();

@@ -203,7 +203,11 @@
   --console-green: #047857;
   --console-cyan: #0e7490;
   --console-purple: #6d28d9;
-  --console-blue: #1d4ed8;
+  /* Light theme only, at the user's request: blue is retired here in favour
+     of green as the sole non-neutral accent — every console-blue usage
+     (links, info badges, etc.) renders green in light mode. Dark theme's
+     own --console-blue below is untouched. */
+  --console-blue: var(--console-green);
   --console-amber: #b45309;
   --console-red: #dc2626;
   /* A distinct, more vivid green used specifically for "live/online right

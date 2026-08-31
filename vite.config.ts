@@ -51,5 +51,21 @@ export default defineConfig(({ mode }) => {
       // with "invalid hook call" once a transitive dep pulls its own React.
       dedupe: ["react", "react-dom", "@tanstack/react-router", "@tanstack/react-store"],
     },
+    server: {
+      watch: {
+        // ai-service/ is a wholly separate Python service (already excluded from
+        // the Docker build context for this same reason — see .dockerignore) and
+        // this frontend never needs to react to changes inside it. Without this,
+        // Vite's chokidar watcher tries to watch every file under
+        // ai-service/.venv/ too — torch alone ships thousands of auto-generated
+        // headers under include/ATen/ops/ — and on Windows that reliably crashes
+        // the whole dev server with an uncaught FSWatcher "UNKNOWN: unknown
+        // error, watch ..." (reproduced live 2026-08-27 via `npm run dev --
+        // --host`). osint-workers/ and data/ are excluded for the same class of
+        // reason (a compose stack and an operator credential store neither of
+        // which the frontend should ever watch).
+        ignored: ["**/ai-service/**", "**/osint-workers/**", "**/data/**"],
+      },
+    },
   };
 });

@@ -220,6 +220,19 @@ export const spiderFootCollector: Collector<SpiderFootRaw> = {
   /** Plan §14: "SpiderFoot failure must not prevent Sentinel from functioning." No instance deployed by default — see the file header. */
   isOptional: true,
 
+  capability: {
+    sourceId: "spiderfoot",
+    name: "SpiderFoot",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: true,
+    notes:
+      "Passive use-case only, behind a self-hosted HTTP worker. Reports unavailable until SPIDERFOOT_WORKER_URL is set. SPIDERFOOT_USE_CASE must not be widened to an active profile.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<SpiderFootRaw>> {
     const clock = startExecution();
     const workerUrl = workerUrlFromEnv();

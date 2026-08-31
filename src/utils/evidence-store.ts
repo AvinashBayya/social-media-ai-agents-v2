@@ -143,6 +143,17 @@ export function deleteEvidence(id: string): EvidenceRecord[] {
   return next;
 }
 
+/** Every vault record linked to one case — backs vault.tsx's `?case=` scoping. */
+export function getEvidenceForCase(caseId: string): EvidenceRecord[] {
+  if (!caseId) return [];
+  return getEvidence().filter((e) => e.caseId === caseId);
+}
+
+/** Vault records not linked to any case. The complement of the above, stated explicitly. */
+export function getUnlinkedEvidence(): EvidenceRecord[] {
+  return getEvidence().filter((e) => !e.caseId);
+}
+
 /** Set or clear the case link, and the id of the copy inside that case. */
 export function setEvidenceCase(
   id: string,
@@ -239,6 +250,41 @@ export function buildFileEvidenceRecord(input: {
     fileSize: formatBytes(input.fileSize),
     provenance: input.provenance,
     provenanceExtractedAt: input.provenanceExtractedAt,
+  };
+}
+
+/**
+ * Build a real evidence record for one saved object-detection crop (Module 4's
+ * Grounding DINO panel — `ai-analysis-panel.tsx`). `type: "Image"` so the
+ * vault grid picks the same icon as any other image record; the "unverified
+ * candidate" framing lives in `title` and travels with the record into the
+ * vault list itself, since Grounding DINO does not reliably report "nothing
+ * found" for an absent object (see CLAUDE.md) — a saved record's title must
+ * keep stating that, not just the live detection UI's caveat text, or a
+ * later viewer sees only a confident-looking label and a percentage.
+ */
+export function buildDetectionEvidenceRecord(input: {
+  label: string;
+  score: number;
+  sourceName: string;
+  reportType: string;
+  previewDataUrl: string;
+  hash: string | null;
+  existing: EvidenceRecord[];
+}): EvidenceRecord {
+  return {
+    id: nextEvidenceId(input.existing),
+    title: `${input.label} — ${Math.round(input.score * 100)}% (unverified candidate, not a confirmed finding)`,
+    type: "Image",
+    timestamp: new Date().toISOString(),
+    source: `${input.reportType}: ${input.sourceName}`,
+    hash: input.hash,
+    geo: "not recorded",
+    entities: [],
+    caseId: "",
+    risk: null,
+    tags: ["detected-object", input.label],
+    previewUrl: input.previewDataUrl,
   };
 }
 

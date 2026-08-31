@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertTriangle,
   Loader2,
@@ -16,6 +17,8 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Crop,
+  Save,
 } from "lucide-react";
 import {
   aiServiceDescribe,
@@ -28,10 +31,24 @@ import {
   type AiFaceReference,
   type AiServiceHealth,
 } from "@/utils/ai-service-client";
+import { cropImageRegion } from "@/utils/imaging-client";
+import { sha256OfFile } from "@/utils/evidence";
+import { buildDetectionEvidenceRecord, getEvidence, appendEvidence } from "@/utils/evidence-store";
 import { llmReport } from "@/utils/llm";
 import { MarkdownReport } from "@/components/markdown-report";
+import { toast } from "sonner";
 
 const CARD = "bg-console-surface border-console-border";
+
+/** A saved evidence record's `previewUrl` must survive a page reload — an object URL (URL.createObjectURL) does not, since it is revoked with the tab session, but a data URL persists in localStorage like the rest of the record. */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the cropped image."));
+    reader.readAsDataURL(blob);
+  });
+}
 
 function Section({
   icon,
@@ -103,9 +120,15 @@ export function AiAnalysisPanel({
   const [aiHealthError, setAiHealthError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const [detectPrompts, setDetectPrompts] = useState("a rifle, a military vehicle, a flag, smoke");
+  const [detectPrompts, setDetectPrompts] = useState("a vehicle license plate, a weapon, a rifle, a military vehicle");
   const [detections, setDetections] = useState<AiDetection[] | null>(null);
   const [detectError, setDetectError] = useState("");
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [crop, setCrop] = useState<{ index: number; url: string; blob: Blob } | null>(null);
+  const [cropBusy, setCropBusy] = useState<number | null>(null);
+  const [cropError, setCropError] = useState("");
+  const [savingCrop, setSavingCrop] = useState(false);
   const [description, setDescription] = useState<string | null>(null);
   const [describeError, setDescribeError] = useState("");
   const [faceRefs, setFaceRefs] = useState<AiFaceReference[]>([]);
@@ -148,7 +171,27 @@ export function AiAnalysisPanel({
     setFaceRefs([]);
     setReport(null);
     setReportError("");
+    setNaturalSize(null);
+    setCropError("");
+    setCrop(null);
   }, [resetKey]);
+
+  // Kept as an object URL for the bounding-box overlay `<img>` below — separate
+  // from `image` itself, which stays the raw Blob every ai-service call sends.
+  useEffect(() => {
+    if (!image) {
+      setImageUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(image);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
+
+  useEffect(() => {
+    if (!crop) return;
+    return () => URL.revokeObjectURL(crop.url);
+  }, [crop]);
 
   const runDetect = async () => {
     if (!image) return;
@@ -160,6 +203,8 @@ export function AiAnalysisPanel({
     setBusy("Running object detection");
     setDetectError("");
     setDetections(null);
+    setCrop(null);
+    setCropError("");
     try {
       const res = await aiServiceDetect(image, prompts);
       setDetections(res.detections);
@@ -167,6 +212,53 @@ export function AiAnalysisPanel({
       setDetectError(err?.message ?? String(err));
     } finally {
       setBusy(null);
+    }
+  };
+
+  /**
+   * Crops directly from `image` — the exact Blob `runDetect` sent to
+   * ai-service — never a separately-loaded copy, since the detection's box
+   * coordinates are only meaningful relative to whatever bytes ai-service
+   * actually received (see cropImageRegion's own doc comment).
+   */
+  const openCrop = async (index: number) => {
+    if (!image || !detections) return;
+    setCropError("");
+    setCropBusy(index);
+    try {
+      const blob = await cropImageRegion(image, detections[index].box);
+      const url = URL.createObjectURL(blob);
+      setCrop({ index, url, blob });
+    } catch (err: any) {
+      setCropError(err?.message ?? String(err));
+    } finally {
+      setCropBusy(null);
+    }
+  };
+
+  const saveCropToVault = async () => {
+    if (!crop || !detections) return;
+    const detection = detections[crop.index];
+    setSavingCrop(true);
+    try {
+      const hash = await sha256OfFile(crop.blob).catch(() => null);
+      const previewDataUrl = await blobToDataUrl(crop.blob);
+      const record = buildDetectionEvidenceRecord({
+        label: detection.label,
+        score: detection.score,
+        sourceName: imageName,
+        reportType,
+        previewDataUrl,
+        hash,
+        existing: getEvidence(),
+      });
+      appendEvidence(record);
+      toast.success(`Saved to Evidence Vault as ${record.id}.`);
+      setCrop(null);
+    } catch (err: any) {
+      toast.error(`Could not save to Evidence Vault: ${err?.message ?? String(err)}`);
+    } finally {
+      setSavingCrop(false);
     }
   };
 
@@ -311,7 +403,7 @@ export function AiAnalysisPanel({
             <Input
               value={detectPrompts}
               onChange={(e) => setDetectPrompts(e.target.value)}
-              placeholder="comma-separated: a rifle, a military vehicle, a flag"
+              placeholder="comma-separated: a vehicle license plate, a weapon, a rifle"
               className="h-7 border-console-border bg-console-deep text-[10px] text-console-text"
             />
             <Button
@@ -343,17 +435,70 @@ export function AiAnalysisPanel({
                     No candidates cleared the confidence threshold for these prompts.
                   </p>
                 ) : (
-                  detections.map((d, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between rounded border border-console-border bg-console-deep/60 px-2 py-1"
-                    >
-                      <span className="text-[11px] text-console-text">{d.label}</span>
-                      <span className="font-mono text-[10px] text-console-muted">
-                        {(d.score * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  ))
+                  <>
+                    {imageUrl && (
+                      <div
+                        className="relative w-full overflow-hidden rounded border border-console-border bg-console-deep"
+                        style={naturalSize ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` } : undefined}
+                      >
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          className="block h-full w-full object-contain"
+                          onLoad={(e) =>
+                            setNaturalSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })
+                          }
+                        />
+                        {naturalSize &&
+                          detections.map((d, i) => {
+                            const [x0, y0, x1, y1] = d.box;
+                            return (
+                              <div
+                                key={i}
+                                title={`${d.label} (${(d.score * 100).toFixed(0)}%)`}
+                                className="absolute border-2 border-console-blue shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
+                                style={{
+                                  left: `${(x0 / naturalSize.width) * 100}%`,
+                                  top: `${(y0 / naturalSize.height) * 100}%`,
+                                  width: `${((x1 - x0) / naturalSize.width) * 100}%`,
+                                  height: `${((y1 - y0) / naturalSize.height) * 100}%`,
+                                }}
+                              >
+                                <span className="absolute -top-4 left-0 whitespace-nowrap rounded-sm bg-console-blue px-1 text-[9px] font-bold text-console-deep">
+                                  {d.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+
+                    {detections.map((d, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between rounded border border-console-border bg-console-deep/60 px-2 py-1"
+                      >
+                        <span className="text-[11px] text-console-text">{d.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-console-muted">{(d.score * 100).toFixed(0)}%</span>
+                          <button
+                            onClick={() => openCrop(i)}
+                            disabled={cropBusy !== null}
+                            title="View this region enlarged, and optionally save it"
+                            className="text-console-label hover:text-console-blue disabled:opacity-50"
+                          >
+                            {cropBusy === i ? <Loader2 className="size-3.5 animate-spin" /> : <Crop className="size-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {cropError && (
+                  <div className="mt-1 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                    <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                    <span className="text-[10px] leading-relaxed text-console-red">{cropError}</span>
+                  </div>
                 )}
                 <p className="mt-1 text-[10px] leading-relaxed text-console-amber">
                   Unverified candidates for analyst review, not confirmed findings — Grounding DINO
@@ -363,6 +508,36 @@ export function AiAnalysisPanel({
               </div>
             )}
           </Section>
+
+          <Dialog open={crop !== null} onOpenChange={(open) => !open && setCrop(null)}>
+            <DialogContent className="max-w-lg bg-console-surface border-console-border">
+              {crop && detections && (
+                <>
+                  <DialogHeader>
+                    <DialogTitle className="text-xs text-console-text">
+                      {detections[crop.index].label} — {(detections[crop.index].score * 100).toFixed(0)}%
+                    </DialogTitle>
+                  </DialogHeader>
+                  <img src={crop.url} alt={detections[crop.index].label} className="max-h-[60vh] w-full rounded border border-console-border object-contain" />
+                  <p className="text-[10px] leading-relaxed text-console-amber">
+                    Unverified candidate for analyst review — not a confirmed finding.
+                  </p>
+                  <DialogFooter>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={savingCrop}
+                      onClick={saveCropToVault}
+                      className="h-7 gap-1 text-[10px]"
+                    >
+                      {savingCrop ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                      Save to Evidence Vault
+                    </Button>
+                  </DialogFooter>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
 
           <Section
             icon={<FileText className="size-3.5 text-console-purple" />}

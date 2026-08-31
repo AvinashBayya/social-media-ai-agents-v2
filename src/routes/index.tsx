@@ -959,10 +959,10 @@ function CommandHub() {
                 </div>
               ) : aiBriefing ? (
                 <>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-console-label">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-console-cyan">
                     AI-generated · {briefModel}
                   </div>
-                  <MarkdownReport text={aiBriefing} className="text-xs font-mono text-[#CBD5E1]" />
+                  <MarkdownReport text={aiBriefing} className="text-xs font-mono text-console-text font-normal leading-relaxed" />
                 </>
               ) : (
                 <p className="py-6 text-center text-xs font-mono text-console-label">

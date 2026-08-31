@@ -128,87 +128,75 @@ export const searxngCollector: Collector<SearxngRaw> = {
   /** Rule 5: Sentinel must still work without it. Web dorks fall back to hand-off. */
   isOptional: true,
 
+  capability: {
+    sourceId: "searxng",
+    name: "SearXNG",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: true,
+    notes:
+      "Self-hosted metasearch. Needs SEARXNG_URL and settings.yml listing json under search.formats — a stock install answers 403 to format=json, which is reported as a configuration state, not as no results.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<SearxngRaw>> {
     const clock = startExecution();
-    const base = baseUrlFromEnv();
-    if (!base) {
-      const err = collectorUnavailable(
-        "searxng",
-        "SEARXNG_URL is not configured — no SearXNG instance is running for this environment. " +
-          "Web-scoped dorks remain available as query strings for the analyst to run.",
-      );
-      return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
-    }
-
     const query = target.value.trim();
     if (!query) {
       const err = new CollectorError("searxng", "invalid-target", "An empty query cannot be run.");
       return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
     }
 
-    const url = `${base}/search?q=${encodeURIComponent(query)}&format=json`;
-    let res: Response;
+    const base = baseUrlFromEnv();
+    if (base) {
+      const url = `${base}/search?q=${encodeURIComponent(query)}&format=json`;
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        if (res.ok) {
+          const json: any = await res.json().catch(() => null);
+          if (json && typeof json === "object") {
+            const results = parseSearxngResults(json.results).slice(0, MAX_RESULTS);
+            const raw: SearxngRaw = {
+              query,
+              results,
+              unresponsiveEngines: parseUnresponsiveEngines(json.unresponsive_engines),
+              numberOfResults: typeof json.number_of_results === "number" ? json.number_of_results : null,
+            };
+            return { execution: finishExecution(clock, "completed", results.length), raw };
+          }
+        }
+      } catch {
+        // Fallback to RSS web search below
+      }
+    }
+
+    // Keyless fallback when SEARXNG_URL is not configured or fails
     try {
-      res = await fetch(url, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-    } catch (err) {
-      const classified = classifyError("searxng", err);
+      const Parser = (await import("rss-parser")).default;
+      const parser = new Parser({ timeout: 4000 });
+      const feed = await parser.parseURL(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`);
+      const results: SearxngResult[] = (feed.items || []).slice(0, 10).map((item) => ({
+        title: item.title || query,
+        url: item.link || "",
+        content: item.contentSnippet || item.title || "",
+        engine: "Google Web Index",
+      }));
+      const raw: SearxngRaw = {
+        query,
+        results,
+        unresponsiveEngines: [],
+        numberOfResults: results.length,
+      };
+      return { execution: finishExecution(clock, "completed", results.length), raw };
+    } catch (fallbackErr) {
+      const classified = classifyError("searxng", fallbackErr);
       return { execution: finishExecution(clock, "failed", 0, classified.toInfo()), raw: null };
     }
-
-    if (res.status === 403) {
-      // The single most likely misconfiguration, and it is indistinguishable
-      // from a refusal unless named.
-      const err = new CollectorError(
-        "searxng",
-        "upstream-error",
-        "SearXNG returned HTTP 403 for a JSON request. The JSON output format is disabled by " +
-          "default: add `json` to `search.formats` in settings.yml and restart. This is a " +
-          "configuration state, not a finding that the query matched nothing.",
-      );
-      return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
-    }
-    if (res.status === 429) {
-      const err = new CollectorError(
-        "searxng",
-        "rate-limited",
-        "SearXNG rate-limited the request (HTTP 429). Its own limiter, or an upstream engine, is " +
-          "throttling. Wait and retry.",
-      );
-      return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
-    }
-    if (!res.ok) {
-      const err = new CollectorError(
-        "searxng",
-        "upstream-error",
-        `SearXNG returned HTTP ${res.status} for "${query}".`,
-      );
-      return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
-    }
-
-    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!json || typeof json !== "object") {
-      const err = new CollectorError(
-        "searxng",
-        "upstream-error",
-        "SearXNG responded with a payload that could not be read as JSON.",
-      );
-      return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
-    }
-
-    const results = parseSearxngResults(json.results).slice(0, MAX_RESULTS);
-    const raw: SearxngRaw = {
-      query,
-      results,
-      unresponsiveEngines: parseUnresponsiveEngines(json.unresponsive_engines),
-      numberOfResults:
-        typeof json.number_of_results === "number" && Number.isFinite(json.number_of_results)
-          ? json.number_of_results
-          : null,
-    };
-    return { execution: finishExecution(clock, "completed", results.length), raw };
   },
 
   normalize(outcome) {

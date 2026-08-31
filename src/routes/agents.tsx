@@ -8,6 +8,22 @@ import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { getInvestigations, pinToInvestigation } from "@/utils/investigations-store";
 import { getWatchlists } from "@/utils/watchlist-store";
+import { getGraphForCase } from "@/utils/graph-store";
+import { getTimelineForCase } from "@/utils/timeline-store";
+import { getCaseRuns } from "@/utils/cases/case-runs";
+import { planOsintInvestigation } from "@/utils/osint/jobs";
+import type { OsintPlan } from "@/utils/osint/query-planner";
+import { capabilityReport, type CapabilityReport } from "@/utils/collectors/capability-report";
+import { GEOINT_DISCIPLINE_ROW } from "@/utils/cases/case-geoint";
+import {
+  NO_CASE_SELECTED,
+  buildCaseContext,
+  resolveCitation,
+  sampleDerivedEntities,
+  type CaseContext,
+} from "@/utils/cases/case-context";
+import { llmAnalyseCaseGrounded, type GroundedResult } from "@/utils/cases/case-analysis";
+import { CaseContextDetail } from "@/components/case-context-detail";
 import { fetchNews, fetchSocialIntelligence } from "./news";
 import { fetchCyberThreats } from "./osint";
 import { llmCaseSummary, llmExecutiveBrief, llmReport, llmExtractEntities } from "@/utils/llm";
@@ -27,11 +43,53 @@ import {
 } from "lucide-react";
 
 export const Route = createFileRoute("/agents")({
+  /**
+   * `?case=INV-1001` preselects the target investigation — so "Open Agent" from a
+   * case workspace lands on that case rather than the first in the list. Strict
+   * about SHAPE only; a stale id simply leaves the picker on its default.
+   */
+  validateSearch: (search: Record<string, unknown>): { case?: string } => {
+    const raw = search.case;
+    if (typeof raw !== "string") return {};
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > 64) return {};
+    return { case: trimmed };
+  },
   head: () => ({ meta: [{ title: "AI Intelligence Assistant — Sentinel AI" }] }),
   component: AgentsPage,
 });
 
+/**
+ * What each capability actually sends the model.
+ *
+ * An audit established, capability by capability, that ELEVEN of the twelve
+ * below send the model case METADATA only — title, description, keyword
+ * list, and in one case an integer COUNT of pinned evidence. No evidence text,
+ * no entities, no relationships, no claims, no contradictions, no evidence ids,
+ * no source URLs. Several are worse than uninformative:
+ *
+ *   - Six share one `llmReport` call with an IDENTICAL payload; only the `type`
+ *     label differs, so "Chronological Event Timeline Analysis" and
+ *     "Quantitative Risk Assessment" are the same request with different names.
+ *   - COMPARE_ENTITIES puts a task INSTRUCTION into the field `llm.ts` labels to
+ *     the model as "Collected context:".
+ *   - EXPLAIN_ENTITY calls a NER extractor whose own prompt says "Only entities
+ *     explicitly present in the text" — on a sentence containing two names.
+ *
+ * `grounded` marks the one capability that reasons over the case's real
+ * evidence. The rest now say what they are, on screen, rather than implying an
+ * analysis they cannot perform. Converting them is follow-on work, not this
+ * phase; naming them costs nothing and stops the page overstating itself.
+ */
 const CAPABILITIES = [
+  {
+    // The only capability that reasons over the case's actual evidence. Every
+    // other entry below sends the model case METADATA only, and now says so.
+    id: "GROUNDED_CASE_ANALYSIS",
+    name: "Grounded Case Analysis",
+    desc: "Answer a question using this case's collected evidence, with citations that resolve.",
+    grounded: true,
+  },
   {
     id: "SUMMARIZE_CASE",
     name: "Summarize Case Files",
@@ -95,12 +153,14 @@ const CAPABILITIES = [
 ];
 
 function AgentsPage() {
+  // A case handed in via `?case=` from a case workspace's "Open Agent" link.
+  const { case: requestedCase } = Route.useSearch();
+
   const [cases, setCases] = useState<any[]>([]);
   const [watchlists, setWatchlists] = useState<any[]>([]);
 
   // Selection states
-  const [selectedCaseId, setSelectedCaseId] = useState("");
-  const [selectedWatchlistId, setSelectedWatchlistId] = useState("");
+  const [selectedCaseId, setSelectedCaseId] = useState(requestedCase ?? "");
   // These were pre-selected as "Vector-17" and "Aster Motors" — two invented
   // names that were then fed to the model as the analysis target (see
   // `activeTarget` below). Selection now starts empty and is populated only from
@@ -150,7 +210,140 @@ function AgentsPage() {
     return Array.from(set);
   }, [cases, watchlists]);
 
+  /**
+   * Entities the picker offers, and which of them are SAMPLE-derived.
+   *
+   * `watchlist-store.ts` seeds two `[SAMPLE]` watchlists whose people and
+   * organizations ("Chen", "Ortega", "Vector-17", "Aster Motors", …) land in this
+   * same list with nothing distinguishing them from a real case target. They are
+   * now labelled.
+   *
+   * The GROUNDED capability is structurally immune either way: it builds its
+   * context from case evidence and never reads a watchlist.
+   */
+  const sampleEntities = useMemo(() => sampleDerivedEntities(watchlists), [watchlists]);
+
   const activeCaseObj = cases.find((c) => c.id === selectedCaseId);
+
+  // ── Real case context ───────────────────────────────────────────────────
+  /**
+   * The correlation layer needs the discipline matrix, and this route never
+   * fetched it — so `buildCrossIntelligence` (inside `buildCaseContext`) would
+   * run with an empty matrix and emit ZERO correlations regardless of the
+   * data. A GEOINT correlation needs two disciplines (GEOINT from the attached
+   * image, MEDIAINT from a news record), so without the matrix a correctly
+   * attached image would still produce nothing.
+   *
+   * Same server function and same client-fetch shape the correlations panel
+   * already uses. An unreadable matrix maps NOTHING — correlations are then
+   * simply absent, never attributed to a guessed discipline.
+   */
+  const [capabilityRows, setCapabilityRows] = useState<CapabilityReport["rows"] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = (await capabilityReport()) as unknown as CapabilityReport;
+        if (!cancelled) setCapabilityRows(r.rows);
+      } catch {
+        if (!cancelled) setCapabilityRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const [caseContext, setCaseContext] = useState<CaseContext | null>(null);
+  const [contextBlocker, setContextBlocker] = useState<string | null>(null);
+  const [casePlan, setCasePlan] = useState<OsintPlan | null>(null);
+  const [groundedQuestion, setGroundedQuestion] = useState("");
+  const [grounded, setGrounded] = useState<GroundedResult | null>(null);
+
+  /**
+   * Plans the target so the context's completeness block carries the passive
+   * policy's real refusal text. Planning is READ-ONLY — `planOsintInvestigation`
+   * starts no job and enters nothing into the job store. A failure degrades to
+   * `null`, which `assessCompleteness` reports as an unknown plan rather than as
+   * full coverage.
+   */
+  useEffect(() => {
+    if (!activeCaseObj?.target) {
+      setCasePlan(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const plan = (await planOsintInvestigation({
+          data: { target: activeCaseObj.target },
+        })) as OsintPlan;
+        if (!cancelled) setCasePlan(plan);
+      } catch {
+        if (!cancelled) setCasePlan(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCaseObj?.target]);
+
+  /**
+   * Assembles what the grounded agent may see.
+   *
+   * The same case-scope rules as the case panels: a MISMATCH or UNSCOPED
+   * verdict means the snapshot belongs elsewhere, and feeding it to a model
+   * would attribute another case's evidence to this one — with citations that
+   * look valid.
+   */
+  useEffect(() => {
+    if (!selectedCaseId || !activeCaseObj) {
+      setCaseContext(null);
+      setContextBlocker(NO_CASE_SELECTED);
+      setGrounded(null);
+      return;
+    }
+    const graph = getGraphForCase(selectedCaseId);
+    const timeline = getTimelineForCase(selectedCaseId);
+    const graphOk = graph.verdict.result === "MATCH" && graph.snapshot;
+    const timelineOk = timeline.verdict.result === "MATCH" && timeline.snapshot;
+
+    if (!graphOk && !timelineOk) {
+      setCaseContext(null);
+      setContextBlocker(
+        "This case has no stored run, so there is no collected evidence to reason over. That is a collection state, not a finding — nothing is substituted, and no other case's data is used.",
+      );
+      setGrounded(null);
+      return;
+    }
+    setContextBlocker(null);
+    const run = getCaseRuns().find((r) => r.caseId === selectedCaseId) ?? null;
+    setCaseContext(
+      buildCaseContext({
+        caseId: selectedCaseId,
+        caseTitle: activeCaseObj.title,
+        target: activeCaseObj.target,
+        description: activeCaseObj.description ?? "",
+        // The SNAPSHOT's provenance is authoritative, not the selected run.
+        runId: (timelineOk ? timeline.snapshot!.runId : graph.snapshot?.runId) ?? run?.id ?? null,
+        investigationId:
+          (timelineOk ? timeline.snapshot!.investigationId : graph.snapshot?.investigationId) ?? "",
+        runStatus: run?.status ?? null,
+        collectedAt: (timelineOk ? timeline.snapshot!.savedAt : graph.snapshot?.savedAt) ?? "",
+        evidence: timelineOk ? timeline.snapshot!.evidence : [],
+        entities: graphOk ? graph.snapshot!.entities : [],
+        relationships: graphOk ? graph.snapshot!.relationships : [],
+        plan: casePlan,
+        // Same verdict gate as every sibling field — a bare `.snapshot` read
+        // here would inherit another case's truncation via the unscoped
+        // fallback.
+        graphTruncation: graphOk ? graph.snapshot!.truncation : undefined,
+        timelineTruncation: timelineOk ? timeline.snapshot!.truncation : undefined,
+        extractedAt: new Date().toISOString(),
+        capabilityRows: [...(capabilityRows ?? []), GEOINT_DISCIPLINE_ROW],
+      }),
+    );
+  }, [selectedCaseId, activeCaseObj, casePlan, capabilityRows]);
 
   // Execute analysis against the configured open-weight LLM provider
   const handleExecuteTask = async () => {
@@ -165,6 +358,12 @@ function AgentsPage() {
     }
     setLoading(true);
     setOutputResult(null);
+    // Cleared here, not just on a successful grounded run: without this, running
+    // Grounded Analysis and then switching to a different capability left the
+    // stale grounded answer on screen — the render below shows `grounded` before
+    // `outputResult`, so a freshly computed non-grounded result would silently
+    // never appear.
+    setGrounded(null);
 
     // Only the capabilities that actually call a model may log model activity.
     // THREAT_CLASSIFY and FOCAL_POINT are deterministic and make ZERO network
@@ -189,6 +388,35 @@ function AgentsPage() {
       // No risk score. This was `activeCaseObj?.risk || 65`, defaulting to a
       // number nobody assigned, then fed to the model as "Risk Score: 65/100"
       // and rendered as "RISK 65%". Nothing in this system computes one.
+
+      if (cap === "GROUNDED_CASE_ANALYSIS") {
+        // The one capability that reasons over evidence. It REFUSES rather than
+        // answering ungrounded — an answer with no case behind it is exactly the
+        // fluent-but-attributable-to-nothing output this capability exists to
+        // rule out.
+        if (!caseContext) {
+          throw new Error(
+            contextBlocker ??
+              "No case context is available. Select a case with a completed run before running grounded analysis.",
+          );
+        }
+        if (!groundedQuestion.trim()) {
+          throw new Error("Enter a question for the grounded analysis to answer.");
+        }
+        const res = (await llmAnalyseCaseGrounded({
+          data: { context: caseContext, question: groundedQuestion },
+        })) as unknown as GroundedResult;
+        setGrounded(res);
+        setTerminalLog((prev) => [
+          ...prev,
+          `[SYS] Grounded on case ${caseContext.caseId}: ${caseContext.evidence.length} evidence, ${caseContext.claims.length} claims, ${caseContext.contradictions.length} contradictions.`,
+          `[SYS] Collection status ${caseContext.completeness.status}.`,
+        ]);
+        setOutputResult(null);
+        setLoading(false);
+        toast.success("Grounded analysis complete.");
+        return;
+      }
 
       if (cap === "SUMMARIZE_CASE") {
         title = `INVESTIGATION DOSSIER: ${activeCaseObj?.title || "GENERAL"}`;
@@ -400,24 +628,11 @@ function AgentsPage() {
                 </select>
               </div>
 
-              {/* Select Watchlist */}
-              <div className="space-y-1">
-                <label className="text-[9px] uppercase tracking-wider text-console-muted/60">
-                  2. Correlated Watchlist
-                </label>
-                <select
-                  value={selectedWatchlistId}
-                  onChange={(e) => setSelectedWatchlistId(e.target.value)}
-                  className="w-full h-8 px-2 border border-console-border bg-console-deep rounded text-[10px] text-console-text font-mono outline-none"
-                >
-                  <option value="">-- No Watchlist Link --</option>
-                  {watchlists.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* A "Correlated Watchlist" dropdown lived here. It was a dead
+                  control — its value was written to state and never read by any
+                  capability, so selecting a watchlist changed nothing. Removed
+                  per this project's "wire it or remove it" rule rather than
+                  inventing a correlation path no backend supports. */}
 
               {/* Entity Inputs (for Compare/Explain) */}
               <div className="grid grid-cols-2 gap-2 pt-1">
@@ -432,6 +647,7 @@ function AgentsPage() {
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
                         {ent}
+                        {sampleEntities.has(ent) ? "  [SAMPLE — not case evidence]" : ""}
                       </option>
                     ))}
                   </select>
@@ -447,6 +663,7 @@ function AgentsPage() {
                     {availableEntities.map((ent) => (
                       <option key={ent} value={ent}>
                         {ent}
+                        {sampleEntities.has(ent) ? "  [SAMPLE — not case evidence]" : ""}
                       </option>
                     ))}
                   </select>
@@ -463,9 +680,48 @@ function AgentsPage() {
               {/* Select Capability Task */}
               <div className="space-y-1 pt-1.5 border-t border-console-border/30">
                 <label className="text-[9px] uppercase tracking-wider text-console-muted/60">
-                  3. Target Task Capability
+                  2. Target Task Capability
                 </label>
                 <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                  {/* Grounded-analysis controls and context summary */}
+                  {selectedCapability === "GROUNDED_CASE_ANALYSIS" && (
+                    <div className="mb-3 space-y-2 rounded border border-console-cyan/30 bg-console-deep p-2">
+                      <p className="font-mono text-[9px] font-bold uppercase tracking-wider text-console-cyan">
+                        Grounded in case evidence
+                      </p>
+
+                      {contextBlocker ? (
+                        <p className="font-mono text-[9px] leading-relaxed text-console-amber">
+                          {contextBlocker}
+                        </p>
+                      ) : caseContext ? (
+                        <>
+                          <p className="font-mono text-[9px] leading-relaxed text-console-label">
+                            Case {caseContext.caseId} · run {caseContext.runId ?? "not recorded"} ·
+                            collected {caseContext.collectedAt || "not recorded"} ·{" "}
+                            <span className="text-console-amber">{caseContext.completeness.status} collection</span>
+                          </p>
+                          <p className="font-mono text-[9px] leading-relaxed text-console-muted">
+                            {caseContext.evidence.length} evidence · {caseContext.entities.length} entities ·{" "}
+                            {caseContext.relationships.length} relationships · {caseContext.claims.length} claims ·{" "}
+                            {caseContext.contradictions.length} contradictions
+                          </p>
+                          <textarea
+                            aria-label="Grounded question"
+                            value={groundedQuestion}
+                            onChange={(e) => setGroundedQuestion(e.target.value)}
+                            placeholder="Ask a question this case's evidence can answer…"
+                            className="h-16 w-full rounded border border-console-border bg-console-surface px-2 py-1 font-mono text-[10px] text-console-text outline-none focus:border-console-blue"
+                          />
+                          <p className="font-mono text-[9px] leading-relaxed text-console-label">
+                            The model sees only this case's evidence. Answers that cite an id which
+                            is not in this case are rejected and retried, then refused.
+                          </p>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+
                   {CAPABILITIES.map((cap) => (
                     <button
                       key={cap.id}
@@ -475,6 +731,11 @@ function AgentsPage() {
                       <span className="font-bold uppercase text-[9px]">{cap.name}</span>
                       <span className="text-[8px] text-console-muted/50 mt-0.5 leading-normal">
                         {cap.desc}
+                        {!(cap as { grounded?: boolean }).grounded && (
+                          <span className="mt-0.5 block font-mono text-[8px] uppercase tracking-wider text-console-amber">
+                            Case metadata only — not grounded in collected evidence
+                          </span>
+                        )}
                       </span>
                     </button>
                   ))}
@@ -538,25 +799,158 @@ function AgentsPage() {
               )}
             </CardHeader>
 
-            <CardContent className="p-5 flex-1 flex flex-col justify-between space-y-6">
-              {outputResult ? (
+            <CardContent className="p-5 flex-1 flex flex-col space-y-6">
+              {/* The selected case's collected intelligence, exposed as
+                  compact detail from the CaseContext the page already builds.
+                  Renders whenever a scoped case is selected (independent of the
+                  chosen capability); a case with no scoped snapshot leaves
+                  caseContext null and the left column shows the blocker instead. */}
+              {caseContext && <CaseContextDetail context={caseContext} />}
+
+              {/* ── Grounded answer, with citations that resolve ── */}
+              {grounded ? (
+                <div className="space-y-4">
+                  <div className="border-b border-console-border/40 pb-2">
+                    <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
+                      Grounded analysis · case {grounded.caseId}
+                    </span>
+                    <p className="mt-1 text-[11px] leading-relaxed text-console-text">{grounded.answer}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-[10px] font-bold uppercase tracking-wide text-console-text">
+                      Findings ({grounded.findings.length})
+                    </h3>
+                    {grounded.findings.map((f, i) => (
+                      <div key={i} className="rounded border border-console-border bg-console-deep p-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[9px] font-bold text-console-text">F-{i + 1}</span>
+                          {/* The class badge is never optional — it is what stops an
+                              INFERRED reading as an OBSERVED fact. */}
+                          <Badge
+                            variant="outline"
+                            className={`text-[8px] font-normal ${
+                              f.claimClass === "OBSERVED"
+                                ? "border-console-green/40 bg-console-green/10 text-console-green"
+                                : f.claimClass === "INFERRED" || f.claimClass === "HYPOTHESIS"
+                                  ? "border-console-amber/40 bg-console-amber/10 text-console-amber"
+                                  : "border-console-purple/40 bg-console-purple/10 text-console-purple"
+                            }`}
+                          >
+                            {f.claimClass}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-console-text">{f.statement}</p>
+
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {f.evidenceRefs.length === 0 ? (
+                            <span className="font-mono text-[9px] text-console-label">
+                              no evidence cited — inference only
+                            </span>
+                          ) : (
+                            f.evidenceRefs.map((ref) => {
+                              // Every rendered citation is resolved against the
+                              // context the model was given. An unresolvable one
+                              // cannot reach here — validation rejects the answer —
+                              // but it is checked again at render rather than assumed.
+                              const rec = caseContext ? resolveCitation(caseContext, ref) : null;
+                              return (
+                                <a
+                                  key={ref}
+                                  href={`/vault?q=${encodeURIComponent(ref)}`}
+                                  title={
+                                    rec
+                                      ? `${rec.collector} · ${rec.source} · ${rec.collectedAt}${rec.sourceUrl ? ` · ${rec.sourceUrl}` : ""}`
+                                      : "This id is not in the supplied case context."
+                                  }
+                                  className={`font-mono text-[9px] underline ${
+                                    rec ? "text-console-cyan" : "text-console-red"
+                                  }`}
+                                >
+                                  [{ref}]
+                                  {rec ? ` ${rec.collector}` : " UNRESOLVED"}
+                                </a>
+                              );
+                            })
+                          )}
+                        </div>
+                        {/* TWO different quantities, labelled apart. The class
+                            badge above is the MODEL's classification; this is
+                            the collectors' own confidence in the records cited,
+                            computed in code after the model answered. */}
+                        <p className="mt-0.5 text-[9px] leading-relaxed text-console-label">
+                          Evidence confidence:{" "}
+                          {f.evidenceConfidence.cited === 0 ? (
+                            <span className="text-console-muted">no evidence cited</span>
+                          ) : f.evidenceConfidence.band === null ? (
+                            <span className="text-console-amber">
+                              not measured by any cited collector ({f.evidenceConfidence.unmeasured} of{" "}
+                              {f.evidenceConfidence.cited} records) — unmeasured is not weak, and not strong
+                            </span>
+                          ) : (
+                            <span className="text-console-muted">
+                              {f.evidenceConfidence.band} band, weakest cited record{" "}
+                              {f.evidenceConfidence.min}
+                              {f.evidenceConfidence.max !== f.evidenceConfidence.min &&
+                                ` (range ${f.evidenceConfidence.min}–${f.evidenceConfidence.max})`}
+                              {f.evidenceConfidence.unmeasured > 0 &&
+                                ` · ${f.evidenceConfidence.unmeasured} cited record(s) unmeasured`}
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-[9px] italic leading-relaxed text-console-muted">
+                          Basis (model's own reasoning): {f.basis}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-[10px] font-bold uppercase tracking-wide text-console-amber">
+                      Not supported by this case's evidence
+                    </h3>
+                    <ul className="space-y-0.5">
+                      {grounded.notSupported.map((n, i) => (
+                        <li key={i} className="text-[9px] leading-relaxed text-console-muted">
+                          - {n}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <p className="rounded border border-console-amber/30 bg-console-amber/5 px-2 py-1 text-[9px] leading-relaxed text-console-amber">
+                    {grounded.collectionCaveat}
+                  </p>
+
+                  {caseContext && (
+                    <div className="space-y-0.5 border-t border-console-border/40 pt-2">
+                      {caseContext.limitations.map((l) => (
+                        <p key={l} className="text-[9px] leading-relaxed text-console-label">
+                          {l}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[9px] text-console-label">
+                    Generated by {grounded.model} ({grounded.provider}). Citable evidence in this
+                    case: {grounded.citableIds.length} record(s).
+                  </p>
+                </div>
+              ) : outputResult ? (
                 <div className="space-y-5 flex-1 flex flex-col justify-between">
                   <div className="space-y-5">
                     {/* Header Details */}
-                    <div className="border-b border-console-border/40 pb-3 flex justify-between items-start flex-wrap gap-4">
-                      <div>
-                        <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
-                          REPORT TITLE
-                        </span>
-                        <h2 className="text-sm font-bold text-console-text uppercase tracking-wide mt-0.5">
-                          {outputResult.title}
-                        </h2>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
-                          THREAT INDEX
-                        </span>
-                      </div>
+                    {/* A right-aligned "THREAT INDEX" label sat here with no
+                        value ever rendered beneath it — a label implying a
+                        measurement the system does not compute. Removed. */}
+                    <div className="border-b border-console-border/40 pb-3">
+                      <span className="text-[9px] uppercase tracking-wider text-console-muted/60">
+                        REPORT TITLE
+                      </span>
+                      <h2 className="text-sm font-bold text-console-text uppercase tracking-wide mt-0.5">
+                        {outputResult.title}
+                      </h2>
                     </div>
 
                     {/* Report Text blocks */}

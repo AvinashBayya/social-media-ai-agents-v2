@@ -62,7 +62,31 @@ const SKIP_DIRS = ["src/components/ui"];
  * wholesale would drown real findings. **Any module whose strings reach the UI
  * belongs on this list.**
  */
-const SCAN_FILES = ["src/utils/collection-policy.ts", "src/utils/social.ts"];
+const SCAN_FILES = [
+  "src/utils/collection-policy.ts",
+  "src/utils/social.ts",
+  // AUDIO_SPECTRAL_GAPS's / AUDIO_EVENT_GAPS's capability/requires/limitation
+  // strings render verbatim via NotImplementedPanel on /videos — same
+  // rationale as the two files above. Recorded explicitly in the Part B
+  // plan this repo's own PROJECT_MEMORY.md carries: a new Gap[] array in a
+  // new file is NOT automatically covered by SCAN_DIRS, the exact "moved
+  // copy out of a scanned file, lost the guard" escape this test's own
+  // history (2026-08-12) already caught once for social.ts.
+  "src/utils/audio-frequency.ts",
+  "src/utils/audio-events.ts",
+  // FILE_PROVENANCE_NOT_IMPLEMENTED's capability/requires/limitation strings,
+  // plus every ProvenanceField's own note/origin/value text, render verbatim
+  // via NotImplementedPanel and the file-provenance-report.tsx UI on the
+  // global search bar's file-forensics panel — but the strings themselves
+  // live in these two files, not in the component that renders them, so
+  // scanning only SCAN_DIRS would never see them. Same escape as above.
+  "src/utils/file-provenance.ts",
+  "src/utils/file-provenance-client.ts",
+  // Same rationale again: interpretRevocationChecks's field text renders via
+  // file-provenance-report.tsx's SignatureRevocationCheck component, but the
+  // strings themselves live here.
+  "src/utils/pdf-revocation.ts",
+];
 
 function posix(p: string): string {
   return relative(ROOT, p).split("\\").join("/");

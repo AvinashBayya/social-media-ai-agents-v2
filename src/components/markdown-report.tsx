@@ -41,46 +41,46 @@ export function MarkdownReport({
               {children}
             </h3>
           ),
-          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          p: ({ children }) => <p className="mb-2 last:mb-0 text-console-text">{children}</p>,
           strong: ({ children }) => <strong className="font-bold text-console-text">{children}</strong>,
-          em: ({ children }) => <em className="italic text-[#CBD5E1]">{children}</em>,
-          ul: ({ children }) => <ul className="mb-2 list-disc space-y-0.5 pl-4">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-2 list-decimal space-y-0.5 pl-4">{children}</ol>,
-          li: ({ children }) => <li>{children}</li>,
+          em: ({ children }) => <em className="italic text-console-text/90 font-medium">{children}</em>,
+          ul: ({ children }) => <ul className="mb-2 list-disc space-y-0.5 pl-4 text-console-text">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-2 list-decimal space-y-0.5 pl-4 text-console-text">{children}</ol>,
+          li: ({ children }) => <li className="text-console-text">{children}</li>,
           hr: () => <hr className="my-3 border-console-border" />,
           a: ({ children, href }) => (
             <a
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-console-blue hover:underline"
+              className="text-console-blue hover:underline font-medium"
             >
               {children}
             </a>
           ),
           code: ({ children }) => (
-            <code className="rounded bg-console-deep px-1 py-0.5 font-mono text-[10px] text-console-amber">
+            <code className="rounded bg-console-deep px-1.5 py-0.5 font-mono text-[10px] text-console-amber font-semibold">
               {children}
             </code>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="my-2 border-l-2 border-console-border pl-2.5 text-console-muted">
+            <blockquote className="my-2 border-l-2 border-console-cyan/60 pl-2.5 text-console-text italic">
               {children}
             </blockquote>
           ),
           table: ({ children }) => (
-            <div className="mb-2 overflow-x-auto rounded border border-console-border">
+            <div className="mb-3 overflow-x-auto rounded border border-console-border shadow-sm">
               <table className="w-full border-collapse text-left">{children}</table>
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="bg-console-deep font-mono text-[9px] uppercase tracking-wide text-console-muted">
+            <thead className="bg-console-deep font-mono text-[10px] uppercase tracking-wide text-console-cyan font-bold border-b border-console-border">
               {children}
             </thead>
           ),
-          tr: ({ children }) => <tr className="border-t border-console-border">{children}</tr>,
-          th: ({ children }) => <th className="px-2 py-1.5 font-bold">{children}</th>,
-          td: ({ children }) => <td className="px-2 py-1.5 align-top">{children}</td>,
+          tr: ({ children }) => <tr className="border-t border-console-border/70 hover:bg-console-surface/50">{children}</tr>,
+          th: ({ children }) => <th className="px-3 py-2 font-bold text-console-text">{children}</th>,
+          td: ({ children }) => <td className="px-3 py-2 align-top text-console-text font-normal">{children}</td>,
         }}
       >
         {text}

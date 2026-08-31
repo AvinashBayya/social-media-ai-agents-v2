@@ -82,6 +82,20 @@ describe("newsCollector.execute", () => {
     expect(outcome.execution.status).toBe("failed");
     expect(outcome.execution.error?.reason).toBe("rate-limited");
   });
+
+  test("a GDELT failure is reported honestly, never masked by a fabricated Google News RSS fallback", async () => {
+    // This collector used to fall back to Google News RSS on GDELT failure,
+    // and — because RSS items carry no real coordinate, credibility score or
+    // reliable timestamp — fabricated all three for every article: India's
+    // geographic centroid (20.5937, 78.9629) as if it were each article's
+    // real location, a flat invented 0.8 credibility, and `new Date()` when
+    // pubDate was missing. A 500 here is exactly the kind of failure that
+    // fallback used to paper over with fake data instead of reporting it.
+    stubFetch(() => new Response("upstream error", { status: 500 }));
+    const outcome = await newsCollector.execute({ type: "person", value: "test query" });
+    expect(outcome.execution.status).toBe("failed");
+    expect(outcome.raw).toBeNull();
+  });
 });
 
 describe("newsCollector.normalize", () => {

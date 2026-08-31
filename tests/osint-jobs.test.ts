@@ -36,6 +36,19 @@ function completedOutcome(
   };
 }
 
+/** Every stub declares this by default — these tests are about job orchestration, not the passive-only gate. */
+const STUB_CAPABILITY = (id: string) => ({
+  sourceId: id,
+  name: id,
+  collectionMode: "PASSIVE_API" as const,
+  activeCapable: false,
+  allowed: true,
+  requiresAuth: false,
+  requiresManualAction: false,
+  apiAvailable: true,
+  notes: "Test stub.",
+});
+
 function instantCollector(
   id: string,
   targetTypes: TargetType[],
@@ -48,6 +61,7 @@ function instantCollector(
     supportedTargetTypes: targetTypes,
     requiresCredentials: false,
     isOptional: false,
+    capability: STUB_CAPABILITY(id),
     async execute() {
       return completedOutcome(entities);
     },
@@ -74,6 +88,7 @@ function deferredCollector(id: string, targetTypes: TargetType[]) {
     supportedTargetTypes: targetTypes,
     requiresCredentials: false,
     isOptional: false,
+    capability: STUB_CAPABILITY(id),
     async execute() {
       return pending;
     },
@@ -98,6 +113,7 @@ function hangingCollector(id: string, targetTypes: TargetType[]): Collector {
     supportedTargetTypes: targetTypes,
     requiresCredentials: false,
     isOptional: false,
+    capability: STUB_CAPABILITY(id),
     execute: () => new Promise(() => {}),
     normalize(outcome) {
       return emptyInvestigationResult(outcome.execution);

@@ -28,6 +28,8 @@ import {
   KeyRound,
   Sparkles,
   Gauge,
+  UserSearch,
+  ExternalLink,
 } from "lucide-react";
 import {
   JetstreamClient,
@@ -269,6 +271,7 @@ function SocialPage() {
     { id: "All", label: "All Platforms" },
     { id: "Instagram", label: "Instagram" },
     { id: "Facebook", label: "Facebook" },
+    { id: "LinkedIn", label: "LinkedIn" },
     { id: "X / Twitter", label: "X / Twitter" },
     { id: "Reddit", label: "Reddit" },
     { id: "Hacker News", label: "Hacker News" },
@@ -282,7 +285,11 @@ function SocialPage() {
     const mentions = socialData.mentions || [];
     const counts: Record<string, number> = { All: mentions.length };
     for (const m of mentions) {
-      const p = m.platform || "Instagram";
+      // Every real mentions.push() in getSocialIntelligence sets a real
+      // platform, but this fallback stays honest rather than silently
+      // misattributing an unreported one to a specific real platform —
+      // exactly CLAUDE.md's "string literal as measurement" pattern.
+      const p = m.platform || "platform not reported";
       counts[p] = (counts[p] || 0) + 1;
     }
     return counts;
@@ -429,7 +436,7 @@ function SocialPage() {
     return allPosts.filter((p) => {
       const text = (p.text || "").toLowerCase();
       const author = (p.author || "").toLowerCase();
-      const handle = (p.handle || "").toLowerCase();
+      const handle = ((p as any).handle || "").toLowerCase();
       const links = (p.links || []).join(" ").toLowerCase();
 
       const fullContent = `${text} ${author} ${handle} ${links}`;
@@ -677,6 +684,81 @@ function SocialPage() {
 
       {activeTab === "agents" ? (
         <div className="space-y-4">
+          {/* Discovered Account Profiles Intelligence across all 10 target platforms */}
+          <Card className="bg-console-surface border-console-border rounded">
+            <CardContent className="p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-console-border pb-2.5">
+                <div>
+                  <h3 className="text-xs font-bold text-console-text uppercase flex items-center gap-2">
+                    <UserSearch className="size-4 text-console-cyan" />
+                    Multi-Platform Account & Profile Intelligence
+                  </h3>
+                  <p className="text-[9px] text-console-muted/70 mt-0.5 font-mono">
+                    Agent-resolved account handles and presence sweep across Instagram, Facebook, LinkedIn, X, Reddit, Hacker News, YouTube, Telegram, Medium for:{" "}
+                    <strong className="text-console-cyan">"{query}"</strong>
+                  </p>
+                </div>
+                <Badge variant="outline" className="border-console-cyan text-console-cyan text-[9px] font-mono">
+                  10 Social Media Platforms
+                </Badge>
+              </div>
+
+              {intelLoading ? (
+                <div className="py-4 text-center text-[10px] text-console-cyan flex items-center justify-center gap-2 font-mono animate-pulse">
+                  <Loader2 className="size-3.5 animate-spin" /> Querying multi-platform agent scrapers & account resolvers...
+                </div>
+              ) : socialData.profiles?.length > 0 ? (
+                <div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 font-mono">
+                  {socialData.profiles.map((p: any, idx: number) => {
+                    const isFound = p.handle && p.handle !== "No public profile found";
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-2.5 rounded border transition-colors ${
+                          isFound
+                            ? "bg-console-deep/50 border-console-cyan/30 hover:border-console-cyan/60"
+                            : "bg-console-deep/20 border-console-border/40 opacity-70"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[9px] mb-1">
+                          <span className="font-bold uppercase text-console-text">{p.platform}</span>
+                          <span
+                            className={`px-1 rounded text-[8px] ${
+                              isFound ? "bg-console-cyan/10 text-console-cyan border border-console-cyan/30" : "bg-console-elevated text-console-muted"
+                            }`}
+                          >
+                            {isFound ? "Resolved" : "Inactive"}
+                          </span>
+                        </div>
+                        <div className="text-[10.5px] font-bold text-console-cyan truncate">
+                          {p.handle}
+                        </div>
+                        <div className="text-[9px] text-console-muted/70 flex items-center justify-between mt-1 pt-1 border-t border-console-border/30">
+                          <span>{p.followers !== "N/A" ? p.followers : p.status}</span>
+                          {p.profileUrl && (
+                            <a
+                              href={p.profileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-console-blue hover:underline inline-flex items-center gap-0.5"
+                              title={`Open ${p.platform} profile`}
+                            >
+                              <ExternalLink className="size-2.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-[10px] text-console-muted text-center py-2">
+                  No profile handles resolved yet for "{query}". Try searching with account handle (e.g. "@elonmusk", "spez").
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Platform Filters Bar */}
           <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs bg-console-surface border border-console-border p-2.5 rounded">
             <span className="text-[10px] uppercase font-bold text-console-muted mr-1">Platform Filter:</span>
@@ -751,7 +833,7 @@ function SocialPage() {
                         className="flex gap-3 px-4 py-3.5 hover:bg-console-elevated/30 transition-colors"
                       >
                         <span className="grid size-8 shrink-0 place-items-center rounded bg-console-elevated font-semibold text-console-text uppercase">
-                          {(p.author || "US").replace("@", "").slice(0, 2)}
+                          {(p.author || "—").replace("@", "").slice(0, 2)}
                         </span>
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="flex items-center gap-2 text-[9px]">
@@ -759,10 +841,10 @@ function SocialPage() {
                               variant="secondary"
                               className="h-4 px-1.5 text-[8px] border-console-border bg-console-deep rounded-none uppercase text-console-cyan"
                             >
-                              {p.platform || "Instagram"}
+                              {p.platform || "not reported"}
                             </Badge>
                             <span className="font-semibold text-console-text">
-                              {p.author || "Anonymous Signal"}
+                              {p.author || "author not reported"}
                             </span>
                             <span className="text-console-label text-[8px] ml-1">
                               {p.pubDate ? new Date(p.pubDate).toLocaleTimeString() : "recent"}
@@ -773,7 +855,7 @@ function SocialPage() {
                                 payload={{
                                   kind: "social",
                                   title: p.text.slice(0, 140),
-                                  source: `${p.author || "Agent Scraped"} (${p.platform || "Instagram"})`,
+                                  source: `${p.author || "author not reported"} (${p.platform || "platform not reported"})`,
                                   url: p.url,
                                   publishedAt: p.pubDate,
                                   excerpt: p.text,
@@ -857,7 +939,11 @@ function SocialPage() {
               <div className="flex justify-between">
                 <dt>Posts received</dt>
                 <dd className="tabular-nums text-console-text">
-                  {status?.received.toLocaleString() ?? 0}
+                  {/* Before the socket object exists, nothing has been measured
+                      yet — a real "0" only starts once status itself is real,
+                      matching the state/detail fields above which already
+                      distinguish "not yet connected" from a genuine count. */}
+                  {status ? status.received.toLocaleString() : "—"}
                 </dd>
               </div>
               <div className="flex justify-between">
@@ -870,7 +956,9 @@ function SocialPage() {
               </div>
               <div className="flex justify-between">
                 <dt>Dropped (buffer full)</dt>
-                <dd className="tabular-nums text-console-text">{status?.dropped.toLocaleString() ?? 0}</dd>
+                <dd className="tabular-nums text-console-text">
+                  {status ? status.dropped.toLocaleString() : "—"}
+                </dd>
               </div>
             </dl>
             <p className="break-all text-[9px] leading-relaxed text-console-label">
@@ -1365,6 +1453,23 @@ function SocialPage() {
 
               <p className="mt-2 rounded border border-console-amber/30 bg-console-amber/5 p-2 text-[10px] leading-relaxed text-console-amber">
                 {CIB_CAVEAT}
+              </p>
+
+              {/* Two things on this page do not map to a case's collected evidence: the
+                  CIB signals (analytical derivations, not observations) and the live
+                  firehose in bulk (arbitrary accounts matching a keyword, not a target
+                  lookup, so attaching them would fabricate an ownership relationship).
+                  The safe, existing path is per-post: the bookmark on each post pins it
+                  to a case with its full provenance. */}
+              <p
+                data-testid="social-cib-not-attachable"
+                className="mt-2 rounded border border-console-border bg-console-deep/60 p-2 text-[10px] leading-relaxed text-console-label"
+              >
+                Coordination signals are derivations recomputed from evidence, not source
+                observations, so they are not attached to a case as evidence. The live stream is not
+                a target lookup either — its posts are arbitrary accounts matching a keyword — so it
+                is not bulk-attachable. To bring a specific post into a case, use the bookmark on that
+                post; it pins with the post's full source and provenance.
               </p>
 
               {cibError && (

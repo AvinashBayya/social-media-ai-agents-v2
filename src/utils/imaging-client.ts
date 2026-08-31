@@ -607,6 +607,40 @@ export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * Crops one rectangular region out of `source` at full quality — no
+ * MAX_ANALYSIS_EDGE downscaling, unlike `decodeImage` above, since this is
+ * for an analyst zooming into a detail (a license plate, a weapon), not bulk
+ * pixel analysis. `box` is `[x0, y0, x1, y1]` in the SAME pixel space the
+ * caller's coordinates already are in — for a Grounding DINO detection, that
+ * is the exact image `Blob` that was sent to `/ai/detect`, since ai-service
+ * returns box coordinates relative to whatever image it actually received
+ * (see `ai-service/app/detect.py`'s `target_sizes`) — so the caller must crop
+ * from that SAME blob, never a separately-loaded/rescaled copy, or the crop
+ * will land on the wrong region.
+ */
+export async function cropImageRegion(source: Blob, box: [number, number, number, number]): Promise<Blob> {
+  const url = URL.createObjectURL(source);
+  try {
+    const img = await loadImageElement(url);
+    const [bx0, by0, bx1, by1] = box;
+    const left = Math.max(0, Math.min(bx0, bx1));
+    const top = Math.max(0, Math.min(by0, by1));
+    const right = Math.min(img.naturalWidth, Math.max(bx0, bx1));
+    const bottom = Math.min(img.naturalHeight, Math.max(by0, by1));
+    const width = Math.max(1, Math.round(right - left));
+    const height = Math.max(1, Math.round(bottom - top));
+
+    const { canvas, ctx } = canvas2d(width, height);
+    ctx.drawImage(img, left, top, width, height, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new MediaError("Could not export the cropped region as an image.", "crop");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 // ─── Corpus persistence ────────────────────────────────────────────────────
 
 import type { HashedImage } from "./imaging";

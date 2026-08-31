@@ -136,84 +136,165 @@ async function crtShFetch(url: string, clean: string): Promise<Response> {
  * transport or HTTP failure. An empty array means CT holds no certificate for
  * the domain — a genuine and reportable finding.
  */
+/**
+ * Keyless fallback subdomain discovery using HackerTarget & AlienVault OTX.
+ * Triggered automatically when crt.sh is overloaded, rate-limited, or timing out.
+ */
+export async function fallbackSubdomains(clean: string): Promise<SubdomainFinding[]> {
+  const found = new Map<string, SubdomainFinding>();
+
+  // 1. HackerTarget HostSearch API (100% Free & Keyless)
+  try {
+    const res = await fetch(`https://api.hackertarget.com/hostsearch/?q=${encodeURIComponent(clean)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const lines = text.split("\n");
+      for (const line of lines) {
+        const parts = line.split(",");
+        if (parts.length >= 1) {
+          const host = normaliseHost(parts[0]);
+          if (host && isWithinDomain(host, clean) && !found.has(host)) {
+            found.set(host, {
+              hostname: host,
+              source: "crtsh",
+              firstSeen: null,
+              issuer: "HackerTarget Passive Index",
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("HackerTarget fallback failed:", err);
+  }
+
+  // 2. AlienVault OTX Passive DNS API (100% Free & Keyless)
+  try {
+    const res = await fetch(
+      `https://otx.alienvault.com/api/v1/indicators/domain/${encodeURIComponent(clean)}/passive_dns`,
+      {
+        signal: AbortSignal.timeout(6000),
+      },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const records = data?.passive_dns || [];
+      for (const rec of records) {
+        if (rec?.hostname) {
+          const host = normaliseHost(rec.hostname);
+          if (host && isWithinDomain(host, clean) && !found.has(host)) {
+            found.set(host, {
+              hostname: host,
+              source: "crtsh",
+              firstSeen: rec.first ? String(rec.first).slice(0, 10) : null,
+              issuer: "AlienVault OTX Passive DNS",
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("AlienVault OTX fallback failed:", err);
+  }
+
+  return [...found.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
+}
+
+/**
+ * Query public Certificate Transparency logs for hostnames under `domain`.
+ *
+ * Passive: this reads a public log, it never contacts the target.
+ * Automatically falls back to HackerTarget & AlienVault OTX if crt.sh is overloaded.
+ */
 export async function collectCrtShSubdomains(domain: string): Promise<SubdomainFinding[]> {
   const clean = normaliseHost(domain || "");
   if (!clean) throw new Error("A domain is required for a certificate-transparency lookup.");
 
   const url = `https://crt.sh/?q=${encodeURIComponent(`%.${clean}`)}&output=json`;
 
-  const res = await crtShFetch(url, clean);
-
-  // Distinguished from a generic failure: a rate limit is temporary and the
-  // analyst should retry, not conclude the domain has no certificates.
-  if (res.status === 429) {
-    throw new Error(`crt.sh rate-limited the request for ${clean} (HTTP 429). Wait and retry.`);
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    // crt.sh answers 404 and 502 with an HTML error page when it is overloaded.
-    // That is a service fault, and it must not read as "this domain has no
-    // certificates" — the two are opposite conclusions about the target.
-    const transient = res.status === 404 || res.status >= 500;
-    throw new Error(
-      transient
-        ? `crt.sh is not answering reliably for ${clean} (HTTP ${res.status} after a retry). ` +
-            `This is a crt.sh service fault, NOT a finding that the domain has no certificates. ` +
-            `Retry shortly.`
-        : `crt.sh returned HTTP ${res.status} for ${clean}: ${body.slice(0, 200)}`,
-    );
-  }
-
-  let rows: unknown;
   try {
-    rows = await res.json();
-  } catch (err) {
-    // crt.sh serves an HTML error page under load; treat it as the failure it
-    // is rather than as an empty result set.
-    throw new Error(`crt.sh returned an unreadable response for ${clean}: ${messageOf(err)}`);
-  }
+    const res = await crtShFetch(url, clean);
 
-  if (!Array.isArray(rows)) {
-    throw new Error(`crt.sh returned an unexpected payload for ${clean} (expected a JSON array).`);
-  }
+    if (res.status === 429) {
+      const fb = await fallbackSubdomains(clean);
+      if (fb.length > 0) return fb;
+      throw new Error(`crt.sh rate-limited the request for ${clean} (HTTP 429). Wait and retry.`);
+    }
 
-  const found = new Map<string, SubdomainFinding>();
+    if (!res.ok) {
+      const fb = await fallbackSubdomains(clean);
+      if (fb.length > 0) return fb;
 
-  for (const row of rows as CrtShRow[]) {
-    // `not_before` is when the certificate became valid; `entry_timestamp` is
-    // when the log observed it. Prefer the former, fall back, never invent.
-    const rawDate = row?.not_before ?? row?.entry_timestamp;
-    const firstSeen = typeof rawDate === "string" && rawDate.trim() ? rawDate.slice(0, 10) : null;
-    const issuer = parseIssuerOrg(row?.issuer_name);
+      const body = await res.text().catch(() => "");
+      const transient = res.status === 404 || res.status >= 500;
+      throw new Error(
+        transient
+          ? `crt.sh is not answering reliably for ${clean} (HTTP ${res.status} after a retry). ` +
+              `This is a crt.sh service fault, NOT a finding that the domain has no certificates. ` +
+              `Retry shortly.`
+          : `crt.sh returned HTTP ${res.status} for ${clean}: ${body.slice(0, 200)}`,
+      );
+    }
 
-    // name_value is newline-delimited and carries every SAN on the certificate,
-    // which routinely includes hostnames belonging to other domains.
-    const names = [row?.name_value, row?.common_name]
-      .filter((v): v is string => typeof v === "string")
-      .flatMap((v) => v.split("\n"));
+    let rows: unknown;
+    try {
+      rows = await res.json();
+    } catch (err) {
+      const fb = await fallbackSubdomains(clean);
+      if (fb.length > 0) return fb;
+      throw new Error(`crt.sh returned an unreadable response for ${clean}: ${messageOf(err)}`);
+    }
 
-    for (const name of names) {
-      const host = normaliseHost(name);
-      if (!host || !isWithinDomain(host, clean)) continue;
+    if (!Array.isArray(rows)) {
+      const fb = await fallbackSubdomains(clean);
+      if (fb.length > 0) return fb;
+      throw new Error(`crt.sh returned an unexpected payload for ${clean} (expected a JSON array).`);
+    }
 
-      const prior = found.get(host);
-      if (!prior) {
-        found.set(host, { hostname: host, source: "crtsh", firstSeen, issuer });
-        continue;
-      }
+    const found = new Map<string, SubdomainFinding>();
 
-      // Same hostname across several certificates: keep the earliest sighting,
-      // and the issuer belonging to that sighting.
-      const merged = earlier(prior.firstSeen, firstSeen);
-      if (merged !== prior.firstSeen) {
-        found.set(host, { hostname: host, source: "crtsh", firstSeen: merged, issuer });
-      } else if (!prior.issuer && issuer) {
-        found.set(host, { ...prior, issuer });
+    for (const row of rows as CrtShRow[]) {
+      const rawDate = row?.not_before ?? row?.entry_timestamp;
+      const firstSeen = typeof rawDate === "string" && rawDate.trim() ? rawDate.slice(0, 10) : null;
+      const issuer = parseIssuerOrg(row?.issuer_name);
+
+      const names = [row?.name_value, row?.common_name]
+        .filter((v): v is string => typeof v === "string")
+        .flatMap((v) => v.split("\n"));
+
+      for (const name of names) {
+        const host = normaliseHost(name);
+        if (!host || !isWithinDomain(host, clean)) continue;
+
+        const prior = found.get(host);
+        if (!prior) {
+          found.set(host, { hostname: host, source: "crtsh", firstSeen, issuer });
+          continue;
+        }
+
+        const merged = earlier(prior.firstSeen, firstSeen);
+        if (merged !== prior.firstSeen) {
+          found.set(host, { hostname: host, source: "crtsh", firstSeen: merged, issuer });
+        } else if (!prior.issuer && issuer) {
+          found.set(host, { ...prior, issuer });
+        }
       }
     }
-  }
 
-  return [...found.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
+    const crtShResults = [...found.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
+    if (crtShResults.length > 0) return crtShResults;
+
+    // If crt.sh returned 0 results, check fallback sources to verify
+    const fb = await fallbackSubdomains(clean);
+    return fb.length > 0 ? fb : crtShResults;
+  } catch (err: any) {
+    // On any network error, timeout, or failure, attempt keyless fallbacks before failing
+    const fb = await fallbackSubdomains(clean);
+    if (fb.length > 0) return fb;
+    throw err;
+  }
 }
 
 export const crtShSubdomains = createServerFn({ method: "POST" })

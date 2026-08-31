@@ -105,17 +105,77 @@ export const NOT_MERGEABLE_BY_VALUE: ReadonlySet<EntityType> = new Set(["person"
 export function computeMergeConfidence(
   entityType: EntityType,
   contributingSources: string[],
+  /**
+   * The contributors' OWN confidence scores (2026-08-30, ported).
+   *
+   * Optional so every pre-existing caller and test keeps its behaviour. When
+   * supplied, it BOUNDS the corroboration score; see the two rules below.
+   */
+  contributorScores?: readonly (ConfidenceScore | null | undefined)[],
 ): ConfidenceScore {
   const sources = [...new Set(contributingSources)].sort();
   if (sources.length <= 1) return UNSCORED;
-  const value = Math.min(0.5 + 0.15 * (sources.length - 1), 0.95);
-  return {
-    value,
-    reasons: [
-      `same normalized ${entityType} reported by ${sources.length} independent collectors`,
-      `sources: ${sources.join(", ")}`,
-    ],
-  };
+
+  const corroboration = Math.min(0.5 + 0.15 * (sources.length - 1), 0.95);
+  const reasons = [
+    // "distinct", not "independent": the module has no representation of shared
+    // upstream sources, so two collectors reading the same dataset would count
+    // as two here. Claiming independence would assert something unverified.
+    `same normalized ${entityType} reported by ${sources.length} distinct collectors (independence not verified — two collectors may share an upstream source)`,
+    `sources: ${sources.join(", ")}`,
+  ];
+
+  if (!contributorScores) {
+    return { value: corroboration, reasons };
+  }
+
+  const measured = contributorScores
+    .map((c) => c?.value)
+    .filter((v): v is number => typeof v === "number");
+
+  // WHEN NO CONTRIBUTOR MEASURED ANYTHING, the corroboration score STANDS.
+  //
+  // An existing, tested methodology already establishes the relationship and
+  // its reasoning is sound: two collectors independently reporting the same
+  // address is real evidence that the address EXISTS, whether or not either
+  // scored its own record. That is a different question from how reliable
+  // either observation was.
+  //
+  // The ambiguity it creates — a number in `confidence` that is corroboration,
+  // not observation reliability — is fixed by NAMING it apart wherever it
+  // renders ("Identity confidence (resolution)", with the contributors listed),
+  // not by deleting the signal. The reasons below say so explicitly.
+  if (measured.length === 0) {
+    return {
+      value: corroboration,
+      reasons: [
+        ...reasons,
+        "No contributing collector measured its own confidence. This score reflects CORROBORATION — that independent collectors reported the same value — not any collector's confidence in its observation.",
+      ],
+    };
+  }
+
+  // THE BOUND — corroboration never exceeds the strongest single contributor.
+  //
+  // Three collectors each at 0.30 previously merged to 0.80, i.e. LOW+LOW+LOW
+  // became the HIGH band. Agreement between weak observations is still weak:
+  // three username string-matches do not become a proven identity, which is
+  // exactly what `sherlock.ts`'s own caveat says. The corroboration signal is
+  // kept — it can raise a score TOWARD the best contributor — but it cannot
+  // manufacture reliability no source ever supplied.
+  const strongest = Math.max(...measured);
+  const value = Math.min(corroboration, strongest);
+  if (value < corroboration) {
+    reasons.push(
+      `Bounded by the strongest contributing collector (${strongest}). Corroboration raises confidence toward the best single source, never beyond it.`,
+    );
+  }
+  reasons.push(
+    `contributor confidences: ${contributorScores
+      .map((c) => (typeof c?.value === "number" ? String(c.value) : "unmeasured"))
+      .join(", ")}`,
+  );
+  return { value, reasons };
 }
 
 // ─── Resolution ─────────────────────────────────────────────────────────────
@@ -174,6 +234,21 @@ export function resolveEntities(
     for (const e of group) Object.assign(mergedMetadata, e.metadata);
     mergedMetadata.mergedFrom = [...new Set(sources)].sort();
     mergedMetadata.mergedEntityCount = group.length;
+    /**
+     * The contributors' OWN scores, retained rather than discarded (2026-08-30, ported).
+     *
+     * The merged `confidence` is a corroboration measure. It is NOT the same
+     * quantity as any contributor's evidence confidence, and previously the
+     * contributors' numbers were dropped entirely, leaving no way to see that a
+     * 0.65 merged score sat on two 0.30 observations. `unmeasured` is recorded
+     * as null, never as 0.
+     */
+    mergedMetadata.contributorConfidences = group
+      .map((e) => ({
+        source: e.source,
+        value: typeof e.confidence?.value === "number" ? e.confidence.value : null,
+      }))
+      .sort((a, b) => a.source.localeCompare(b.source));
 
     resolved.push({
       id: mergedId,
@@ -181,7 +256,11 @@ export function resolveEntities(
       value: normalizedValue,
       displayName: first.displayName || first.value,
       source: "entity-resolution",
-      confidence: computeMergeConfidence(first.type, sources),
+      confidence: computeMergeConfidence(
+        first.type,
+        sources,
+        group.map((e) => e.confidence),
+      ),
       metadata: mergedMetadata,
     });
 

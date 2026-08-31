@@ -26,8 +26,18 @@
  */
 
 import { MediaError } from "./imaging-client";
+import { ANALYSIS_SAMPLE_RATE, analyseSpectrum, type SpectralAnalysis, type SpectralAnalysisOptions } from "./audio-frequency";
 
 const TARGET_SAMPLE_RATE = 16_000;
+
+/**
+ * 15 minutes. analyseSpectrum's own measured runtime is sub-second even at
+ * this cap (the FFT itself is cheap — decodeAudioData is the real cost,
+ * already true for the existing transcription feature), so a hard refusal
+ * above this line is the real safety net rather than a Web Worker: an
+ * explicit MediaError the analyst sees, never a silent multi-minute freeze.
+ */
+export const MAX_AUDIO_ANALYSIS_SECONDS = 900;
 
 /**
  * Pure: Float32 PCM samples (one channel, [-1, 1] range) -> a standard
@@ -68,16 +78,26 @@ export function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob 
   return new Blob([buffer], { type: "audio/wav" });
 }
 
+export interface DecodedAudioSamples {
+  /** Mono PCM, [-1, 1] range, at `sampleRate`. */
+  samples: Float32Array;
+  sampleRate: number;
+  duration: number;
+}
+
 /**
  * Decodes the audio track out of an uploaded video/audio file and returns
- * it as a 16kHz mono WAV blob, ready to send to Sarvam. Throws MediaError
- * (stage "decode-audio") if the browser cannot decode this file at all —
- * never falls back to returning the original, undemuxed bytes.
+ * real mono PCM at `targetSampleRate` — the shared decode step behind both
+ * `extractAudioAsWav` (Sarvam transcription) and the spectral-analysis
+ * feature (audio-frequency.ts), so a file is only ever decoded once per
+ * call site rather than each feature re-decoding independently. Throws
+ * MediaError (stage "decode-audio") if the browser cannot decode this file
+ * at all — never falls back to returning the original, undemuxed bytes.
  */
-export async function extractAudioAsWav(
+export async function decodeAudioSamples(
   file: File,
   targetSampleRate: number = TARGET_SAMPLE_RATE,
-): Promise<Blob> {
+): Promise<DecodedAudioSamples> {
   const AudioContextCtor: typeof AudioContext | undefined =
     (window as any).AudioContext ?? (window as any).webkitAudioContext;
   if (!AudioContextCtor) {
@@ -123,5 +143,55 @@ export async function extractAudioAsWav(
     );
   }
 
-  return encodeWavPcm16(rendered.getChannelData(0), targetSampleRate);
+  return {
+    samples: rendered.getChannelData(0),
+    sampleRate: targetSampleRate,
+    duration: rendered.duration,
+  };
+}
+
+/**
+ * Decodes the audio track out of an uploaded video/audio file and returns
+ * it as a 16kHz mono WAV blob, ready to send to Sarvam. Thin wrapper over
+ * `decodeAudioSamples` — kept as its own export since it's the one that
+ * carries the historical doc comment below explaining why this exists at
+ * all (see the module header).
+ */
+export async function extractAudioAsWav(
+  file: File,
+  targetSampleRate: number = TARGET_SAMPLE_RATE,
+): Promise<Blob> {
+  const { samples, sampleRate } = await decodeAudioSamples(file, targetSampleRate);
+  return encodeWavPcm16(samples, sampleRate);
+}
+
+/**
+ * Decode + full spectral analysis in one call — the entry point
+ * audio-spectrum-panel.tsx uses. `analyseSpectrum` itself is synchronous and
+ * pure (see audio-frequency.ts); this async wrapper is the DOM-decode half,
+ * and it's where a duration cap is enforced: a file whose decoded audio
+ * exceeds MAX_AUDIO_ANALYSIS_SECONDS is refused outright (MediaError, stage
+ * "duration-cap") rather than truncated or left to freeze the tab.
+ *
+ * Decodes at audio-frequency.ts's own ANALYSIS_SAMPLE_RATE (not
+ * TARGET_SAMPLE_RATE above, which is a separate Sarvam-tuned constant that
+ * happens to share the same value today) so the two stay explicitly tied
+ * even if one is ever changed independently.
+ */
+export async function analyseAudioFrequencies(
+  file: File,
+  options: SpectralAnalysisOptions = {},
+  onProgress?: (done: number, total: number) => void,
+): Promise<SpectralAnalysis> {
+  const { samples, sampleRate, duration } = await decodeAudioSamples(file, ANALYSIS_SAMPLE_RATE);
+
+  if (duration > MAX_AUDIO_ANALYSIS_SECONDS) {
+    throw new MediaError(
+      `${file.name} decodes to ${Math.round(duration)}s of audio, over the ` +
+        `${Math.round(MAX_AUDIO_ANALYSIS_SECONDS / 60)}-minute cap for spectral analysis. Trim the file and retry.`,
+      "duration-cap",
+    );
+  }
+
+  return analyseSpectrum(samples, sampleRate, options, onProgress);
 }

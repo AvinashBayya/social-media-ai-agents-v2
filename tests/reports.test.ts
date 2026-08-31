@@ -405,9 +405,13 @@ describe("markdown rendering", () => {
     expect(md).toContain("analyst assessment, not reported fact");
   });
 
-  test("confidence qualifiers and their basis are both rendered", () => {
-    expect(md).toContain("HIGH confidence");
-    expect(md).toContain("Confidence basis:");
+  test("confidence qualifiers and their basis are both rendered, labelled as the model's own assessment", () => {
+    // Labelled "Model assessment confidence" rather than a bare "HIGH confidence" —
+    // the model's own assessment of how well the sources support the judgement is
+    // a different quantity from a collector's evidence confidence, and the two
+    // must not render identically.
+    expect(md).toContain("Model assessment confidence: HIGH");
+    expect(md).toContain("Model assessment confidence basis:");
   });
 });
 

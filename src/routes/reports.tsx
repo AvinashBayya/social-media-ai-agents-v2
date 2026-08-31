@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,12 +20,15 @@ import {
   ChevronRight,
   Shield,
   Network,
+  Clock,
+  FolderOpen,
 } from "lucide-react";
 import { getActiveTarget, setActiveTarget } from "@/utils/active-target";
 import { fetchNews } from "./news";
 import { clusterStories, type Article } from "@/utils/analysis";
 import { bandFor, defaultFactors, scoreCorpus } from "@/utils/credibility";
 import {
+  MODEL_CONFIDENCE_LABEL,
   generateIntelligenceProduct,
   renumber,
   sourcesFromArticles,
@@ -41,6 +44,28 @@ import {
 import { renderProductPdf } from "@/utils/report-pdf";
 import { fetchGeoLayers } from "@/utils/geo-sources";
 import { runOsintInvestigation } from "@/utils/osint/orchestrator";
+import { planOsintInvestigation } from "@/utils/osint/jobs";
+import {
+  INVESTIGATIONS_CHANGED_EVENT,
+  getInvestigations,
+  type Investigation as CaseRecord,
+} from "@/utils/investigations-store";
+import { CaseMediaIntPanel } from "@/components/case-mediaint-panel";
+import { CaseCorrelationsPanel } from "@/components/case-correlations-panel";
+import { getCaseRuns, type CaseRun } from "@/utils/cases/case-runs";
+import { getGraphForCase } from "@/utils/graph-store";
+import { getTimelineForCase } from "@/utils/timeline-store";
+import { buildCaseReport, caseReportBlocker } from "@/utils/cases/case-report-build";
+import { capabilityReport, type CapabilityReport } from "@/utils/collectors/capability-report";
+import { GEOINT_DISCIPLINE_ROW } from "@/utils/cases/case-geoint";
+import {
+  COMPLETENESS_CAVEATS,
+  CONTRADICTION_CAVEAT,
+  NO_CONTRADICTIONS_MESSAGE,
+  completenessHeadline,
+} from "@/utils/cases/case-report";
+import type { CaseReportBuild } from "@/utils/cases/case-report-build";
+import type { OsintPlan } from "@/utils/osint/query-planner";
 import type { Investigation } from "@/utils/osint/orchestrator";
 import { LlmQuotaCard } from "@/components/llm-quota";
 
@@ -69,6 +94,19 @@ import { LlmQuotaCard } from "@/components/llm-quota";
 export const DEFAULT_SOURCE_BUDGET = 12;
 
 export const Route = createFileRoute("/reports")({
+  /**
+   * `?case=INV-1001` opens the generator in CASE mode on that case — so "Open
+   * Report" from a case workspace lands ready to report on that case's stored
+   * run, never mid-collection. Strict about SHAPE only; a stale id shows the
+   * case picker's honest "select a case" state.
+   */
+  validateSearch: (search: Record<string, unknown>): { case?: string } => {
+    const raw = search.case;
+    if (typeof raw !== "string") return {};
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > 64) return {};
+    return { case: trimmed };
+  },
   head: () => ({ meta: [{ title: "Report Generator — Sentinel AI" }] }),
   component: ReportsPage,
 });
@@ -97,6 +135,10 @@ function saveProducts(list: IntelligenceProduct[]): void {
 }
 
 function ReportsPage() {
+  // A case handed in via `?case=` from a case workspace's "Open Report" link.
+  // Opening on that case means CASE mode, which never collects.
+  const { case: requestedCase } = Route.useSearch();
+
   // Empty on both server and first client render — getActiveTarget() reads
   // localStorage, unavailable during SSR. A synchronous getActiveTarget()
   // call here made the server-rendered text differ from the client's first
@@ -114,6 +156,53 @@ function ReportsPage() {
   const [osintCollecting, setOsintCollecting] = useState(false);
   const [osintError, setOsintError] = useState("");
   const [osintIncluded, setOsintIncluded] = useState<Investigation | null>(null);
+
+  /**
+   * Report from a stored case run, instead of a fresh collection.
+   *
+   * "SUBJECT" is the pre-existing flow and stays the default: most report
+   * subjects here are open-ended topics ("China Taiwan tensions") that have no
+   * case, and removing that path would delete working capability.
+   *
+   * "CASE" is the new one, and it NEVER collects. Everything it needs is
+   * already stored.
+   */
+  const [mode, setMode] = useState<"SUBJECT" | "CASE">(requestedCase ? "CASE" : "SUBJECT");
+  const [cases, setCases] = useState<Array<{ id: string; target: string; title: string }>>([]);
+  const [caseRuns, setCaseRuns] = useState<CaseRun[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState(requestedCase ?? "");
+  const [selectedRunId, setSelectedRunId] = useState("");
+  /**
+   * The correlation layer needs the discipline matrix, and this route never
+   * fetched it — so `buildCrossIntelligence` (inside `buildCaseReport`) would
+   * run with an empty matrix and emit ZERO correlations regardless of the
+   * data. A GEOINT correlation needs two disciplines (GEOINT from the attached
+   * image, MEDIAINT from a news record), so without the matrix a correctly
+   * attached image would still produce nothing.
+   *
+   * Same server function and same client-fetch shape the correlations panel
+   * already uses. An unreadable matrix maps NOTHING — correlations are then
+   * simply absent, never attributed to a guessed discipline.
+   */
+  const [capabilityRows, setCapabilityRows] = useState<CapabilityReport["rows"] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = (await capabilityReport()) as unknown as CapabilityReport;
+        if (!cancelled) setCapabilityRows(r.rows);
+      } catch {
+        if (!cancelled) setCapabilityRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const [caseBuild, setCaseBuild] = useState<CaseReportBuild | null>(null);
+  const [caseBlocker, setCaseBlocker] = useState<string | null>(null);
+  const [casePlan, setCasePlan] = useState<OsintPlan | null>(null);
 
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
@@ -200,8 +289,131 @@ function ReportsPage() {
     // Skip the empty placeholder — the mount-sync effect above fills in the
     // real target a moment later, which re-triggers this effect via [target].
     if (!target) return;
+    // In CASE mode the sources come from stored data. Collecting here would be
+    // exactly the fresh-collection dependency this mode removes.
+    if (mode === "CASE") return;
     collect(target);
-  }, [target, collect]);
+  }, [target, collect, mode]);
+
+  // ── Case list, from the EXISTING investigations store. No second case store. ──
+  useEffect(() => {
+    const load = () => {
+      setCases(getInvestigations().map((c) => ({ id: c.id, target: c.target, title: c.title })));
+      setCaseRuns(getCaseRuns());
+    };
+    load();
+    window.addEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
+  }, []);
+
+  const runsForSelectedCase = useMemo(
+    () => caseRuns.filter((r) => r.caseId === selectedCaseId),
+    [caseRuns, selectedCaseId],
+  );
+
+  // The full case record, so the existing case panels (which read only `.id`)
+  // can be mounted in CASE mode to expose the case's MEDIAINT claims and
+  // cross-intelligence correlations. Reactive to `cases` so it tracks the
+  // store. Reused as-is — no duplicate extraction/correlation logic here.
+  const selectedInvestigation = useMemo<CaseRecord | null>(
+    () => getInvestigations().find((c) => c.id === selectedCaseId) ?? null,
+    [selectedCaseId, cases],
+  );
+
+  /**
+   * Plans the target so `excluded` carries the passive-policy's real reasons.
+   *
+   * Planning is READ-ONLY — `planOsintInvestigation`'s own documentation says
+   * "no job, no investigation id, nothing enters jobStore". It is not a
+   * collection, and the completeness block needs the registry's actual refusal
+   * text rather than a hardcoded list. A failure here degrades to `null`, which
+   * `assessCompleteness` reports as an unknown plan rather than as full coverage.
+   */
+  useEffect(() => {
+    if (mode !== "CASE" || !selectedCaseId) return;
+    const c = cases.find((x) => x.id === selectedCaseId);
+    if (!c?.target) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const plan = (await planOsintInvestigation({ data: { target: c.target } })) as OsintPlan;
+        if (!cancelled) setCasePlan(plan);
+      } catch {
+        if (!cancelled) setCasePlan(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, selectedCaseId, cases]);
+
+  /**
+   * Assembles the report inputs from what the case already stores.
+   *
+   * Reads the case-scoped snapshots and refuses anything that is not this
+   * case's own — a MISMATCH or UNSCOPED verdict produces a blocker, never a
+   * substituted product.
+   */
+  useEffect(() => {
+    if (mode !== "CASE" || !selectedCaseId) {
+      setCaseBuild(null);
+      setCaseBlocker(null);
+      return;
+    }
+    const c = cases.find((x) => x.id === selectedCaseId);
+    if (!c) return;
+
+    const graph = getGraphForCase(selectedCaseId);
+    const timeline = getTimelineForCase(selectedCaseId);
+    const graphOk = graph.verdict.result === "MATCH" && graph.snapshot;
+    const timelineOk = timeline.verdict.result === "MATCH" && timeline.snapshot;
+    const run = runsForSelectedCase.find((r) => r.id === selectedRunId) ?? runsForSelectedCase[0] ?? null;
+
+    const blocker = caseReportBlocker({
+      hasSnapshot: !!(graphOk || timelineOk),
+      scopeVerdict: timeline.verdict.result,
+      evidenceCount: timelineOk ? timeline.snapshot!.evidence.length : 0,
+      runStatus: run?.status ?? null,
+    });
+    if (blocker) {
+      setCaseBlocker(blocker);
+      setCaseBuild(null);
+      setCandidates([]);
+      setExcluded(new Set());
+      return;
+    }
+
+    setCaseBlocker(null);
+    const build = buildCaseReport({
+      caseId: selectedCaseId,
+      caseTitle: c.title,
+      target: c.target,
+      // The SNAPSHOT's own provenance is authoritative, not the selected run —
+      // a snapshot records which run produced it.
+      runId: (timelineOk ? timeline.snapshot!.runId : graph.snapshot?.runId) ?? run?.id ?? null,
+      investigationId:
+        (timelineOk ? timeline.snapshot!.investigationId : graph.snapshot?.investigationId) ?? "",
+      collectedAt: (timelineOk ? timeline.snapshot!.savedAt : graph.snapshot?.savedAt) ?? "",
+      runStatus: run?.status ?? null,
+      evidence: timelineOk ? timeline.snapshot!.evidence : [],
+      relationships: graphOk ? graph.snapshot!.relationships : [],
+      entities: graphOk ? graph.snapshot!.entities : [],
+      plan: casePlan,
+      // Gated on the SAME verdict as every sibling field. These two were the
+      // only bare `.snapshot` reads in this block, and `getGraphForCase` falls
+      // back to the unscoped slot — so a case holding only a timeline snapshot
+      // would pick up ANOTHER case's truncation object, and the report would
+      // then state "Capped for storage: X of Y records stored" about records
+      // that were never this case's.
+      graphTruncation: graphOk ? graph.snapshot!.truncation : undefined,
+      timelineTruncation: timelineOk ? timeline.snapshot!.truncation : undefined,
+      extractedAt: new Date().toISOString(),
+      capabilityRows: [...(capabilityRows ?? []), GEOINT_DISCIPLINE_ROW],
+    });
+    setCaseBuild(build);
+    setCandidates(build.sources);
+    setExcluded(new Set(build.sources.slice(DEFAULT_SOURCE_BUDGET).map((s) => s.n)));
+  }, [mode, selectedCaseId, selectedRunId, cases, runsForSelectedCase, casePlan, capabilityRows]);
 
   /**
    * Runs the same OSINT collector framework `/recon` uses (`runOsintInvestigation`
@@ -298,8 +510,15 @@ function ReportsPage() {
     setGenerating(true);
     setGenError("");
     try {
+      // In CASE mode the completeness statement, the case provenance and the
+      // contradictions travel WITH the request. They are facts established
+      // before generation, so a model failure cannot drop them and the model
+      // cannot influence them.
       const product = (await generateIntelligenceProduct({
-        data: { type, subject: target, sources: selected },
+        data:
+          mode === "CASE" && caseBuild
+            ? { ...caseBuild.toGenerateInput(type), sources: selected }
+            : { type, subject: target, sources: selected },
       })) as unknown as IntelligenceProduct;
       const next = [...products, product];
       setProducts(next);
@@ -371,24 +590,292 @@ function ReportsPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-4">
+          {/* ── Report source ─────────────────────────────────────────────── */}
+          <Card className={CARD}>
+            <CardContent className="space-y-2 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-console-cyan">
+                  Report source
+                </span>
+                {(["SUBJECT", "CASE"] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setMode(m)}
+                    className={`h-6 rounded border px-2 font-mono text-[10px] uppercase tracking-wider ${
+                      mode === m
+                        ? "border-console-blue bg-console-blue/10 text-console-blue"
+                        : "border-console-border bg-console-deep text-console-label hover:text-console-muted"
+                    }`}
+                  >
+                    {m === "SUBJECT" ? "Ad-hoc subject" : "Existing case run"}
+                  </button>
+                ))}
+              </div>
+
+              {mode === "CASE" ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="font-mono text-[10px] text-console-muted">
+                      <span className="mr-1 uppercase tracking-wider text-console-label">Case</span>
+                      <select
+                        aria-label="Report case"
+                        value={selectedCaseId}
+                        onChange={(e) => {
+                          setSelectedCaseId(e.target.value);
+                          setSelectedRunId("");
+                        }}
+                        className="h-6 rounded border border-console-border bg-console-deep px-1.5 font-mono text-[10px] text-console-text"
+                      >
+                        <option value="">-- select a case --</option>
+                        {cases.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.id} - {c.target}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="font-mono text-[10px] text-console-muted">
+                      <span className="mr-1 uppercase tracking-wider text-console-label">Run</span>
+                      <select
+                        aria-label="Report run"
+                        value={selectedRunId}
+                        onChange={(e) => setSelectedRunId(e.target.value)}
+                        className="h-6 rounded border border-console-border bg-console-deep px-1.5 font-mono text-[10px] text-console-text"
+                      >
+                        <option value="">
+                          {runsForSelectedCase.length === 0 ? "no runs recorded" : "-- latest --"}
+                        </option>
+                        {runsForSelectedCase.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.input} · {r.status}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {/* An honest unavailable state. Nothing is substituted. */}
+                  {caseBlocker && (
+                    <div className="space-y-1.5 rounded border border-console-amber/30 bg-console-amber/5 px-2 py-1.5">
+                      <p className="font-mono text-[10px] leading-relaxed text-console-amber">
+                        {caseBlocker}
+                      </p>
+                      {/* A case with no completed run is a dead-end here — the
+                          run lives on the case workspace. Link there rather
+                          than leaving the analyst to navigate away and find it. */}
+                      {selectedCaseId && (
+                        <Link
+                          to="/investigations"
+                          search={{ case: selectedCaseId }}
+                          className="inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-console-cyan hover:underline"
+                        >
+                          Open {selectedCaseId} in Investigations to run it →
+                        </Link>
+                      )}
+                    </div>
+                  )}
+
+                  {caseBuild && (
+                    <div className="space-y-2">
+                      {/* Provenance - which case, run, investigation and when. */}
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 rounded border border-console-border bg-console-deep px-2 py-1.5 font-mono text-[9px] text-console-label">
+                        <span>
+                          Case <span className="text-console-muted">{caseBuild.provenance.caseId}</span>
+                        </span>
+                        <span>
+                          Investigation{" "}
+                          <span className="text-console-muted">
+                            {caseBuild.provenance.investigationId || "not recorded"}
+                          </span>
+                        </span>
+                        <span>
+                          Run <span className="text-console-muted">{caseBuild.provenance.runId ?? "not recorded"}</span>
+                        </span>
+                        <span>
+                          Collected{" "}
+                          <span className="text-console-muted">
+                            {caseBuild.provenance.collectedAt || "not recorded"}
+                          </span>
+                        </span>
+                        <span>
+                          Status <span className="text-console-muted">{caseBuild.provenance.runStatus ?? "not recorded"}</span>
+                        </span>
+                      </div>
+
+                      {/* Completeness - shown BEFORE generation. */}
+                      <div
+                        className={`space-y-1 rounded border px-2 py-1.5 font-mono text-[9px] ${
+                          caseBuild.completeness.status === "COMPLETE"
+                            ? "border-console-green/30 bg-console-green/5 text-console-green"
+                            : "border-console-amber/30 bg-console-amber/5 text-console-amber"
+                        }`}
+                      >
+                        <p className="font-bold uppercase tracking-wider">
+                          {caseBuild.completeness.status} COLLECTION
+                        </p>
+                        <p className="leading-relaxed">{completenessHeadline(caseBuild.completeness)}</p>
+                        {caseBuild.completeness.reasons.length > 0 && (
+                          <ul className="space-y-0.5 pt-0.5">
+                            {caseBuild.completeness.reasons.map((r, i) => (
+                              <li key={`${r.kind}-${r.subject}-${i}`} className="leading-relaxed text-console-muted">
+                                <span className="text-console-amber">{r.kind}</span> · {r.subject} - {r.detail}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-console-label">
+                          Produced ({caseBuild.completeness.produced.length}):{" "}
+                          {caseBuild.completeness.produced.join(", ") || "none"} · Silent (
+                          {caseBuild.completeness.silent.length}):{" "}
+                          {caseBuild.completeness.silent.join(", ") || "none"}
+                        </p>
+                      </div>
+
+                      {/* Contradictions - the existing derivation. */}
+                      <div className="space-y-1 rounded border border-console-red/30 bg-console-deep px-2 py-1.5 font-mono text-[9px]">
+                        <p className="font-bold uppercase tracking-wider text-console-red">
+                          Contradictions ({caseBuild.contradictions.length})
+                        </p>
+                        {caseBuild.contradictions.length === 0 ? (
+                          <p className="leading-relaxed text-console-label">{NO_CONTRADICTIONS_MESSAGE}</p>
+                        ) : (
+                          <>
+                            <p className="leading-relaxed text-console-amber">{CONTRADICTION_CAVEAT}</p>
+                            {caseBuild.contradictions.map((c, i) => (
+                              <div key={`${c.kind}-${c.subject}-${i}`} className="space-y-0.5 border-t border-console-border/40 pt-1">
+                                <p className="text-console-muted">
+                                  {c.kind} · {c.subject} · status {c.status}
+                                </p>
+                                <p className="text-console-green">
+                                  A ({c.claimClassA ?? "class not recorded"}): {c.claimA} - {c.sourceA}
+                                  {c.evidenceRefA ? ` · ${c.evidenceRefA}` : " · no evidence id"}
+                                  {/* The original source, reachable before generation as
+                                      well as after — an analyst reviewing a conflict
+                                      should not have to generate a product to check it. */}
+                                  {c.sourceUrlA && (
+                                    <>
+                                      {" · "}
+                                      <a href={c.sourceUrlA} target="_blank" rel="noopener noreferrer" className="text-console-blue hover:underline">
+                                        source
+                                      </a>
+                                    </>
+                                  )}
+                                </p>
+                                <p className="text-console-red">
+                                  B ({c.claimClassB ?? "class not recorded"}): {c.claimB} - {c.sourceB}
+                                  {c.evidenceRefB ? ` · ${c.evidenceRefB}` : " · no evidence id"}
+                                  {c.sourceUrlB && (
+                                    <>
+                                      {" · "}
+                                      <a href={c.sourceUrlB} target="_blank" rel="noopener noreferrer" className="text-console-blue hover:underline">
+                                        source
+                                      </a>
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="space-y-0.5">
+                        {COMPLETENESS_CAVEATS.map((cv) => (
+                          <p key={cv} className="font-mono text-[9px] leading-relaxed text-console-label">
+                            {cv}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="font-mono text-[9px] leading-relaxed text-console-label">
+                  Ad-hoc mode collects fresh sources for an open-ended subject. It is not tied to a
+                  case and carries no collection-completeness statement. To report on work already
+                  done, choose <span className="text-console-muted">Existing case run</span>.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* The case's MEDIAINT claims and cross-intelligence correlations in
+              CASE mode, via the SAME panels the case workspace renders
+              (scope-safe, MATCH-gated, PRESENT/ZERO/NOT_CASE_SCOPED). The
+              report already feeds these to the model but never showed them
+              here; contradictions, completeness and source provenance render
+              above and in the source list. No duplicate extraction/
+              correlation logic. */}
+          {mode === "CASE" && selectedInvestigation && caseBuild && (
+            <>
+              <Card className={CARD} data-testid="reports-case-exposure">
+                <CardContent className="space-y-2 p-4">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-console-cyan">
+                    Case intelligence detail
+                  </span>
+                  {/* Back to the case's other surfaces, case preserved. */}
+                  <div className="flex flex-wrap items-center gap-2 font-mono text-[9px]">
+                    <Link
+                      to="/investigations"
+                      search={{ case: selectedInvestigation.id }}
+                      className="inline-flex items-center gap-1 text-console-muted hover:text-console-text"
+                    >
+                      <FolderOpen className="size-2.5" /> Case
+                    </Link>
+                    <Link
+                      to="/graph"
+                      search={{ case: selectedInvestigation.id }}
+                      className="inline-flex items-center gap-1 text-console-purple hover:underline"
+                    >
+                      <Network className="size-2.5" /> Graph
+                    </Link>
+                    <Link
+                      to="/timeline"
+                      search={{ case: selectedInvestigation.id }}
+                      className="inline-flex items-center gap-1 text-console-cyan hover:underline"
+                    >
+                      <Clock className="size-2.5" /> Timeline
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseMediaIntPanel investigation={selectedInvestigation} />
+                </CardContent>
+              </Card>
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseCorrelationsPanel investigation={selectedInvestigation} />
+                </CardContent>
+              </Card>
+            </>
+          )}
+
           {/* ── Subject and product type ─────────────────────────────────── */}
           <Card className={CARD}>
             <CardContent className="p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative min-w-[220px] flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
-                  <Input
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && search()}
-                    placeholder="Subject…"
-                    className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
-                  />
+              {/* Subject collection is a SUBJECT-mode control only. In CASE
+                  mode the sources come from the case's stored run — showing a
+                  subject box and a "Collect sources" button would imply a
+                  fresh collection this mode deliberately never performs. */}
+              {mode === "SUBJECT" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[220px] flex-1">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-console-label" />
+                    <Input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && search()}
+                      placeholder="Subject…"
+                      className="h-8 border-console-border bg-console-deep pl-8 text-[11px] text-console-text"
+                    />
+                  </div>
+                  <Button size="sm" onClick={search} disabled={collecting} className="h-8">
+                    {collecting ? <Loader2 className="size-3.5 animate-spin" /> : "Collect sources"}
+                  </Button>
                 </div>
-                <Button size="sm" onClick={search} disabled={collecting} className="h-8">
-                  {collecting ? <Loader2 className="size-3.5 animate-spin" /> : "Collect sources"}
-                </Button>
-              </div>
+              )}
 
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {PRODUCT_TYPES.map((p) => (
@@ -409,57 +896,64 @@ function ReportsPage() {
                 {spec.description}
               </p>
 
-              {collectError && (
+              {mode === "SUBJECT" && collectError && (
                 <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
                   <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
                   <span className="font-mono text-[10px] text-console-red">{collectError}</span>
                 </div>
               )}
 
-              <div className="mt-3 flex items-center gap-2 border-t border-console-border pt-3">
-                <Network className="size-3.5 shrink-0 text-console-purple" />
-                <p className="flex-1 text-[10px] leading-relaxed text-console-muted">
-                  Also run DNS/RDAP/crt.sh/Shodan/dorks/news/social/theHarvester/SpiderFoot against
-                  "{target}" and cite their evidence and relationships. Most useful when the subject
-                  is a domain, IP, email or similar recon target — a general topic subject will
-                  likely return nothing, which is expected.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={collectOsint}
-                  disabled={osintCollecting || collecting || !target.trim()}
-                  className="h-7 shrink-0 gap-1.5 border-console-purple/40 text-[10px] text-console-purple hover:bg-console-purple/10"
-                >
-                  {osintCollecting ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Network className="size-3" />
-                  )}
-                  {osintCollecting ? "Running…" : "Include OSINT investigation"}
-                </Button>
-              </div>
-
-              {osintIncluded && (
+              {/* Live OSINT collection is a SUBJECT-mode action. CASE mode
+                  reports on a stored run and must not offer a fresh collector
+                  sweep that would imply new collection. */}
+              {mode === "SUBJECT" && (
                 <>
-                  <p className="mt-1.5 font-mono text-[9px] text-console-purple">
-                    Included: {osintIncluded.evidence.length} evidence item(s) and{" "}
-                    {osintIncluded.relationships.length} relationship(s) from{" "}
-                    {osintIncluded.plan.collectors.length} candidate collector(s).
-                  </p>
-                  {osintIncluded.errors.map((e, i) => (
-                    <p key={i} className="mt-0.5 font-mono text-[9px] text-console-amber">
-                      ⚠ {e}
+                  <div className="mt-3 flex items-center gap-2 border-t border-console-border pt-3">
+                    <Network className="size-3.5 shrink-0 text-console-purple" />
+                    <p className="flex-1 text-[10px] leading-relaxed text-console-muted">
+                      Also run DNS/RDAP/crt.sh/Shodan/dorks/news/social/theHarvester/SpiderFoot against
+                      "{target}" and cite their evidence and relationships. Most useful when the subject
+                      is a domain, IP, email or similar recon target — a general topic subject will
+                      likely return nothing, which is expected.
                     </p>
-                  ))}
-                </>
-              )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={collectOsint}
+                      disabled={osintCollecting || collecting || !target.trim()}
+                      className="h-7 shrink-0 gap-1.5 border-console-purple/40 text-[10px] text-console-purple hover:bg-console-purple/10"
+                    >
+                      {osintCollecting ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Network className="size-3" />
+                      )}
+                      {osintCollecting ? "Running…" : "Include OSINT investigation"}
+                    </Button>
+                  </div>
 
-              {osintError && (
-                <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
-                  <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
-                  <span className="font-mono text-[10px] text-console-red">{osintError}</span>
-                </div>
+                  {osintIncluded && (
+                    <>
+                      <p className="mt-1.5 font-mono text-[9px] text-console-purple">
+                        Included: {osintIncluded.evidence.length} evidence item(s) and{" "}
+                        {osintIncluded.relationships.length} relationship(s) from{" "}
+                        {osintIncluded.plan.collectors.length} candidate collector(s).
+                      </p>
+                      {osintIncluded.errors.map((e, i) => (
+                        <p key={i} className="mt-0.5 font-mono text-[9px] text-console-amber">
+                          ⚠ {e}
+                        </p>
+                      ))}
+                    </>
+                  )}
+
+                  {osintError && (
+                    <div className="mt-2 flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-2">
+                      <AlertTriangle className="size-3.5 shrink-0 text-console-red" />
+                      <span className="font-mono text-[10px] text-console-red">{osintError}</span>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -722,6 +1216,46 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
         {product.classification}
       </div>
 
+      {/* Collection completeness comes FIRST. A reader who stops after the
+          bottom line must still have seen what was not collected. */}
+      {product.completeness && (
+        <section
+          className={`rounded border p-2 ${
+            product.completeness.status === "COMPLETE"
+              ? "border-console-green/30 bg-console-green/5"
+              : "border-console-amber/30 bg-console-amber/5"
+          }`}
+        >
+          <h4
+            className={`text-[10px] font-bold uppercase tracking-wider ${
+              product.completeness.status === "COMPLETE" ? "text-console-green" : "text-console-amber"
+            }`}
+          >
+            {product.completeness.status} COLLECTION
+          </h4>
+          <p className="mt-1 text-[10px] leading-relaxed text-console-muted">
+            {completenessHeadline(product.completeness)}
+          </p>
+          {product.completeness.reasons.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {product.completeness.reasons.map((r, i) => (
+                <li key={i} className="text-[9px] leading-relaxed text-console-muted">
+                  <span className="text-console-amber">{r.kind}</span> · {r.subject} - {r.detail}
+                </li>
+              ))}
+            </ul>
+          )}
+          {product.caseProvenance && (
+            <p className="mt-1 text-[9px] text-console-label">
+              Case {product.caseProvenance.caseId} · run{" "}
+              {product.caseProvenance.runId ?? "not recorded"} ·{" "}
+              {product.caseProvenance.investigationId || "investigation not recorded"} · collected{" "}
+              {product.caseProvenance.collectedAt || "not recorded"}
+            </p>
+          )}
+        </section>
+      )}
+
       <section>
         <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-blue">
           Bottom line
@@ -748,7 +1282,11 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
                         : "border-console-red/40 bg-console-red/10 text-console-red"
                   }`}
                 >
-                  {kj.confidence} confidence
+                  {/* Names WHICH confidence this is. It used to read as a
+                      bare "high confidence", indistinguishable from a
+                      collector score sitting a few rows below it on the same
+                      page. */}
+                  {MODEL_CONFIDENCE_LABEL}: {kj.confidence}
                 </Badge>
               </div>
               <p className="mt-1 text-[11px] leading-relaxed text-console-text">
@@ -756,7 +1294,7 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
                 {cite(kj.sources)}
               </p>
               <p className="mt-0.5 text-[9px] italic leading-relaxed text-console-muted">
-                Confidence basis: {kj.confidenceRationale}
+                {MODEL_CONFIDENCE_LABEL} basis: {kj.confidenceRationale}
               </p>
             </div>
           ))}
@@ -779,6 +1317,63 @@ function ProductView({ product }: { product: IntelligenceProduct }) {
           ))}
         </ul>
       </section>
+
+      {/* Contradictions detected in the case's OWN data. Placed before gaps: a
+          conflict between the product's own sources is a finding about the
+          material, not a gap in it. */}
+      {product.contradictions && (
+        <section>
+          <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-red">
+            Contradictions ({product.contradictions.length})
+          </h4>
+          {product.contradictions.length === 0 ? (
+            <p className="mt-1 text-[10px] leading-relaxed text-console-muted">
+              {NO_CONTRADICTIONS_MESSAGE}
+            </p>
+          ) : (
+            <div className="mt-1 space-y-2">
+              <p className="rounded border border-console-amber/30 bg-console-amber/5 px-2 py-1 text-[9px] leading-relaxed text-console-amber">
+                {CONTRADICTION_CAVEAT}
+              </p>
+              {product.contradictions.map((c, i) => (
+                <div key={i} className="rounded border border-console-border bg-console-surface p-2 text-[9px]">
+                  <p className="font-mono font-bold text-console-text">
+                    C-{i + 1} · {c.kind} · {c.subject} · status {c.status}
+                  </p>
+                  <p className="mt-1 text-console-green">
+                    A ({c.claimClassA ?? "class not recorded"},{" "}
+                    {c.confidenceA === null ? "confidence not measured" : `${Math.round(c.confidenceA * 100)}%`}
+                    ): {c.claimA} - {c.sourceA}
+                    {c.evidenceRefA ? ` · ${c.evidenceRefA}` : " · no evidence id"}
+                    {c.publishedAtA ? ` · ${c.publishedAtA.slice(0, 10)}` : " · no date reported"}
+                  </p>
+                  {c.sourceUrlA && (
+                    <a href={c.sourceUrlA} target="_blank" rel="noopener noreferrer" className="text-console-blue hover:underline">
+                      {c.sourceUrlA}
+                    </a>
+                  )}
+                  <p className="mt-1 text-console-red">
+                    B ({c.claimClassB ?? "class not recorded"},{" "}
+                    {c.confidenceB === null ? "confidence not measured" : `${Math.round(c.confidenceB * 100)}%`}
+                    ): {c.claimB} - {c.sourceB}
+                    {c.evidenceRefB ? ` · ${c.evidenceRefB}` : " · no evidence id"}
+                    {c.publishedAtB ? ` · ${c.publishedAtB.slice(0, 10)}` : " · no date reported"}
+                  </p>
+                  {c.sourceUrlB && (
+                    <a href={c.sourceUrlB} target="_blank" rel="noopener noreferrer" className="text-console-blue hover:underline">
+                      {c.sourceUrlB}
+                    </a>
+                  )}
+                  <p className="mt-1 leading-relaxed text-console-label">
+                    Possible explanation (hypothesis): {c.explanation}
+                  </p>
+                  <p className="leading-relaxed text-console-label">Basis: {c.explanationBasis}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section>
         <h4 className="text-[10px] font-bold uppercase tracking-wider text-console-amber">

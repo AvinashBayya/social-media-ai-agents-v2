@@ -2,12 +2,16 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, ChevronDown, ChevronRight, FileWarning, ImageIcon, Save } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, FileWarning, ImageIcon, Save, ShieldQuestion } from "lucide-react";
 import {
   FILE_PROVENANCE_NOT_IMPLEMENTED,
   assessFileProvenance,
   type FileProvenanceReport,
+  type PdfSignatureCertificatePair,
+  type ProvenanceField,
 } from "@/utils/file-provenance";
+import { interpretRevocationChecks, type RevocationCheckResult } from "@/utils/pdf-revocation";
+import { checkCertificateRevocation } from "@/utils/pdf-revocation-client";
 import { NotImplementedPanel } from "@/components/not-implemented";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -140,7 +144,7 @@ function FileProvenanceCard({
           </p>
         )}
 
-        {report && (report.kind === "pdf" || report.kind === "ooxml" || report.kind === "odf" || report.kind === "video") && (
+        {report && (report.kind === "pdf" || report.kind === "ooxml" || report.kind === "odf" || report.kind === "video" || report.kind === "image") && (
           <NotImplementedPanel
             gaps={FILE_PROVENANCE_NOT_IMPLEMENTED}
             title="What this cannot establish"
@@ -207,26 +211,17 @@ function ReportBody({ report }: { report: FileProvenanceReport }) {
 
       <div className="space-y-1">
         {[...notable, ...other].map((f) => (
-          <div
-            key={f.id}
-            className={`rounded border p-1.5 ${
-              f.severity === "notable"
-                ? "border-console-amber/30 bg-console-amber/5"
-                : "border-console-border bg-console-deep/60"
-            }`}
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="text-[10px] font-semibold text-console-text">{f.label}</span>
-              <span className={`font-mono text-[9px] ${STATUS_STYLE[f.status]}`}>
-                {f.status === "absent" ? "not embedded" : f.status === "unreadable" ? f.note : f.value}
-              </span>
-            </div>
-            {f.status !== "unreadable" && (
-              <p className="mt-0.5 text-[9px] leading-relaxed text-console-muted">{f.note}</p>
-            )}
-          </div>
+          <FieldCard key={f.id} f={f} />
         ))}
       </div>
+
+      {report.signatureCertificates && report.signatureCertificates.length > 0 && (
+        <div className="space-y-1.5">
+          {report.signatureCertificates.map((pair) => (
+            <SignatureRevocationCheck key={pair.signatureIndex} pair={pair} />
+          ))}
+        </div>
+      )}
 
       {report.timestamps.length > 0 && (
         <div className="space-y-1">
@@ -248,6 +243,79 @@ function ReportBody({ report }: { report: FileProvenanceReport }) {
           ))}
         </ul>
       </details>
+    </div>
+  );
+}
+
+function FieldCard({ f }: { f: ProvenanceField }) {
+  return (
+    <div
+      className={`rounded border p-1.5 ${
+        f.severity === "notable" ? "border-console-amber/30 bg-console-amber/5" : "border-console-border bg-console-deep/60"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[10px] font-semibold text-console-text">{f.label}</span>
+        <span className={`font-mono text-[9px] ${STATUS_STYLE[f.status]}`}>
+          {f.status === "absent" ? "not embedded" : f.status === "unreadable" ? f.note : f.value}
+        </span>
+      </div>
+      {f.status !== "unreadable" && <p className="mt-0.5 text-[9px] leading-relaxed text-console-muted">{f.note}</p>}
+    </div>
+  );
+}
+
+type RevocationCheckState = { status: "idle" } | { status: "running" } | { status: "done"; results: RevocationCheckResult[] } | { status: "failed"; message: string };
+
+/**
+ * The one opt-in action anywhere in file-provenance that makes a real
+ * network call (through a server-side proxy — see pdf-revocation-server.ts
+ * for why OCSP/CRL endpoints can't be reached directly from a browser tab).
+ * Deliberately NOT run automatically alongside everything else in this
+ * report, unlike every other field here.
+ */
+function SignatureRevocationCheck({ pair }: { pair: PdfSignatureCertificatePair }) {
+  const [state, setState] = useState<RevocationCheckState>({ status: "idle" });
+
+  const run = async () => {
+    setState({ status: "running" });
+    try {
+      const results = await checkCertificateRevocation(pair.leafDer, pair.issuerDer);
+      setState({ status: "done", results });
+    } catch (err: any) {
+      setState({ status: "failed", message: err?.message ?? String(err) });
+    }
+  };
+
+  return (
+    <div className="rounded border border-console-border bg-console-deep/40 p-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold text-console-text">Signature {pair.signatureIndex + 1} — revocation check (OCSP/CRL)</span>
+        <Button
+          size="sm"
+          disabled={state.status === "running"}
+          onClick={run}
+          className="h-6 rounded bg-console-elevated px-2 font-mono text-[9px] font-bold text-console-text hover:bg-console-border disabled:opacity-50"
+        >
+          <ShieldQuestion className="mr-1 size-3" />
+          {state.status === "running" ? "Checking…" : state.status === "done" ? "Re-check" : "Check revocation"}
+        </Button>
+      </div>
+      {state.status === "idle" && (
+        <p className="mt-0.5 text-[9px] leading-relaxed text-console-label">
+          Not run automatically — this is the one check in this report that leaves the browser tab (through this
+          app's own server, to the certificate's real OCSP responder / CRL distribution point). Only the
+          certificate's own serial and issuer bytes are sent, never the file's content.
+        </p>
+      )}
+      {state.status === "failed" && <p className="mt-0.5 text-[9px] leading-relaxed text-console-red">{state.message}</p>}
+      {state.status === "done" && (
+        <div className="mt-1 space-y-1">
+          {interpretRevocationChecks(state.results).map((f) => (
+            <FieldCard key={f.id} f={f} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

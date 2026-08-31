@@ -27,6 +27,18 @@ export const dnsCollector: Collector<DnsRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "dns",
+    name: "DNS",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "Cloudflare DNS-over-HTTPS. Queries a third-party public resolver, never the target's infrastructure directly.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<DnsRaw>> {
     const clock = startExecution();
     const hostname = toHostname(target.value);

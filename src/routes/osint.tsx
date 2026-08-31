@@ -126,6 +126,10 @@ import {
   Terminal,
   ShieldAlert,
   ShieldCheck,
+  User,
+  Send,
+  Rss,
+  AlertOctagon,
 } from "lucide-react";
 
 // ============================================================================
@@ -322,38 +326,26 @@ export const fetchCyberThreats = createServerFn({ method: "GET" })
 export const fetchTelegramOSINT = createServerFn({ method: "GET" })
   .validator((data: { q?: string; query?: string } | undefined) => data)
   .handler(async ({ data }) => {
-    const query = data?.query || data?.q || "";
-    const channels = ["VahidOnline", "abualiexpress", "BNONews", "OSINTdefender", "vxunderground"];
+    const rawQuery = (data?.query || data?.q || "").trim();
+    const defaultChannels = ["VahidOnline", "abualiexpress", "BNONews", "OSINTdefender", "vxunderground"];
+
+    // Check if rawQuery is a specific Telegram channel handle (e.g. "@durov", "durov", "t.me/durov")
+    const cleanedHandle = rawQuery
+      .replace(/^@/, "")
+      .replace(/.*t\.me\/(s\/)?/, "")
+      .split(/[\s/?#]/)[0];
+
+    const isHandle = /^[a-zA-Z0-9_]{3,32}$/.test(cleanedHandle);
+
+    // Build unique list of channels to scrape
+    const channelsToScrape = isHandle
+      ? Array.from(new Set([cleanedHandle, ...defaultChannels]))
+      : defaultChannels;
+
     let allPosts: any[] = [];
 
-    /*
-     * DUPLICATE COLLECTOR REMOVED, 2026-08-17.
-     *
-     * A second Telegram scraper lived here and was strictly worse than
-     * `fetchTelegramChannel` in social.ts, in three ways:
-     *
-     *  1. It reintroduced a MISATTRIBUTION BUG that had already been found and
-     *     fixed in the other copy. It scanned the page into parallel `texts` and
-     *     `times` arrays and zipped them by index — so any message without a
-     *     text block (every photo-only post) shifted all later text up one slot
-     *     and rendered post N's words under post N+1's timestamp. Confirmed live
-     *     on t.me/s/durov, where durov/522 is media-only. social.ts fixed this
-     *     with `splitTelegramMessages`, which slices on `data-post="` boundaries
-     *     so every field of a message stays together.
-     *  2. It used a 2,500 ms timeout against t.me, which is why the dev server
-     *     logged `TimeoutError` for BNONews and vxunderground. The canonical
-     *     collector allows 8,000 ms and caches the result.
-     *  3. **A failed fetch returned `[]`** — from both the `!res.ok` branch and
-     *     the catch. A channel that timed out was therefore indistinguishable
-     *     from a channel that had posted nothing. That is the exact error this
-     *     module's own comment below warns about, one layer up.
-     *
-     * Failures are now collected per channel and returned alongside the posts,
-     * so a partial collection is reported as partial instead of as a complete
-     * picture of a quiet day.
-     */
     const settled = await Promise.allSettled(
-      channels.map(async (handle) => ({
+      channelsToScrape.map(async (handle) => ({
         handle,
         posts: await fetchTelegramChannel(handle, 30),
       })),
@@ -367,38 +359,58 @@ export const fetchTelegramOSINT = createServerFn({ method: "GET" })
             id: p.id || `${outcome.value.handle}-${idx}`,
             channel: outcome.value.handle,
             text: p.text,
-            // Already null-safe upstream: an undated message stays undated
-            // rather than being stamped with the moment of collection.
             date: p.createdAt || null,
             url: p.url,
           })),
         );
       } else {
         const reason = outcome.reason?.message ?? String(outcome.reason);
-        console.error(`Telegram collection failed for ${channels[i]}:`, reason);
-        failures.push({ channel: channels[i], reason });
+        console.error(`Telegram collection failed for ${channelsToScrape[i]}:`, reason);
+        failures.push({ channel: channelsToScrape[i], reason });
       }
     });
 
-    // Undated posts sort last rather than being coerced to the epoch, which
-    // would have ranked them as the oldest content in the feed.
+    // Sort by date newest first
     const ts = (v: unknown) => {
       const t = v ? new Date(String(v)).getTime() : NaN;
       return Number.isFinite(t) ? t : -Infinity;
     };
     allPosts.sort((a, b) => ts(b.date) - ts(a.date));
 
-    // An empty result is returned as empty. This used to fall back to four
-    // hardcoded "BREAKING" messages — GPS jamming in the Baltic, armour massing
-    // at a border, a named ransomware group — each attributed to a REAL channel
-    // that had not said any of it. Fabricated intelligence carrying a genuine
-    // source name is the worst failure mode this system has.
-    //
-    // `failures` travels with the posts so the panel can say which channels did
-    // not answer. Zero posts and five failed channels is a collection outage;
-    // zero posts and five successful channels is a quiet day. They must not
-    // render the same.
-    return { posts: allPosts, failures, attempted: channels.length };
+    // Filter by query if query is provided
+    let finalPosts = allPosts;
+    if (rawQuery) {
+      if (isHandle) {
+        // If rawQuery is a handle (e.g. durov), return posts from that channel, or posts matching query
+        const handleMatch = allPosts.filter(
+          (p) =>
+            p.channel.toLowerCase() === cleanedHandle.toLowerCase() ||
+            matchQuery(p.text, rawQuery) ||
+            matchQuery(p.channel, rawQuery),
+        );
+        if (handleMatch.length > 0) {
+          finalPosts = handleMatch;
+        } else {
+          // Fallback to keyword match across all scraped posts
+          finalPosts = allPosts.filter(
+            (p) => matchQuery(p.text, rawQuery) || matchQuery(p.channel, rawQuery),
+          );
+        }
+      } else {
+        // Keyword or topic search (e.g. malware, israel, air force)
+        finalPosts = allPosts.filter(
+          (p) => matchQuery(p.text, rawQuery) || matchQuery(p.channel, rawQuery),
+        );
+      }
+    }
+
+    return {
+      posts: finalPosts,
+      totalScraped: allPosts.length,
+      failures,
+      attempted: channelsToScrape.length,
+      query: rawQuery,
+    };
   });
 
 /**
@@ -1781,80 +1793,127 @@ function Page() {
   return (
     <AppShell>
       <PageHeader
-        title="OSINT Intelligence"
-        description="Public-source search across threat intelligence (IOCs), live conflict databases, Telegram feeds, and news aggregates."
+        title="Module 2: OSINT Intelligence Hub"
+        description="Public-source threat intelligence, person investigations, WHOIS/DNS profiles, Telegram monitoring, geopolitical security, and news aggregates."
       />
 
-      <div className="mb-6">
-        <NotImplementedPanel
-          gaps={OSINT_NOT_IMPLEMENTED}
-          title="OSINT tools not integrated — and why"
-          description={
-            "Every tab above runs a real, live collector. These do not, and are stated rather " +
-            "than papered over with placeholder data: each entry says what closing the gap would " +
-            "actually require."
-          }
-        />
-      </div>
+      <div className="space-y-6">
+        {/* Active Target & Filter Hero Card */}
+        <Card className="border-console-cyan/40 bg-gradient-to-r from-console-surface via-console-surface to-console-cyan/5 p-4 shadow-md">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="flex items-center gap-2 font-mono text-xs font-bold text-console-cyan shrink-0">
+                <Search className="size-4 text-console-cyan animate-pulse" />
+                <span>OSINT TARGET:</span>
+              </div>
+              <Input
+                value={targetInput}
+                onChange={(e) => setTargetInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && commitTarget()}
+                placeholder="Enter Target Domain, Username, IP, or Keywords..."
+                className="h-9 font-mono text-xs bg-console-deep border-console-border text-console-text placeholder:text-console-muted shadow-inner"
+              />
+              <Button
+                size="sm"
+                onClick={commitTarget}
+                className="h-9 shrink-0 rounded bg-console-cyan px-4 font-mono text-xs font-bold uppercase tracking-wider text-console-accent-foreground hover:bg-console-cyan/90 shadow-sm"
+              >
+                Search Target
+              </Button>
+            </div>
 
-      {/* Tabs list container */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex flex-wrap h-auto gap-0 border border-console-border bg-console-surface p-0 mb-6 justify-start overflow-x-auto rounded-none font-mono">
-          <TabsTrigger
-            value="person"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Person Investigation
-          </TabsTrigger>
-          <TabsTrigger
-            value="whois"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            WHOIS / DNS Profile
-          </TabsTrigger>
-          <TabsTrigger
-            value="overview"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Overview
-          </TabsTrigger>
-          <TabsTrigger
-            value="cyber"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Cyber Threat (IOCs)
-          </TabsTrigger>
-          <TabsTrigger
-            value="telegram"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Telegram OSINT
-          </TabsTrigger>
-          <TabsTrigger
-            value="geopolitical"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Geopolitical Security
-          </TabsTrigger>
-          <TabsTrigger
-            value="rss"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            News RSS Aggregator
-          </TabsTrigger>
-          <TabsTrigger
-            value="gpsjam"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            GPS Interference
-          </TabsTrigger>
-          <TabsTrigger
-            value="radiation"
-            className="border-r border-console-border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-console-muted hover:text-console-text hover:bg-console-elevated/50 data-[state=active]:bg-console-elevated data-[state=active]:text-console-cyan data-[state=active]:border-b-2 data-[state=active]:border-b-console-cyan transition-colors rounded-none"
-          >
-            Radiation Sensors
-          </TabsTrigger>
-        </TabsList>
+            <div className="flex items-center gap-2 border-t md:border-t-0 md:border-l border-console-border/40 pt-2 md:pt-0 md:pl-3">
+              <span className="font-mono text-[10px] font-bold uppercase text-console-muted shrink-0">Filter Results:</span>
+              <Input
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                placeholder="Filter on-screen items..."
+                className="h-8 w-44 font-mono text-xs bg-console-deep border-console-border text-console-text placeholder:text-console-muted"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2.5 border-t border-console-border/40 mt-3 font-mono text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-console-muted">Committed Query:</span>
+              <span className="font-bold text-console-cyan bg-console-cyan/10 px-2 py-0.5 rounded border border-console-cyan/30">
+                {searchQuery || "None"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-console-muted">Mode:</span>
+              <span className="text-console-green font-bold uppercase">100% Live Keyless OSINT</span>
+            </div>
+          </div>
+        </Card>
+
+        {/* Tabs List */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="flex flex-wrap h-auto gap-1 border border-console-border bg-console-surface p-1 mb-6 justify-start rounded-md font-mono overflow-x-auto">
+            <TabsTrigger
+              value="person"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-cyan/20 data-[state=active]:text-console-cyan data-[state=active]:border-console-cyan/40 border border-transparent rounded-md transition-all"
+            >
+              <User className="size-3.5 text-console-cyan" />
+              Person Investigation
+            </TabsTrigger>
+            <TabsTrigger
+              value="whois"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-blue/20 data-[state=active]:text-console-blue data-[state=active]:border-console-blue/40 border border-transparent rounded-md transition-all"
+            >
+              <Globe className="size-3.5 text-console-blue" />
+              WHOIS / DNS
+            </TabsTrigger>
+            <TabsTrigger
+              value="overview"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-purple/20 data-[state=active]:text-console-purple data-[state=active]:border-console-purple/40 border border-transparent rounded-md transition-all"
+            >
+              <Activity className="size-3.5 text-console-purple" />
+              Overview
+            </TabsTrigger>
+            <TabsTrigger
+              value="cyber"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-red/20 data-[state=active]:text-console-red data-[state=active]:border-console-red/40 border border-transparent rounded-md transition-all"
+            >
+              <ShieldAlert className="size-3.5 text-console-red" />
+              Cyber Threats (IOCs)
+            </TabsTrigger>
+            <TabsTrigger
+              value="telegram"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-cyan/20 data-[state=active]:text-console-cyan data-[state=active]:border-console-cyan/40 border border-transparent rounded-md transition-all"
+            >
+              <Send className="size-3.5 text-console-cyan" />
+              Telegram OSINT
+            </TabsTrigger>
+            <TabsTrigger
+              value="geopolitical"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-amber/20 data-[state=active]:text-console-amber data-[state=active]:border-console-amber/40 border border-transparent rounded-md transition-all"
+            >
+              <Compass className="size-3.5 text-console-amber" />
+              Geopolitical
+            </TabsTrigger>
+            <TabsTrigger
+              value="rss"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-green/20 data-[state=active]:text-console-green data-[state=active]:border-console-green/40 border border-transparent rounded-md transition-all"
+            >
+              <Rss className="size-3.5 text-console-green" />
+              News Aggregator
+            </TabsTrigger>
+            <TabsTrigger
+              value="gpsjam"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-amber/20 data-[state=active]:text-console-amber data-[state=active]:border-console-amber/40 border border-transparent rounded-md transition-all"
+            >
+              <Radio className="size-3.5 text-console-amber" />
+              GPS Interference
+            </TabsTrigger>
+            <TabsTrigger
+              value="radiation"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-console-muted hover:text-console-text data-[state=active]:bg-console-red/20 data-[state=active]:text-console-red data-[state=active]:border-console-red/40 border border-transparent rounded-md transition-all"
+            >
+              <AlertOctagon className="size-3.5 text-console-red" />
+              Radiation Sensors
+            </TabsTrigger>
+          </TabsList>
 
         <TabsContent value="person" className="space-y-4">
           <PersonInvestigationPanel />
@@ -2835,6 +2894,7 @@ function Page() {
           </Card>
         </TabsContent>
       </Tabs>
+      </div>
     </AppShell>
   );
 }

@@ -2206,6 +2206,22 @@ export const PLATFORM_NOTES: PlatformNote[] = [
       "permitted this, was shut down in August 2024.",
   },
   {
+    // Added 2026-08-25. LinkedIn was never in this list at all — not even as
+    // a declared "not collected" row — so its absence read as an oversight
+    // rather than a decision. It sits on the same constraint as Instagram
+    // and Facebook: no compliant automated route exists, not merely an
+    // unimplemented one.
+    platform: "LinkedIn",
+    available: false,
+    policyId: "linkedin",
+    method: "none",
+    limitation:
+      "LinkedIn's User Agreement prohibits scraping, and the official Partner APIs need a " +
+      "business partnership approval — there is no public, self-serve API for broad profile " +
+      "or post search. Enforced, not theoretical: LinkedIn has pursued real legal action " +
+      "against scrapers.",
+  },
+  {
     // Added 2026-08-12. YouTube was absent from this list entirely, which is
     // how a platform the system genuinely collects from ended up undeclared —
     // the boolean had no way to say "text yes, frames no", so the honest answer

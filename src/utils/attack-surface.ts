@@ -48,6 +48,13 @@ export function toHostname(target: string): string {
     .replace(/:\d+$/, "");
 }
 
+export interface DeviceClassification {
+  cctvOrWebcam: boolean;
+  routerOrGateway: boolean;
+  iotOrIndustrial: boolean;
+  detectedDevices: string[];
+}
+
 export interface HostSurface {
   ip: string;
   /** False when Shodan has no record for this address (HTTP 404). */
@@ -60,6 +67,10 @@ export interface HostSurface {
   tags: string[];
   /** CVE identifiers Shodan associates with the observed services. */
   vulns: string[];
+  /** Inferred device types (CCTV, Routers, IoT). */
+  devices: DeviceClassification;
+  /** Direct link to view full host record on Shodan. */
+  shodanUrl: string;
 }
 
 export interface AttackSurfaceResult {
@@ -70,6 +81,80 @@ export interface AttackSurfaceResult {
   hosts: HostSurface[];
   /** ISO timestamp of this lookup, so the UI can show data age honestly. */
   retrievedAt: string;
+}
+
+/** Identify CCTV, Routers, and IoT devices from open ports and CPE strings. */
+export function classifyDevices(ports: number[], cpes: string[], tags: string[]): DeviceClassification {
+  const detectedDevices: string[] = [];
+  let cctvOrWebcam = false;
+  let routerOrGateway = false;
+  let iotOrIndustrial = false;
+
+  const cpeStr = cpes.join(" ").toLowerCase();
+  const tagStr = tags.join(" ").toLowerCase();
+
+  // CCTV / Webcam / RTSP / Video Stream detection
+  if (
+    ports.includes(554) || // RTSP
+    ports.includes(8554) || // Alternative RTSP
+    ports.includes(37777) || // Dahua DVR/NVR
+    ports.includes(8000) || // Hikvision DVR/NVR
+    ports.includes(8008) ||
+    ports.includes(8888) ||
+    cpeStr.includes("dahua") ||
+    cpeStr.includes("hikvision") ||
+    cpeStr.includes("axis") ||
+    cpeStr.includes("webcam") ||
+    cpeStr.includes("camera") ||
+    tagStr.includes("camera") ||
+    tagStr.includes("webcam")
+  ) {
+    cctvOrWebcam = true;
+    detectedDevices.push("CCTV / IP Camera / Stream Server");
+  }
+
+  // Routers, Switches & Gateways
+  if (
+    ports.includes(23) || // Telnet
+    ports.includes(80) ||
+    ports.includes(443) ||
+    ports.includes(8080) ||
+    cpeStr.includes("mikrotik") ||
+    cpeStr.includes("cisco") ||
+    cpeStr.includes("tplink") ||
+    cpeStr.includes("netgear") ||
+    cpeStr.includes("routeros") ||
+    cpeStr.includes("dd-wrt") ||
+    cpeStr.includes("openwrt") ||
+    cpeStr.includes("fortinet") ||
+    cpeStr.includes("ubiquiti") ||
+    tagStr.includes("router")
+  ) {
+    routerOrGateway = true;
+    detectedDevices.push("Router / Network Switch / Gateway");
+  }
+
+  // Industrial / SCADA / IoT / MQTT
+  if (
+    ports.includes(1883) || // MQTT
+    ports.includes(8883) || // Secure MQTT
+    ports.includes(502) || // Modbus
+    ports.includes(47808) || // BACnet
+    ports.includes(102) || // Siemens S7
+    tagStr.includes("ics") ||
+    tagStr.includes("scada") ||
+    tagStr.includes("iot")
+  ) {
+    iotOrIndustrial = true;
+    detectedDevices.push("Industrial / IoT / SCADA Node");
+  }
+
+  return {
+    cctvOrWebcam,
+    routerOrGateway,
+    iotOrIndustrial,
+    detectedDevices: Array.from(new Set(detectedDevices)),
+  };
 }
 
 /** Resolve A records over Cloudflare DNS-over-HTTPS. */
@@ -125,7 +210,17 @@ export async function internetDb(ip: string): Promise<HostSurface> {
   // 404 means Shodan holds no record for the address. That is a real, reportable
   // result, so it is not an error.
   if (res.status === 404) {
-    return { ip, scanned: false, ports: [], cpes: [], hostnames: [], tags: [], vulns: [] };
+    return {
+      ip,
+      scanned: false,
+      ports: [],
+      cpes: [],
+      hostnames: [],
+      tags: [],
+      vulns: [],
+      devices: { cctvOrWebcam: false, routerOrGateway: false, iotOrIndustrial: false, detectedDevices: [] },
+      shodanUrl: `https://www.shodan.io/host/${ip}`,
+    };
   }
 
   // A rate limit is temporary and retryable. Collapsing it into the generic
@@ -145,14 +240,24 @@ export async function internetDb(ip: string): Promise<HostSurface> {
   const arr = (v: any): string[] =>
     Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 
+  const ports = Array.isArray(json?.ports) ? json.ports.filter((p: any) => Number.isInteger(p)) : [];
+  const cpes = arr(json?.cpes);
+  const tags = arr(json?.tags);
+  const hostnames = arr(json?.hostnames);
+  const vulns = arr(json?.vulns);
+
+  const devices = classifyDevices(ports, cpes, tags);
+
   return {
     ip,
     scanned: true,
-    ports: Array.isArray(json?.ports) ? json.ports.filter((p: any) => Number.isInteger(p)) : [],
-    cpes: arr(json?.cpes),
-    hostnames: arr(json?.hostnames),
-    tags: arr(json?.tags),
-    vulns: arr(json?.vulns),
+    ports,
+    cpes,
+    hostnames,
+    tags,
+    vulns,
+    devices,
+    shodanUrl: `https://www.shodan.io/host/${ip}`,
   };
 }
 
@@ -166,7 +271,11 @@ export const lookupAttackSurface = createServerFn({ method: "POST" })
     if (!raw) throw new Error("A domain or IP address is required.");
 
     const hostname = toHostname(raw);
-    if (!hostname) throw new Error(`Could not read a hostname from "${raw}".`);
+    if (!hostname || (!isIPv4(hostname) && !hostname.includes("."))) {
+      throw new Error(
+        `"${raw}" appears to be a username/handle, not a domain or IP address. Attack surface lookup requires a valid domain (e.g. example.com) or IP address (e.g. 8.8.8.8).`
+      );
+    }
 
     let addresses: string[];
     if (isIPv4(hostname)) {

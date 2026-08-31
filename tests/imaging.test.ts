@@ -771,7 +771,9 @@ describe("provenance assessment", () => {
     const a = assessProvenance({ exif: null, c2pa: null, duplicates: null });
     expect(a.cannotDetermine.length).toBeGreaterThanOrEqual(4);
     expect(a.cannotDetermine.join(" ")).toContain("No deepfake classifier is deployed");
-    expect(a.cannotDetermine.join(" ")).toContain("No object detection model is deployed");
+    // Object detection IS deployed (Grounding DINO via the Local AI Analysis panel) — the
+    // caveat is that its results are unverified candidates, not that it doesn't exist.
+    expect(a.cannotDetermine.join(" ")).toContain("unverified candidate for analyst review");
   });
 
   test("separates cryptographically verified findings from observed signals", () => {
@@ -806,7 +808,16 @@ describe("documented gaps", () => {
     const gap = NOT_IMPLEMENTED.find((g) => g.capability.includes("Deepfake"))!;
     expect(gap.limitation).toContain("diffusion");
     expect(gap.limitation).toContain("recompression");
-    expect(gap.requires).toContain("GPU");
+    // GPU is deliberately NOT the stated blocker (regression guard, not a
+    // relaxation): this project's ai-service already runs CUDA inference on
+    // this exact machine for other models, so a "requires GPU" framing here
+    // would itself be a stale, inaccurate claim — the real, verified blocker
+    // is detector accuracy, not compute. See CLAUDE.md's Module 4 section
+    // and the 2026-08-26 milestone in PROJECT_MEMORY.md for the full
+    // research trail (specific candidate models checked and why each fails).
+    expect(gap.requires).not.toContain("GPU");
+    expect(gap.limitation).toContain("GPU inference itself is not the blocker");
+    expect(gap.limitation).toMatch(/45.53%|coin flip|indistinguishable from chance/);
   });
 
   test("object detection is implemented and still records the AGPL licence trap", () => {

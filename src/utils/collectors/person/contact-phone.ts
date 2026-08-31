@@ -33,6 +33,19 @@ export const contactPhoneCollector: Collector<ContactPhoneRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "contact.phone",
+    name: "Contact — Phone metadata",
+    collectionMode: "LOCAL_FILE_ANALYSIS",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: false,
+    notes:
+      "libphonenumber-js metadata only, derived purely from the number's own structure. No carrier database, no reverse lookup, no external call at all.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<ContactPhoneRaw>> {
     const clock = startExecution();
     const raw = target.value.trim();

@@ -70,6 +70,19 @@ export const contactDomainCollector: Collector<ContactDomainRaw> = {
   requiresCredentials: false,
   isOptional: true,
 
+  capability: {
+    sourceId: "contact.domain",
+    name: "Contact — Domain tech check",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes:
+      "An ordinary GET of the domain's own homepage — the same request any browser visitor makes — checked against a small, self-hosted, fixed signature set. No port scan, no third-party API.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<ContactDomainRaw>> {
     const clock = startExecution();
     const hostname = toHostname(target.value);

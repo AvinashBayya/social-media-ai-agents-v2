@@ -42,6 +42,19 @@ export const dorksCollector: Collector<DorksRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "dorks",
+    name: "Google Dorks",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: false,
+    notes:
+      "News-scope dorks execute against public RSS. Web-scope dorks are LISTED as manual URLs, never scraped — there is no free web-search API and scraping google.com/search violates its ToS.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<DorksRaw>> {
     const clock = startExecution();
     try {
