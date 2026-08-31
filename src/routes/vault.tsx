@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell, PageHeader, Tone } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
   appendEvidence,
   deleteEvidence,
   getEvidence,
+  getEvidenceForCase,
   nextEvidenceId,
   saveEvidence,
   setEvidenceCase,
@@ -39,7 +40,30 @@ import {
   FolderLock,
 } from "lucide-react";
 
+/**
+ * `?q=<evidenceId>` seeds the search box and `?case=<caseId>` scopes the grid
+ * to that case's exhibits (via `getEvidenceForCase`) — both independent and
+ * composable (scope narrows the base, `q` narrows within it). The scope
+ * lives ONLY in the URL, deliberately never seeded into the search box, so
+ * it cannot be typed away and silently lost. A link elsewhere in the app
+ * pointing at `/vault?case=<id>` (a case hub's "view its evidence" link, for
+ * instance) lands the analyst pre-scoped instead of in an unfiltered vault.
+ */
 export const Route = createFileRoute("/vault")({
+  validateSearch: (search: Record<string, unknown>): { q?: string; case?: string } => {
+    const out: { q?: string; case?: string } = {};
+    const rawQ = search.q;
+    if (typeof rawQ === "string") {
+      const trimmed = rawQ.trim();
+      if (trimmed && trimmed.length <= 256) out.q = trimmed;
+    }
+    const rawCase = search.case;
+    if (typeof rawCase === "string") {
+      const trimmed = rawCase.trim();
+      if (trimmed && trimmed.length <= 64) out.case = trimmed;
+    }
+    return out;
+  },
   head: () => ({ meta: [{ title: "Evidence Vault — Sentinel AI" }] }),
   component: VaultPage,
 });
@@ -86,8 +110,12 @@ function formatBytes(bytes: number): string {
 }
 
 function VaultPage() {
+  const navigate = useNavigate();
+  // `case` is a reserved word — destructure it under an alias.
+  const { q, case: caseId } = Route.useSearch();
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Seeded from `?q=` so an evidence-reference link lands pre-filtered.
+  const [searchQuery, setSearchQuery] = useState(q ?? "");
   const [selectedTag, setSelectedTag] = useState<string>("");
   const [selectedItem, setSelectedItem] = useState<EvidenceItem | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -337,9 +365,18 @@ function VaultPage() {
     return Object.entries(tagsMap);
   }, [evidenceList]);
 
-  // Filter evidence list based on tag and query
+  // When `?case=` is present the base is that case's exhibits, via the
+  // store's own getEvidenceForCase (never an inline e.caseId === caseId
+  // predicate that would duplicate the store's one-line calc). Depends on
+  // evidenceList so it re-derives after any in-session mutation.
+  const scopedBase = useMemo(
+    () => (caseId ? getEvidenceForCase(caseId) : evidenceList),
+    [caseId, evidenceList],
+  );
+
+  // Filter the (possibly case-scoped) base by tag and query.
   const filteredEvidenceList = useMemo(() => {
-    return evidenceList.filter((e) => {
+    return scopedBase.filter((e) => {
       const matchesSearch =
         e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -349,7 +386,7 @@ function VaultPage() {
       const matchesTag = !selectedTag || e.tags?.includes(selectedTag);
       return matchesSearch && matchesTag;
     });
-  }, [evidenceList, searchQuery, selectedTag]);
+  }, [scopedBase, searchQuery, selectedTag]);
 
   return (
     <AppShell>
@@ -362,6 +399,38 @@ function VaultPage() {
         this vault is seeded any more — every record here was put here by an
         analyst, and every digest is a real SHA-256 of real bytes.
       */}
+
+      {/* Case scope banner. Shows whenever `?case=` is set (even when the
+          case holds no exhibits, so a zero-exhibit case still announces its
+          scope rather than looking like an empty vault), with a path back to
+          all evidence. */}
+      {caseId && (
+        <div
+          className="mb-4 flex flex-wrap items-center gap-2 rounded border border-console-cyan/40 bg-console-cyan/5 px-3 py-2 font-mono text-[11px]"
+          data-testid="vault-case-scope"
+        >
+          <FolderLock className="size-3.5 shrink-0 text-console-cyan" />
+          <span className="text-console-cyan">
+            Scoped to case <span className="font-bold">{caseId}</span>
+            {caseExists(caseId) ? (
+              <>
+                {" — "}
+                {cases.find((c) => c.id === caseId)?.title}
+                {" · "}
+                {scopedBase.length} exhibit(s)
+              </>
+            ) : (
+              <span className="text-console-amber"> — not in your investigations</span>
+            )}
+          </span>
+          <Link
+            to="/vault"
+            className="ml-auto inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-0.5 text-[10px] uppercase tracking-wider text-console-muted hover:text-console-text"
+          >
+            Show all evidence
+          </Link>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px] font-mono text-xs text-console-muted">
         {/* Main Vault Workspace */}
@@ -487,6 +556,37 @@ function VaultPage() {
                 className="pl-8 h-8 text-[11px] border-console-border bg-console-surface text-console-text rounded"
               />
             </div>
+            {/* Case scope selector. Drives the SAME URL `?case=` the banner and
+                scopedBase already read (single source of truth), so a selection
+                preserves the case in the address bar and this box cannot
+                silently diverge from it. The case is chosen explicitly and
+                never inferred; "All evidence" clears the scope. */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px]">Case:</span>
+              <select
+                aria-label="Scope vault to a case"
+                data-testid="vault-case-filter"
+                value={caseId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  navigate({
+                    to: "/vault",
+                    search: {
+                      ...(id ? { case: id } : {}),
+                      ...(searchQuery ? { q: searchQuery } : {}),
+                    },
+                  });
+                }}
+                className="h-7 rounded border border-console-border bg-console-deep px-1 text-[10px] text-console-cyan"
+              >
+                <option value="">All evidence</option>
+                {cases.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id} · {c.title}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex gap-1.5 flex-wrap items-center">
               <span className="text-[10px]">Filter Tag:</span>
               {selectedTag && (
@@ -551,6 +651,13 @@ function VaultPage() {
                           <Trash2 className="size-3" />
                         </button>
                       </div>
+                      {item.previewUrl && (
+                        <img
+                          src={item.previewUrl}
+                          alt={item.title}
+                          className="h-20 w-full rounded border border-console-border/40 object-cover"
+                        />
+                      )}
                       <h4 className="line-clamp-1 text-[11px] font-semibold text-console-text">
                         {item.title}
                       </h4>
@@ -601,6 +708,14 @@ function VaultPage() {
                         {selectedItem.title}
                       </h3>
                     </div>
+
+                    {selectedItem.previewUrl && (
+                      <img
+                        src={selectedItem.previewUrl}
+                        alt={selectedItem.title}
+                        className="w-full rounded border border-console-border/40 object-contain"
+                      />
+                    )}
 
                     <div className="border border-console-border/40 rounded bg-console-deep p-2 space-y-2 text-[9px] font-mono leading-normal">
                       <div className="flex justify-between">

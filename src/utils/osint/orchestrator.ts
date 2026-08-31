@@ -45,6 +45,7 @@ import { collectorRegistry } from "../collectors/registry";
 import { registerExistingCollectors } from "../collectors/existing";
 import { registerExternalCollectors } from "../collectors/external";
 import { registerPersonCollectors } from "../collectors/person";
+import { assertPassiveCollector } from "../collectors/passive-policy";
 import { resolveInvestigationEntities } from "./entity-resolution";
 import { dedupeEntitiesById, dedupeRelationships, mergeTargetSelfEntities } from "./merge";
 import type { OsintPlan } from "./query-planner";
@@ -86,6 +87,13 @@ export async function runInvestigation(
         // orchestrator's own bookkeeping, not just upstream collectors.
         throw new Error(`Planned collector "${collectorId}" is no longer registered.`);
       }
+      // Spec §2: "any adapter marked ACTIVE must be rejected by the orchestrator."
+      // The planner already filtered these out, so reaching here means either the
+      // registry was mutated between planning and execution or a future caller
+      // hand-built a plan. Both are exactly the cases a second check exists for —
+      // this is the last point before a non-passive adapter would touch the
+      // network, and the gate that matters is the one closest to the action.
+      assertPassiveCollector(collector);
       const outcome = await collector.execute({ type: targetType, value: plan.input });
       const result = collector.normalize(outcome);
       return { collectorId, result };

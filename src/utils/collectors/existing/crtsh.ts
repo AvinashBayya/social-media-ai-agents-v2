@@ -24,6 +24,18 @@ export const crtshCollector: Collector<CrtShRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "crtsh",
+    name: "crt.sh",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "Certificate Transparency logs — a public append-only record of issued certificates. Flaky upstream; retries once within a 50s budget.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<CrtShRaw>> {
     const clock = startExecution();
     if (target.type !== "domain") {

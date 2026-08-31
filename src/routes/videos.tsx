@@ -37,6 +37,8 @@ import {
   type KeyframeResult,
 } from "@/utils/imaging-client";
 import { extractAudioAsWav } from "@/utils/audio-extract-client";
+import { AudioSpectrumPanel } from "@/components/audio-spectrum-panel";
+import { AudioEventsPanel } from "@/components/audio-events-panel";
 import {
   aiServiceOcrVlm,
   AiServiceUnavailableError,
@@ -121,15 +123,21 @@ function Page() {
   const [ocrVlmError, setOcrVlmError] = useState("");
   const [ocrVlmLoading, setOcrVlmLoading] = useState(false);
 
-  // ── Audio transcription (Sarvam) — the one action on this page that sends
-  // the file off the machine, so it requires explicit consent (unchecked by
-  // default) before the button is even enabled. `jobId` is only set for the
-  // batch (long-clip) path; the polling effect below drives it.
+  // ── Audio transcription (Sarvam) — one of two actions on this page that
+  // send the file off the machine (the other is sound-event classification,
+  // via AudioEventsPanel below), so both require explicit consent (unchecked
+  // by default) before their button is even enabled. `jobId` is only set for
+  // the batch (long-clip) path; the polling effect below drives it.
   const [transcribeConsent, setTranscribeConsent] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptionResult | null>(null);
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
   const [transcribeError, setTranscribeError] = useState("");
   const [transcribeJobId, setTranscribeJobId] = useState<string | null>(null);
+
+  // Audio spectral analysis (audio-spectrum-panel.tsx) — fully local, no
+  // consent needed. Its findings are threaded into the AI panel below as
+  // extra measured context, the same way the transcript already is.
+  const [audioFindingLines, setAudioFindingLines] = useState<string[]>([]);
 
   // AiAnalysisPanel needs real bytes, not a data URL — resolved once per
   // selected frame rather than on every render.
@@ -392,7 +400,7 @@ function Page() {
     <AppShell>
       <PageHeader
         title="Video Intelligence"
-        description="In-browser keyframe extraction, scene-cut detection and perceptual matching. No GPU, no server — the file is never uploaded."
+        description="In-browser keyframe extraction, scene-cut detection, perceptual matching and audio spectral analysis. No GPU, no server for those — the file is never uploaded. Audio transcription and sound-event classification are opt-in exceptions that do send audio to a server."
       />
 
       <Card className={`${CARD} mb-4`}>
@@ -543,9 +551,10 @@ function Page() {
               <Film className="mx-auto size-8 text-console-border" />
               <p className="mt-3 text-sm text-console-muted">No video loaded.</p>
               <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-console-label">
-                Upload a file to extract keyframes. Decoding, hashing and OCR all run in this tab —
-                nothing is sent to a server. The one exception is audio transcription, which is
-                explicit and opt-in — see below once a video is loaded.
+                Upload a file to extract keyframes. Decoding, hashing, OCR and audio spectral
+                analysis all run in this tab — nothing is sent to a server. Audio transcription
+                and sound-event classification are the two exceptions, both explicit and opt-in —
+                see below once a video is loaded.
               </p>
             </CardContent>
           </Card>
@@ -718,6 +727,10 @@ function Page() {
                 </p>
               </CardContent>
             </Card>
+
+            <AudioSpectrumPanel file={videoFile} onFindings={setAudioFindingLines} />
+
+            <AudioEventsPanel file={videoFile} />
 
             {Object.keys(matches).length > 0 && (
               <Card className="border-console-purple/40 bg-console-surface">
@@ -939,6 +952,7 @@ function Page() {
                         `Audio transcript (Sarvam, ${transcript.mode}${transcript.languageCode ? `, ${transcript.languageCode}` : ""}): ${transcript.transcript.trim().slice(0, 3000)}`,
                       ]
                     : []),
+                  ...audioFindingLines,
                 ]}
                 bytesUnavailableNote="Preparing frame bytes — try again in a moment."
               />

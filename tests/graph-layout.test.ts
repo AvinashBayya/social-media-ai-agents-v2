@@ -162,6 +162,37 @@ describe("layoutRadial", () => {
     expect(radius).toBeCloseTo(85, 1);
   });
 
+  test("a single-member ring with long labels gets a wider radial gap than the flat ringGap — real overlap fix", () => {
+    // The exact reported shape: one email-address root, one discovered
+    // account one hop out, both with long labels. A flat `ringGap` (85px)
+    // placed the single ring-1 member at angle 0 — directly beside the root
+    // — with each label's own half-width alone exceeding that gap, so the
+    // two labels rendered on top of each other.
+    const root = entity("nvtarakanadh@gmail.com");
+    const account = entity("nvtarakanadh on GitHub");
+    const entities = [root, account];
+    const relationships = [rel(root.id, account.id)];
+    const result = layoutRadial(entities, relationships, root.id, { ringGap: 85, minArcSpacing: 92 });
+    const node = result.nodes.find((n) => n.id === account.id)!;
+    const radius = Math.hypot(node.x - 400, node.y - 280);
+    expect(radius).toBeGreaterThan(85); // wider than the flat default the old formula would have used
+    // The gap must be at least both labels' half-widths plus the padding —
+    // i.e. genuinely wide enough that the two labels cannot overlap.
+    const minRequired =
+      (Math.min(root.displayName.length, 24) * 6.4) / 2 +
+      (Math.min(account.displayName.length, 24) * 6.4) / 2;
+    expect(radius).toBeGreaterThanOrEqual(minRequired);
+  });
+
+  test("short labels still produce exactly the flat ringGap — the content-aware fix adds nothing when nothing is needed", () => {
+    const entities = [entity("root"), entity("c1")];
+    const relationships = [rel("root", "c1")];
+    const result = layoutRadial(entities, relationships, "root", { ringGap: 85 });
+    const c1 = result.nodes.find((n) => n.id === "c1")!;
+    const radius = Math.hypot(c1.x - 400, c1.y - 280);
+    expect(radius).toBeCloseTo(85, 1);
+  });
+
   test("ring radii still strictly increase with BFS distance even when an inner ring is busier than an outer one", () => {
     // Ring 1 has many members (needs a large radius for spacing); ring 2
     // has only one. Ring 2 must still end up further out than ring 1, or

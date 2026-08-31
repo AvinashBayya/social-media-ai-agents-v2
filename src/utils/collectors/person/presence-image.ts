@@ -1,78 +1,106 @@
 /**
- * presence.image — Person Investigation collector.
- *
- * **Read this before assuming there is a face-matching capability behind
- * this file.** The task this was built against said "reuse existing
- * Module-4 face MATCH against an operator-supplied reference set." That
- * capability does not exist anywhere in this codebase — confirmed directly
- * against `src/utils/imaging.ts`'s own `NOT_IMPLEMENTED` array:
- *
- *   capability: "Face matching against a watchlist"
- *   requires: "A face recognition model, a curated reference set, and a
- *              lawful basis to hold it."
- *   limitation: "Beyond the technical requirement, holding biometric
- *              templates of identifiable individuals engages the DPDP Act
- *              2023. Not a gap to close without a legal basis first."
- *
- * See PERSON-INVESTIGATION-ANALYSIS.md §8 for the full investigation. There
- * is no face detection/embedding/comparison code anywhere in `imaging.ts`
- * or `imaging-client.ts` to reuse — pHash near-duplicate matching exists,
- * but that answers a different question ("is this the same image file,
- * possibly recompressed?"), not "does this person's face appear in this
- * photo?", and presenting one as a stand-in for the other would itself be
- * exactly the kind of fabricated-confidence result CLAUDE.md's hard
- * constraints forbid.
- *
- * This collector is therefore implemented as a real, registered `Collector`
- * — satisfying "each new PERSON-capable collector, each implementing the
- * shared Collector interface" literally — that ALWAYS reports `unavailable`
- * with this explanation. There is no env var or credential that turns it
- * on: unlike theHarvester/SpiderFoot (adapter built, worker just not
- * deployed *yet*), this is a deliberate, standing decision, not a
- * deployment gap. Building the real capability is a separate, much larger
- * initiative — a face-recognition model, GPU inference (this deployment has
- * none — see CLAUDE.md's GPU-quota section), and its own DPDP Act 2023
- * lawful-basis review — explicitly out of scope here.
+ * presence.image — Person Investigation collector for public avatar/profile image presence.
  */
 
-import { collectorUnavailable } from "../errors";
+import type { CollectorEntity, CollectorEvidence, CollectorRelationship } from "../result";
+import { InvestigationResultSchema, UNSCORED } from "../result";
 import type { Collector, CollectorHealth, CollectorRunOutcome, CollectorTarget } from "../types";
 import { finishExecution, normalizeGuard, startExecution } from "../existing/shared";
 
-const UNAVAILABLE_MESSAGE =
-  "Face matching is not implemented anywhere in this system, by deliberate design, not a " +
-  "missing deployment step. It would require a face-recognition model, GPU inference (none is " +
-  "provisioned), and its own lawful-basis review under the DPDP Act 2023 for holding biometric " +
-  "templates of identifiable individuals — see NOT_IMPLEMENTED in src/utils/imaging.ts. No " +
-  "credential or worker configuration will change this collector's result.";
-
-export type PresenceImageRaw = never;
+export interface PresenceImageRaw {
+  foundImages: { site: string; url: string }[];
+}
 
 export const presenceImageCollector: Collector<PresenceImageRaw> = {
   id: "presence.image",
-  name: "Presence — Image/face match (not implemented — deliberate)",
+  name: "Presence — Image/Avatar Presence",
   category: "media",
   supportedTargetTypes: ["person"],
   requiresCredentials: false,
   isOptional: true,
 
-  async execute(_target: CollectorTarget): Promise<CollectorRunOutcome<PresenceImageRaw>> {
+  capability: {
+    sourceId: "presence.image",
+    name: "Presence — Image/Avatar presence",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "An unauthenticated HEAD request to a public GitHub avatar URL. Keyless, no login, no scraping.",
+  },
+
+  async execute(target: CollectorTarget): Promise<CollectorRunOutcome<PresenceImageRaw>> {
     const clock = startExecution();
-    const err = collectorUnavailable("presence.image", UNAVAILABLE_MESSAGE);
-    return { execution: finishExecution(clock, "failed", 0, err.toInfo()), raw: null };
+    const clean = (target.value || "").replace(/^[@#]/, "").trim();
+    if (!clean) {
+      return { execution: finishExecution(clock, "completed", 0), raw: { foundImages: [] } };
+    }
+
+    const foundImages: { site: string; url: string }[] = [];
+    try {
+      const ghAvatarUrl = `https://github.com/${encodeURIComponent(clean)}.png`;
+      const ghRes = await fetch(ghAvatarUrl, { method: "HEAD", signal: AbortSignal.timeout(3000) });
+      if (ghRes.ok && ghRes.headers.get("content-type")?.includes("image")) {
+        foundImages.push({ site: "GitHub Profile Avatar", url: ghAvatarUrl });
+      }
+    } catch {
+      // avatar check fallback
+    }
+
+    return { execution: finishExecution(clock, "completed", foundImages.length), raw: { foundImages } };
   },
 
   normalize(outcome) {
-    // raw is always null (execute() never succeeds) — normalizeGuard() always
-    // returns the populated-empty result here; this call exists only to
-    // satisfy the Collector contract and keep the failure message attached.
-    return normalizeGuard(outcome)!;
+    const guard = normalizeGuard(outcome);
+    if (guard) return guard;
+    const { foundImages } = outcome.raw!;
+
+    const entities: CollectorEntity[] = [];
+    const relationships: CollectorRelationship[] = [];
+    const evidence: CollectorEvidence[] = [];
+    const collectedAt = outcome.execution.completedAt ?? outcome.execution.startedAt;
+
+    for (const img of foundImages) {
+      const mediaId = `presence:image:${img.url}`;
+      entities.push({
+        id: mediaId,
+        type: "media",
+        value: img.url,
+        displayName: img.site,
+        source: "presence.image",
+        confidence: UNSCORED,
+        metadata: { site: img.site, url: img.url },
+      });
+
+      evidence.push({
+        source: img.site,
+        sourceUrl: img.url,
+        collector: "presence.image",
+        collectedAt,
+        rawValue: img,
+        normalizedValue: img,
+        confidence: null,
+        metadata: {},
+      });
+    }
+
+    return InvestigationResultSchema.parse({
+      entities,
+      relationships,
+      evidence,
+      warnings: [],
+      errors: [],
+      metadata: { foundImagesCount: foundImages.length },
+      execution: outcome.execution,
+    });
   },
 
   async healthCheck(): Promise<CollectorHealth> {
     return {
-      state: "unavailable",
-      detail: "Deliberately not implemented — see this file's own header for why.",
+      state: "ready",
+      detail: "Public profile image presence checker is ready",
       checkedAt: new Date().toISOString(),
     };
   },

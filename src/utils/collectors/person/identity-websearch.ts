@@ -177,6 +177,19 @@ export const identityWebsearchCollector: Collector<IdentityWebsearchRaw> = {
   requiresCredentials: true,
   isOptional: true,
 
+  capability: {
+    sourceId: "identity.websearch",
+    name: "Identity — Web search + readability extract",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: true,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes:
+      "Brave Search (key-gated) for discovery, then self-hosted readability extraction of the top result's own page — never a targeted site:linkedin.com construction, never an authenticated/logged-in session against any platform.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<IdentityWebsearchRaw>> {
     const clock = startExecution();
     const query = target.value.trim();

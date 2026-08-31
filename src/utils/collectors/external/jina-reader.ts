@@ -71,6 +71,18 @@ export const jinaReaderCollector: Collector<JinaReaderRaw> = {
   requiresCredentials: false,
   isOptional: true,
 
+  capability: {
+    sourceId: "jina-reader",
+    name: "Jina Reader",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "Free keyless full-text extraction of a public URL. Fetches only what an ordinary reader would see.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<JinaReaderRaw>> {
     const clock = startExecution();
     const url = target.value.trim();

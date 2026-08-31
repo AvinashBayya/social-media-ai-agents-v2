@@ -1,11 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Cpu, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { Cpu, RefreshCw, Loader2, AlertTriangle, ShieldCheck } from "lucide-react";
 import { collectorHealth, type CollectorProbe } from "@/utils/collector-health";
+import { capabilityReport, type CapabilityReport } from "@/utils/collectors/capability-report";
 
 /**
  * Collector reachability — measured on demand.
@@ -151,6 +152,20 @@ function CrawlersPage() {
               <p className="border-t border-console-border/40 pt-2 text-[10px] leading-relaxed text-console-label">
                 {p.detail}
               </p>
+
+              {/* The remediation for a credential-gated probe has a real existing
+                  destination: the operator vault on /settings, the same place
+                  CredentialNotice points to. Linked only for the no-credential
+                  status, so it never implies a fix that does not apply. */}
+              {p.status === "no-credential" && (
+                <Link
+                  to="/settings"
+                  data-testid="crawler-settings-link"
+                  className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-console-purple hover:underline"
+                >
+                  Add credentials in Settings →
+                </Link>
+              )}
             </Card>
           ))}
         </div>
@@ -160,7 +175,155 @@ function CrawlersPage() {
             No collectors registered.
           </Card>
         )}
+
+        <CapabilityMatrix />
       </div>
     </AppShell>
+  );
+}
+
+/**
+ * Source capability matrix — ported from a teammate's parallel fork alongside
+ * `passive-policy.ts`/`wayback.ts`/`sherlock.ts`.
+ *
+ * Deliberately BELOW the probe and visually separated: this table reports what each
+ * collector *declares*, and the probe above reports what actually answered. Merging
+ * them into one table would let a static declaration read as a live status, which is
+ * the exact failure this page was rebuilt to remove (it once showed hardcoded
+ * ONLINE badges for collectors that were returning 403).
+ */
+function CapabilityMatrix() {
+  const [report, setReport] = useState<CapabilityReport | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = (await capabilityReport()) as unknown as CapabilityReport;
+        if (!cancelled) setReport(data);
+      } catch (err: any) {
+        // An unreadable registry is reported, never rendered as an empty table —
+        // an empty table would say "no sources", which is a different claim.
+        if (!cancelled) setError(err?.message ?? String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-2 rounded border border-console-red/30 bg-console-red/5 p-3">
+        <AlertTriangle className="size-4 shrink-0 text-console-red" />
+        <span className="text-[11px] leading-relaxed text-console-red">
+          Capability matrix unavailable: {error}
+        </span>
+      </div>
+    );
+  }
+
+  if (!report) {
+    return (
+      <Card className={`${CARD} p-4 text-[10px] text-console-label`}>Loading capability matrix…</Card>
+    );
+  }
+
+  const yn = (v: boolean) => (v ? "yes" : "no");
+
+  return (
+    <Card className={`${CARD} space-y-3 p-4`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="flex items-center gap-2 font-bold text-console-text">
+          <ShieldCheck className="size-4 shrink-0 text-console-cyan" />
+          Source Capability Matrix
+        </span>
+        <span className="text-[10px] text-console-muted">
+          {report.totals.declared} declared · {report.totals.passive} passive ·{" "}
+          {report.totals.refused} refused
+          {report.totals.activeCapableGated > 0 &&
+            ` · ${report.totals.activeCapableGated} active-capable behind an authorisation gate`}
+        </span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] border-collapse text-[10px]">
+          <thead>
+            <tr className="border-b border-console-border text-left text-console-label">
+              <th className="py-2 pr-3 font-normal">Source</th>
+              <th className="py-2 pr-3 font-normal">Discipline</th>
+              <th className="py-2 pr-3 font-normal">Input types</th>
+              <th className="py-2 pr-3 font-normal">Mode</th>
+              <th className="py-2 pr-3 font-normal">Passive</th>
+              <th className="py-2 pr-3 font-normal">API</th>
+              <th className="py-2 pr-3 font-normal">Auth</th>
+              <th className="py-2 pr-3 font-normal">Manual</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.rows.map((r) => (
+              <tr key={r.sourceId} className="border-b border-console-border/40 align-top">
+                <td className="py-2 pr-3 font-bold text-console-text">{r.name}</td>
+                <td className="py-2 pr-3 text-console-muted">
+                  {/* Untagged is shown as untagged, never filed under a default discipline. */}
+                  {r.disciplines.length ? r.disciplines.join(", ") : "—"}
+                </td>
+                <td className="py-2 pr-3 text-console-muted">{r.inputTypes.join(", ")}</td>
+                <td className="py-2 pr-3 text-console-muted">{r.collectionMode}</td>
+                <td className="py-2 pr-3">
+                  <Badge
+                    className={`border text-[9px] uppercase ${
+                      r.passive
+                        ? "border-console-green/30 bg-console-green/10 text-console-green"
+                        : "border-console-red/30 bg-console-red/10 text-console-red"
+                    }`}
+                  >
+                    {r.passive ? "passive" : "refused"}
+                  </Badge>
+                </td>
+                <td className="py-2 pr-3 text-console-muted">{yn(r.apiAvailable)}</td>
+                <td className="py-2 pr-3 text-console-muted">{yn(r.requiresAuth)}</td>
+                <td className="py-2 pr-3 text-console-muted">{yn(r.requiresManualAction)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* A refusal always states its reason — a source silently missing from a run
+          reads to an analyst as a source that found nothing. */}
+      {report.rows
+        .filter((r) => r.rejection)
+        .map((r) => (
+          <p
+            key={`${r.sourceId}-rejection`}
+            className="rounded border border-console-red/30 bg-console-red/5 p-2 text-[10px] leading-relaxed text-console-red"
+          >
+            <span className="font-bold">{r.name} will not run:</span> {r.rejection!.detail}
+          </p>
+        ))}
+
+      {report.rows
+        .filter((r) => r.activeCapable && r.authorisationGated)
+        .map((r) => (
+          <p
+            key={`${r.sourceId}-gated`}
+            className="rounded border border-console-amber/30 bg-console-amber/5 p-2 text-[10px] leading-relaxed text-console-amber"
+          >
+            <span className="font-bold">{r.name} is active-capable.</span> It only reads a stored
+            operator-owned dataset and sends the target nothing, but that dataset originates from
+            scanning, so every call passes a named-officer authorisation gate that denies by default.
+          </p>
+        ))}
+
+      <div className="space-y-1 border-t border-console-border/40 pt-2">
+        {report.caveats.map((c) => (
+          <p key={c} className="text-[10px] leading-relaxed text-console-label">
+            {c}
+          </p>
+        ))}
+      </div>
+    </Card>
   );
 }

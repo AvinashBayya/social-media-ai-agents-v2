@@ -154,6 +154,31 @@ export const COLLECTION_POLICIES: CollectionPolicy[] = [
       "evidence store; see manual-evidence.ts.",
   },
   {
+    id: "linkedin",
+    sources: ["LinkedIn"],
+    mode: "manual-only",
+    basis: ["platform-tos", "dpdp-act-2023"],
+    rationale:
+      "No automated collection. LinkedIn's User Agreement explicitly prohibits scraping, and the " +
+      "official Partner APIs that could return profile or post data need a business partnership " +
+      "approval — there is no public, self-serve API for broad search. LinkedIn has also " +
+      "pursued real legal action against scrapers (e.g. hiQ Labs), so this is an enforced " +
+      "restriction, not a theoretical one. Profile data is additionally personal data of " +
+      "identifiable individuals (real names, employers, roles), so bulk automated collection " +
+      "would process it without a lawful basis under the DPDP Act 2023 — the same constraint " +
+      "that rules out Instagram and Facebook above.",
+    ingestionRoute:
+      "An analyst opens a public profile or post, captures it, and uploads that capture with " +
+      "its source URL, capture time and attribution. It enters as analyst-attested evidence — " +
+      "hashed, provenance-marked, and never presented as collected data.",
+    permitted: [],
+    withheld: [],
+    manualUploadAllowed: true,
+    implementedBy:
+      "No collector exists, by design. The manual capture panel on /social writes to the " +
+      "evidence store; see manual-evidence.ts.",
+  },
+  {
     id: "active-scan",
     sources: ["IVRE", "Nmap"],
     mode: "partial",

@@ -7,13 +7,15 @@ from app.config import settings
 
 logger = logging.getLogger("ai-service.loaders")
 
-# "florence2" is an addition to the original stub plan — image
-# captioning/description wasn't one of the five originally-stubbed models,
-# but /ai/describe needed a real local engine same as the others.
-STUB_MODEL_NAMES = ["grounding_dino", "insightface", "florence2", "tesseract", "whisper", "llm"]
+# "florence2"/"yamnet" are additions to the original stub plan — neither
+# image captioning nor audio event classification were among the five
+# originally-stubbed models, but /ai/describe and /ai/audio/events needed a
+# real local engine same as the others.
+STUB_MODEL_NAMES = ["grounding_dino", "insightface", "florence2", "yamnet", "tesseract", "whisper", "llm"]
 
 GROUNDING_DINO_DIR = "grounding-dino-tiny"
 FLORENCE2_DIR = "florence-2-large"
+YAMNET_DIR = "yamnet"
 # insightface's own FaceAnalysis(root=...) convention: the pack lives at
 # root/models/<name>, e.g. models/insightface/models/buffalo_l. Vendored
 # once via its own one-time download (see project notes); this loader
@@ -111,6 +113,42 @@ def _load_insightface(models_dir: str, device: str):
         return None, f"unavailable: {e}"
 
 
+def _load_yamnet(models_dir: str):
+    """Loads from a local vendored directory only — same air-gap guarantee
+    as grounding_dino/florence2 above. See scripts/vendor_yamnet.py for how
+    models/yamnet/{yamnet.onnx,yamnet_class_map.csv} are produced: a
+    first-party ONNX conversion of Google's own official YAMNet weights,
+    not a third-party re-upload.
+
+    CPU-only by design, unlike the torch-based loaders above: YAMNet's own
+    mel-spectrogram front-end is baked into the ONNX graph (no separate
+    feature-extraction dependency needed), inference is ~15-25ms per 0.96s
+    window even on CPU, and staying off the GPU avoids competing for VRAM
+    with the torch-based models this same process may also be serving.
+    """
+    path = Path(models_dir) / YAMNET_DIR
+    onnx_path = path / "yamnet.onnx"
+    class_map_path = path / "yamnet_class_map.csv"
+    if not onnx_path.is_file() or not class_map_path.is_file():
+        return None, f"unavailable: no vendored model at {path}"
+
+    try:
+        import csv
+
+        import onnxruntime as ort
+
+        session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+        with open(class_map_path, newline="") as f:
+            reader = csv.reader(f)
+            next(reader)  # header: index,mid,display_name
+            class_names = [row[2] for row in reader]
+        if len(class_names) != 521:
+            return None, f"unavailable: class map has {len(class_names)} entries, expected 521"
+        return (session, class_names), "loaded (cpu, onnxruntime)"
+    except Exception as e:
+        return None, f"unavailable: {e}"
+
+
 class ModelRegistry:
     """Load-once model registry. Real engines register a status here as later
     phases wire them in; entries with no engine yet stay "not_loaded" stubs."""
@@ -153,6 +191,12 @@ class ModelRegistry:
             self._status["insightface"] = insightface_status
             if insightface_app is not None:
                 self._models["insightface"] = insightface_app
+
+        if "yamnet" not in self._models:
+            yamnet, yamnet_status = _load_yamnet(settings.MODELS_DIR)
+            self._status["yamnet"] = yamnet_status
+            if yamnet is not None:
+                self._models["yamnet"] = yamnet
 
         for name in STUB_MODEL_NAMES:
             logger.info("Model '%s' status: %s", name, self._status[name])

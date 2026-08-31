@@ -21,6 +21,7 @@ import { newsCollector } from "./news";
 import { rdapCollector } from "./rdap";
 import { shodanInternetDbCollector } from "./shodan-internetdb";
 import { socialCollector } from "./social";
+import { waybackCollector } from "./wayback";
 
 export { crtshCollector } from "./crtsh";
 export { dnsCollector } from "./dns";
@@ -29,6 +30,7 @@ export { newsCollector } from "./news";
 export { rdapCollector } from "./rdap";
 export { shodanInternetDbCollector } from "./shodan-internetdb";
 export { socialCollector } from "./social";
+export { waybackCollector } from "./wayback";
 
 export const EXISTING_COLLECTORS = [
   dorksCollector,
@@ -38,6 +40,7 @@ export const EXISTING_COLLECTORS = [
   shodanInternetDbCollector,
   newsCollector,
   socialCollector,
+  waybackCollector,
 ];
 
 export function registerExistingCollectors(registry: CollectorRegistry = collectorRegistry): void {

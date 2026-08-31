@@ -79,6 +79,19 @@ export const socialCollector: Collector<SocialRaw> = {
   requiresCredentials: false,
   isOptional: true,
 
+  capability: {
+    sourceId: "social",
+    name: "Social",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes:
+      "Bluesky public AppView and Telegram public channel previews run keyless. The Reddit path additionally needs REDDIT_CLIENT_ID/SECRET — without them Reddit reports a missing credential rather than zero results.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<SocialRaw>> {
     const clock = startExecution();
     const value = (target.value || "").trim();
@@ -107,8 +120,25 @@ export const socialCollector: Collector<SocialRaw> = {
     const failures = results.filter((r): r is PlatformFailure => "reason" in r);
     const resultCount = platforms.reduce((sum, p) => sum + p.posts.length, 0);
 
+    // Every platform can throw independently — a run that got zero posts
+    // because Bluesky/Telegram/Reddit all genuinely failed is a different
+    // fact from a real search that came back empty, and reporting both as a
+    // clean "completed" made a total outage indistinguishable from "nothing
+    // to find." `failed`/`partial` already exist for exactly this; a total
+    // failure sets raw: null (matching this collector's own invalid-target
+    // path above) so normalizeGuard's empty-result builder handles it the
+    // same way every other hard failure here already does.
+    if (platforms.length === 0) {
+      const combined = classifyError(
+        "social",
+        new Error(failures.map((f) => `${f.platform}: ${f.reason}`).join("; ")),
+      );
+      return { execution: finishExecution(clock, "failed", 0, combined.toInfo()), raw: null };
+    }
+
+    const status = failures.length > 0 ? "partial" : "completed";
     return {
-      execution: finishExecution(clock, "completed", resultCount),
+      execution: finishExecution(clock, status, resultCount),
       raw: { targetValue: value, targetType: target.type, platforms, failures },
     };
   },

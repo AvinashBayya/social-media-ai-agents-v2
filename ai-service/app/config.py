@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     DETECT_BOX_THRESHOLD: float = 0.35
     DETECT_TEXT_THRESHOLD: float = 0.25
     FACE_MATCH_THRESHOLD: float = 0.5
+    # YAMNet's outputs are independent, uncalibrated per-class sigmoids —
+    # never a probability distribution — so these are a stated reporting
+    # POLICY, not a measured confidence cutoff. REPORT is what actually
+    # renders as a finding; REVIEW is shown de-emphasized (an interval must
+    # clear REPORT at least once, but its full extent is measured down to
+    # REVIEW, so a real detection's fade-in/out isn't clipped at REPORT).
+    AUDIO_EVENT_REPORT_THRESHOLD: float = 0.50
+    AUDIO_EVENT_REVIEW_THRESHOLD: float = 0.20
     # Only needed when the system Tesseract install doesn't already carry the
     # languages OCR needs — see .env.example. pydantic-settings parses this
     # into the Settings object, not the real OS environment, so it does

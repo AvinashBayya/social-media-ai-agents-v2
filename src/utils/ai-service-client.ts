@@ -181,3 +181,65 @@ export async function aiServiceFaces(
   if (references.length) form.append("reference_ids", references.map((r) => r.id).join(","));
   return postForm("/ai/faces", form);
 }
+
+export interface AiAudioEvent {
+  className: string;
+  startTime: number;
+  endTime: number;
+  maxScore: number;
+  meanScore: number;
+  framesAboveThreshold: number;
+  framesTotal: number;
+  hazard: boolean;
+}
+export interface AiAudioEventsCoverage {
+  windowsAnalysed: number;
+  windowsWithAnyClassAboveThreshold: number;
+}
+export interface AiClosestMatch {
+  className: string;
+  maxScore: number;
+}
+export interface AiAudioEventsResult {
+  events: AiAudioEvent[];
+  coverage: AiAudioEventsCoverage;
+  /** The model's own real top candidates that never cleared the reporting threshold — see audio-events.ts. */
+  closestBelowThreshold: AiClosestMatch[];
+  provenance: { model: string; version: string };
+}
+
+/**
+ * Semantic sound-event classification (YAMNet) — the one call in this
+ * client whose input is audio, not an image, and the one action anywhere
+ * on /videos that sends audio off the browser. See audio-events.ts for the
+ * honesty framing this result must be rendered with: "model score", never
+ * "confidence"; a hazard class needs a listen to confirm, never a bare
+ * label. `file` must be 16kHz mono PCM16 WAV — audio-extract-client.ts's
+ * `encodeWavPcm16`/`decodeAudioSamples` already produce exactly that.
+ */
+export async function aiServiceClassifyAudio(file: Blob): Promise<AiAudioEventsResult> {
+  const form = new FormData();
+  form.append("file", file, "audio.wav");
+  const raw = await postForm("/ai/audio/events", form);
+  return {
+    events: (raw.events as any[]).map((e) => ({
+      className: e.class_name,
+      startTime: e.start_time,
+      endTime: e.end_time,
+      maxScore: e.max_score,
+      meanScore: e.mean_score,
+      framesAboveThreshold: e.frames_above_threshold,
+      framesTotal: e.frames_total,
+      hazard: e.hazard,
+    })),
+    coverage: {
+      windowsAnalysed: raw.coverage.windows_analysed,
+      windowsWithAnyClassAboveThreshold: raw.coverage.windows_with_any_class_above_threshold,
+    },
+    closestBelowThreshold: (raw.closest_below_threshold as any[]).map((c) => ({
+      className: c.class_name,
+      maxScore: c.max_score,
+    })),
+    provenance: raw.provenance,
+  };
+}

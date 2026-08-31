@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,12 +22,15 @@ import {
   FileText,
   Save,
   X,
+  Network,
+  Clock,
+  FolderLock,
+  Boxes,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   caseMetrics,
   createInvestigation,
-  deleteInvestigation,
   getInvestigations,
   removeEvidence,
   sourcesFromEvidence,
@@ -44,6 +47,15 @@ import {
   type ProductType,
 } from "@/utils/reports";
 import { renderProductPdf } from "@/utils/report-pdf";
+import { CaseRunsPanel } from "@/components/case-runs-panel";
+import { CaseScopePanel } from "@/components/case-scope-panel";
+import { CaseContradictionsPanel } from "@/components/case-contradictions-panel";
+import { CaseIntelligenceBreakdownPanel } from "@/components/case-intelligence-breakdown";
+import { CaseCorrelationsPanel } from "@/components/case-correlations-panel";
+import { CaseMediaIntPanel } from "@/components/case-mediaint-panel";
+import { CaseSummaryPanel } from "@/components/case-summary-panel";
+import { CaseEntitiesPanel } from "@/components/case-entities-panel";
+import { deleteCaseCascade } from "@/utils/cases/case-delete";
 
 /**
  * Investigations — case workspaces (PS-18 §7, analyst workflow).
@@ -443,15 +455,86 @@ function InvestigationsPage() {
                     </div>
                     <button
                       onClick={() => {
-                        deleteInvestigation(active.id);
+                        // Full cascade, not a bare record delete. Deleting only
+                        // the case record left its graph/timeline snapshots
+                        // behind, and because ids are minted as max+1, deleting
+                        // the highest case made the next-created one REUSE the id
+                        // and read those snapshots back as verdict MATCH.
+                        // `deleteCaseCascade` clears the scoped slots, the
+                        // this-case unscoped mirrors, the eviction ledger and the
+                        // runs, and UNLINKS (never deletes) vault exhibits.
+                        const r = deleteCaseCascade(active.id);
                         refresh();
-                        toast.success(`${active.id} deleted.`);
+                        toast.success(
+                          r.evidenceUnlinked > 0
+                            ? `${active.id} deleted · ${r.evidenceUnlinked} exhibit(s) moved to unlinked evidence.`
+                            : `${active.id} deleted.`,
+                        );
                       }}
                       className="shrink-0 text-console-label hover:text-console-red"
                       title="Delete case"
                     >
                       <Trash2 className="size-3.5" />
                     </button>
+                  </div>
+
+                  {/* Case command bar — the hub. Every case-aware surface for
+                      THIS case in one row, each link carrying ?case= so it opens
+                      scoped to it (never the unscoped/latest slot). The per-run
+                      Graph/Timeline buttons in the runs panel below view one
+                      run's snapshot; these open the case's current scoped view. */}
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-console-border pt-3"
+                    data-testid="case-command-bar"
+                  >
+                    <span className="mr-0.5 text-[9px] uppercase tracking-wider text-console-label">
+                      Open case in
+                    </span>
+                    <Link
+                      to="/graph"
+                      search={{ case: active.id }}
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-purple hover:border-console-purple/50"
+                    >
+                      <Network className="size-3" /> Graph
+                    </Link>
+                    <Link
+                      to="/timeline"
+                      search={{ case: active.id }}
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-cyan hover:border-console-cyan/50"
+                    >
+                      <Clock className="size-3" /> Timeline
+                    </Link>
+                    <Link
+                      to="/agents"
+                      search={{ case: active.id }}
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-purple hover:border-console-purple/50"
+                    >
+                      <Sparkles className="size-3" /> Agent
+                    </Link>
+                    <Link
+                      to="/reports"
+                      search={{ case: active.id }}
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-cyan hover:border-console-cyan/50"
+                    >
+                      <FileText className="size-3" /> Report
+                    </Link>
+                    <Link
+                      to="/vault"
+                      search={{ case: active.id }}
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-green hover:border-console-green/50"
+                    >
+                      <FolderLock className="size-3" /> Vault
+                    </Link>
+                    {/* The resolved entities live in-page on this same case
+                        (below), so this is an in-page anchor rather than a route:
+                        the case context is already the selected one and is not
+                        left. Completes the hub's enumerated set. */}
+                    <a
+                      href="#case-entities"
+                      className="inline-flex items-center gap-1 rounded border border-console-border bg-console-deep px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-console-purple hover:border-console-purple/50"
+                    >
+                      <Boxes className="size-3" /> Entities
+                    </a>
                   </div>
 
                   {/* Derived metrics. No risk score, no threat score. */}
@@ -490,6 +573,82 @@ function InvestigationsPage() {
                     page previously rendered both as percentages with progress bars — which reads as
                     a measurement.
                   </p>
+                </CardContent>
+              </Card>
+
+              {/* ── Case Intelligence Summary ──────────────────────────────
+                  The hub's at-a-glance roll-up: the eight figures + the four
+                  disciplines, read off the SAME builders the detailed panels
+                  below render. Sits directly under the header so the overview
+                  reads before the detail. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseSummaryPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* ── Investigations in this case ────────────────────────────
+                  Where the case's evidence is actually collected — drives the
+                  existing OSINT job lifecycle, scoped to this case. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseRunsPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* Where a cross-case mismatch becomes visible. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseScopePanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* What this case actually holds, by discipline. Sits above
+                  contradictions: "what is here" reads before "what disagrees". */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseIntelligenceBreakdownPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* The resolved entity set, made browsable. Sits under the
+                  discipline breakdown (which counts entities): the count reads
+                  first, then the list. Reuses the existing resolvedCaseEntities
+                  accessor — no second resolver — and carries an entity → graph
+                  link scoped to this case. The id anchors the command bar's
+                  Entities link. */}
+              <Card className={CARD} id="case-entities">
+                <CardContent className="p-4">
+                  <CaseEntitiesPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* The MEDIAINT claims themselves. Sits directly under the
+                  discipline breakdown, which counts them: the count reads
+                  first, then what was counted. Above correlations and
+                  contradictions, both of which refer back to these claims. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseMediaIntPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* Cross-intelligence correlations. Sits between the discipline
+                  breakdown ("what is here") and contradictions ("what
+                  disagrees"): "what connects" is the natural middle. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseCorrelationsPanel investigation={active} />
+                </CardContent>
+              </Card>
+
+              {/* Contradictions, derived from this case's own snapshots.
+                  Deliberately BELOW the scope panel: if the scope panel says the
+                  data is not this case's, the contradiction panel says so too
+                  rather than deriving findings from another case's evidence. */}
+              <Card className={CARD}>
+                <CardContent className="p-4">
+                  <CaseContradictionsPanel investigation={active} />
                 </CardContent>
               </Card>
 

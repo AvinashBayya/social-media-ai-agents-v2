@@ -129,6 +129,40 @@ class ChatResult(BaseModel):
     provenance: Provenance
 
 
+class AudioEvent(BaseModel):
+    class_name: str
+    start_time: float
+    end_time: float
+    # "model score", never "confidence" — YAMNet's outputs are independent,
+    # uncalibrated per-class sigmoids, not a probability. See config.py.
+    max_score: float
+    mean_score: float
+    frames_above_threshold: int
+    frames_total: int
+    hazard: bool
+
+
+class AudioEventsCoverage(BaseModel):
+    windows_analysed: int
+    windows_with_any_class_above_threshold: int
+
+
+class ClosestMatch(BaseModel):
+    class_name: str
+    max_score: float
+
+
+class AudioEventsResult(BaseModel):
+    events: list[AudioEvent]
+    coverage: AudioEventsCoverage
+    # The model's own real top candidates that never cleared REPORT_THRESHOLD
+    # — real transparency for the common "nothing confident" case, not a
+    # second, looser findings list. See audio_events.py's
+    # _closest_below_threshold for what this is and isn't.
+    closest_below_threshold: list[ClosestMatch]
+    provenance: Provenance
+
+
 class StatsResult(BaseModel):
     calls: int
     cache_hits: int

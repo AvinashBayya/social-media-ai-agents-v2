@@ -37,6 +37,7 @@ import {
   Youtube,
   UserCircle,
   Paperclip,
+  ShieldCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -145,6 +146,10 @@ const NAV_GROUPS: NavGroup[] = [
       { title: "Watchlists", to: "/watchlists", icon: Bookmark },
       { title: "Network Analysis", to: "/network", icon: GitBranch },
       { title: "Crawler Status", to: "/crawlers", icon: Cpu },
+      // Otherwise reachable only by direct URL and bun run verify:osint — a
+      // real one-click run of the same end-to-end check, not just a status
+      // declaration like Crawler Status above.
+      { title: "OSINT Verification", to: "/osint-verification", icon: ShieldCheck },
     ],
   },
   {

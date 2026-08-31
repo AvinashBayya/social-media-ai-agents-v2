@@ -75,6 +75,19 @@ export const presenceUsernameCollector: Collector<PresenceUsernameRaw> = {
   requiresCredentials: false,
   isOptional: true,
 
+  capability: {
+    sourceId: "presence.username",
+    name: "Presence — Username sweep",
+    collectionMode: "PASSIVE_PUBLIC_WEB",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: true,
+    notes:
+      "Sherlock/Maigret-style worker (SHERLOCK_WORKER_URL, unconfigured by default) with a real keyless fallback to unauthenticated existence checks against GitHub, Reddit, HackerNews and Dev.to. A hit is a candidate account, never a confirmed identity.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<PresenceUsernameRaw>> {
     const clock = startExecution();
     const username = target.value.trim();
@@ -129,6 +142,40 @@ export const presenceUsernameCollector: Collector<PresenceUsernameRaw> = {
           url: `https://dev.to/${cleanU}`,
           test: async () => {
             const r = await fetch(`https://dev.to/api/users/by_username?url=${encodeURIComponent(cleanU)}`, {
+              signal: AbortSignal.timeout(2000),
+            });
+            return r.status === 200;
+          },
+        },
+        {
+          site: "Telegram",
+          url: `https://t.me/s/${cleanU}`,
+          test: async () => {
+            const r = await fetch(`https://t.me/s/${encodeURIComponent(cleanU)}`, {
+              headers: { "User-Agent": "Sentinel-OSINT" },
+              signal: AbortSignal.timeout(2000),
+            });
+            if (!r.ok) return false;
+            const html = await r.text();
+            return html.includes("tgme_channel_info") || html.includes("tgme_widget_message");
+          },
+        },
+        {
+          site: "Medium",
+          url: `https://medium.com/@${cleanU}`,
+          test: async () => {
+            const r = await fetch(`https://medium.com/feed/@${encodeURIComponent(cleanU)}`, {
+              headers: { "User-Agent": "Sentinel-OSINT" },
+              signal: AbortSignal.timeout(2000),
+            });
+            return r.status === 200;
+          },
+        },
+        {
+          site: "YouTube",
+          url: `https://youtube.com/@${cleanU}`,
+          test: async () => {
+            const r = await fetch(`https://www.youtube.com/feeds/videos.xml?user=${encodeURIComponent(cleanU)}`, {
               signal: AbortSignal.timeout(2000),
             });
             return r.status === 200;

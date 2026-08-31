@@ -94,7 +94,114 @@ export interface Collector<TRaw = unknown> {
   /** False for collectors this project cannot run without (plan §5: "Sentinel must still work" if this is true and the tool is absent). */
   isOptional: boolean;
 
+  /**
+   * Passive-only capability declaration — spec §2. **Optional on purpose**: every
+   * collector that predates this field keeps compiling and keeps working.
+   *
+   * Absence means **undeclared**, never "declared passive". `assertPassiveCollector()`
+   * in `passive-policy.ts` treats an undeclared collector as a policy gap and refuses
+   * it, exactly as `collection-policy.ts`'s `policyFor()` returning null must be read
+   * as DENY. An unreviewed source that runs by default is how the enforcement gets
+   * hollowed out.
+   */
+  capability?: SourceCapability;
+
+  /**
+   * Which intelligence discipline(s) this collector feeds — spec §1, §26, §28, §35.
+   * Optional for the same reason `capability` is. Absence means untagged, and the
+   * UI must show it as untagged rather than silently filing it under one.
+   */
+  disciplines?: Discipline[];
+
   execute(target: CollectorTarget): Promise<CollectorRunOutcome<TRaw>>;
   normalize(outcome: CollectorRunOutcome<TRaw>): InvestigationResult;
   healthCheck(): Promise<CollectorHealth>;
+}
+
+// ─── Intelligence disciplines — spec §1 ─────────────────────────────────────
+
+/**
+ * The four disciplines the platform must support.
+ *
+ * **MEDIAINT is MEDIA intelligence, not medical.** Public news/media/web coverage:
+ * publishers, articles, claims, narratives, events, timelines, sentiment, source
+ * comparison. Do not add a medical source here.
+ */
+export const DISCIPLINES = ["SOCMINT", "GEOINT", "TECHINT", "MEDIAINT"] as const;
+export type Discipline = (typeof DISCIPLINES)[number];
+
+export const DISCIPLINE_LABELS: Record<Discipline, string> = {
+  SOCMINT: "Social Media Intelligence",
+  GEOINT: "Geospatial Intelligence",
+  TECHINT: "Technical Intelligence",
+  MEDIAINT: "Media Intelligence",
+};
+
+// ─── Source capability model — spec §2 ──────────────────────────────────────
+
+/**
+ * How a source collects, in the spec §2 vocabulary.
+ *
+ * ⚠️ **Not the same type as `CollectionMode` in `collection-policy.ts`**, and the two
+ * must not be merged. That one answers "may we collect from this platform, and on what
+ * legal basis" (`automated` / `partial` / `manual-only` / `none`) — a compliance
+ * question about a *platform*. This one answers "by what technical route does this
+ * *adapter* obtain data", which is what decides whether the orchestrator may run it.
+ * A source can be `PASSIVE_API` here and `manual-only` there; both are true.
+ *
+ * `ACTIVE` exists so a non-passive adapter can be *named and rejected* rather than
+ * being unrepresentable. A vocabulary that cannot express the thing it forbids cannot
+ * enforce the prohibition.
+ */
+export const SOURCE_COLLECTION_MODES = [
+  "PASSIVE_API",
+  "PASSIVE_PUBLIC_WEB",
+  "PASSIVE_DATASET",
+  "LOCAL_FILE_ANALYSIS",
+  "MANUAL_ASSISTED",
+  "ACTIVE",
+] as const;
+export type SourceCollectionMode = (typeof SOURCE_COLLECTION_MODES)[number];
+
+/** The five modes spec §2 lists as permitted. `ACTIVE` is deliberately absent. */
+export const PASSIVE_COLLECTION_MODES: ReadonlySet<SourceCollectionMode> = new Set([
+  "PASSIVE_API",
+  "PASSIVE_PUBLIC_WEB",
+  "PASSIVE_DATASET",
+  "LOCAL_FILE_ANALYSIS",
+  "MANUAL_ASSISTED",
+]);
+
+/**
+ * Spec §2's `SourceCapability`, in this codebase's camelCase idiom rather than the
+ * spec's snake_case — the surrounding code (`supportedTargetTypes`, `requiresCredentials`)
+ * is camelCase and consistency inside the file wins over transliteration.
+ *
+ * **`activeCapable` and `collectionMode` are separate on purpose.** IVRE is the case
+ * that forces it: `ivreCollector.execute()` only ever READS an operator-owned scan
+ * database and never emits a packet, so its mode is honestly `PASSIVE_DATASET` — but
+ * the data in that database came from Nmap, so `activeCapable` is `true` and the
+ * authorisation gate must stay. Collapsing the two into one boolean would force a
+ * choice between lying about the mode and deleting a working, gated collector.
+ */
+export interface SourceCapability {
+  sourceId: string;
+  name: string;
+  collectionMode: SourceCollectionMode;
+  /**
+   * True when the underlying data originates from packets sent to the target, even if
+   * this adapter itself only reads a stored result. Requires `authorisationGated`.
+   */
+  activeCapable: boolean;
+  /** False marks a source declared but forbidden — it stays visible in the registry and never runs. */
+  allowed: boolean;
+  requiresAuth: boolean;
+  requiresManualAction: boolean;
+  apiAvailable: boolean;
+  /**
+   * Whether every call passes an authorisation gate (`assertScanAuthorised()`).
+   * Must be true whenever `activeCapable` is true — `passive-policy.ts` enforces this.
+   */
+  authorisationGated?: boolean;
+  notes: string;
 }

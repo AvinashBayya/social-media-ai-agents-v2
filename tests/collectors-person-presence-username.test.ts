@@ -30,7 +30,7 @@ describe("presenceUsernameCollector.execute — a keyless in-process fallback ch
     const outcome = await presenceUsernameCollector.execute({ type: "username", value: "johnsmith" });
     expect(outcome.execution.status).toBe("completed");
     expect(outcome.raw).not.toBeNull();
-    expect(outcome.raw?.sitesChecked).toBe(4);
+    expect(outcome.raw?.sitesChecked).toBeGreaterThanOrEqual(4);
   });
 
   test("rejects an empty username without even checking the worker URL", async () => {

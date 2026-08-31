@@ -60,6 +60,29 @@ const DEFAULTS: Required<LayoutOptions> = {
 };
 
 /**
+ * Rough label-pixel-width estimate from character count. This module is
+ * deliberately DOM-free (see the file header), so it cannot measure real font
+ * metrics — this is a real bound derived from actual label content rather
+ * than a flat guess, calibrated against `graph.tsx`'s own label rendering
+ * (10px font, weight 600) and its 24-character truncation. It intentionally
+ * errs wide: a slightly loose layout is a lesser fault than a colliding one.
+ *
+ * `minArcSpacing`/`ringGap` already guarantee separation for short labels
+ * (an id, a short handle); this exists for the case they don't cover — two
+ * nodes with long labels (an email address, a full URL) landing close enough
+ * that the flat constants alone are no longer wide enough, e.g. a ring with
+ * exactly one member sitting a fixed `ringGap` from a long-labelled root.
+ */
+const AVG_LABEL_CHAR_PX = 6.4;
+/** Must match the truncation length in graph.tsx's label rendering. */
+const MAX_LABEL_CHARS = 24;
+const LABEL_PADDING_PX = 8;
+
+function labelHalfWidth(displayName: string): number {
+  return (Math.min(displayName.length, MAX_LABEL_CHARS) * AVG_LABEL_CHAR_PX) / 2;
+}
+
+/**
  * Places every entity on a ring by its BFS distance from `preferredRootId`
  * (or, if that id isn't among the entities, the first entity — never throws
  * for a missing root, since "the target itself wasn't returned as an
@@ -123,6 +146,10 @@ export function layoutRadial(
     return minRadius + (maxRadius - minRadius) * (d / maxDegree);
   };
 
+  const entityById = new Map(entities.map((e) => [e.id, e]));
+  const maxLabelHalfWidthOf = (memberIds: string[]): number =>
+    Math.max(0, ...memberIds.map((id) => labelHalfWidth(entityById.get(id)?.displayName ?? "")));
+
   // Ring radius must grow with *this ring's own member count*, not just its
   // BFS depth: a fixed `ring * ringGap` packs a busy ring's nodes so close
   // together that their real labels (rendered under each node) overlap —
@@ -132,9 +159,21 @@ export function layoutRadial(
   // so ring order still reads visually as "further = more hops"), boosted
   // to whatever this ring's own circumference needs to give each member at
   // least `minArcSpacing` px of its neighbors on the same ring.
+  //
+  // Neither `ringGap` nor `minArcSpacing` alone is enough once labels get
+  // long: a ring with exactly one member (e.g. a single discovered account,
+  // one hop from an email-address root) never benefits from the
+  // circumference-based widening above — it lands at a fixed `ringGap` from
+  // the root regardless of content, so a long root label and a long
+  // one-member label collide even though the "busy ring" case above is
+  // already handled. `labelHalfWidth` closes that gap from the two rings'
+  // OWN content instead of a second flat constant, and is a floor under the
+  // existing constants (`Math.max`), never a reduction of them — a graph of
+  // short ids lays out exactly as before.
   const nodes: LayoutNode[] = [];
   const sortedRings = [...ringMembers.keys()].sort((a, b) => a - b);
   let previousRadius = 0;
+  let previousRingLabelHalfWidth = 0;
   for (const ring of sortedRings) {
     const memberIds = ringMembers.get(ring)!;
     if (ring === 0) {
@@ -146,11 +185,19 @@ export function layoutRadial(
         ring: 0,
       });
       previousRadius = 0;
+      previousRingLabelHalfWidth = maxLabelHalfWidthOf(memberIds);
       continue;
     }
-    const requiredForSpacing = (memberIds.length * minArcSpacing) / (2 * Math.PI);
-    const radius = Math.max(previousRadius + ringGap, requiredForSpacing);
+    const thisRingLabelHalfWidth = maxLabelHalfWidthOf(memberIds);
+    const radialGap = Math.max(
+      ringGap,
+      previousRingLabelHalfWidth + thisRingLabelHalfWidth + LABEL_PADDING_PX,
+    );
+    const arcSpacing = Math.max(minArcSpacing, 2 * thisRingLabelHalfWidth + LABEL_PADDING_PX);
+    const requiredForSpacing = (memberIds.length * arcSpacing) / (2 * Math.PI);
+    const radius = Math.max(previousRadius + radialGap, requiredForSpacing);
     previousRadius = radius;
+    previousRingLabelHalfWidth = thisRingLabelHalfWidth;
     memberIds.forEach((id, i) => {
       const angle = (2 * Math.PI * i) / memberIds.length;
       nodes.push({

@@ -52,6 +52,26 @@ describe("socialCollector.execute — validation path", () => {
     expect(outcome.execution.status).toBe("failed");
     expect(outcome.execution.error?.reason).toBe("invalid-target");
   });
+
+  test("execute() itself — not just a hand-built fixture — reports failed/raw:null when every platform genuinely fails, never a fabricated empty completion", async () => {
+    // This collector used to always report `status: "completed"` from
+    // execute() regardless of outcome, so a total outage (all three
+    // platforms throwing) was indistinguishable from a real search that
+    // came back empty. Unlike the fixture-based test below (which only
+    // proves normalize() handles this shape correctly), this drives the
+    // REAL execute() path with every underlying fetch failing, to prove the
+    // fix actually engages rather than just being asserted against a shape
+    // nothing produced.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("upstream error", { status: 500 })) as typeof fetch;
+    try {
+      const outcome = await socialCollector.execute({ type: "username", value: "nonexistent-handle" });
+      expect(outcome.execution.status).toBe("failed");
+      expect(outcome.raw).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("socialCollector.normalize", () => {

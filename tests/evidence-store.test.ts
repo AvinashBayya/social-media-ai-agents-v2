@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { nextEvidenceId, withoutSeeded, type EvidenceRecord } from "../src/utils/evidence-store";
+import {
+  buildDetectionEvidenceRecord,
+  getEvidenceForCase,
+  getUnlinkedEvidence,
+  nextEvidenceId,
+  withoutSeeded,
+  type EvidenceRecord,
+} from "../src/utils/evidence-store";
 
 function rec(over: Partial<EvidenceRecord> = {}): EvidenceRecord {
   return {
@@ -70,5 +77,65 @@ describe("nextEvidenceId", () => {
 
   test("ids stay zero-padded and sortable", () => {
     expect(nextEvidenceId([rec({ id: "EVID-0009" })])).toBe("EVID-0010");
+  });
+});
+
+describe("getEvidenceForCase / getUnlinkedEvidence", () => {
+  // Both read through getEvidence(), which is SSR-safe by returning [] when
+  // `window` doesn't exist (bun test has no window/localStorage) — the same
+  // convention every other store in this project relies on. This proves
+  // these two new filters inherit that safety rather than throwing.
+  test("getEvidenceForCase never throws outside a browser and returns an honest empty list", () => {
+    expect(getEvidenceForCase("INV-1001")).toEqual([]);
+  });
+
+  test("getEvidenceForCase with no caseId returns [] without even reading storage", () => {
+    expect(getEvidenceForCase("")).toEqual([]);
+  });
+
+  test("getUnlinkedEvidence never throws outside a browser and returns an honest empty list", () => {
+    expect(getUnlinkedEvidence()).toEqual([]);
+  });
+});
+
+describe("buildDetectionEvidenceRecord", () => {
+  const base = {
+    label: "a vehicle license plate",
+    score: 0.87,
+    sourceName: "photo.jpg",
+    reportType: "Image Intelligence",
+    previewDataUrl: "data:image/png;base64,AAAA",
+    hash: "b".repeat(64),
+    existing: [] as EvidenceRecord[],
+  };
+
+  test("carries the real detection fields through, never inventing a fabricated finding", () => {
+    const r = buildDetectionEvidenceRecord(base);
+    expect(r.previewUrl).toBe(base.previewDataUrl);
+    expect(r.hash).toBe(base.hash);
+    expect(r.source).toBe("Image Intelligence: photo.jpg");
+    expect(r.tags).toEqual(["detected-object", "a vehicle license plate"]);
+  });
+
+  test("the title keeps stating this is an unverified candidate, not a confirmed finding — it must survive into the saved record, not just the live detection UI", () => {
+    const r = buildDetectionEvidenceRecord(base);
+    expect(r.title).toContain("87%");
+    expect(r.title.toLowerCase()).toContain("unverified candidate");
+    expect(r.title.toLowerCase()).toContain("not a confirmed finding");
+  });
+
+  test("type is 'Image' so the vault grid picks the same icon as any other image record", () => {
+    expect(buildDetectionEvidenceRecord(base).type).toBe("Image");
+  });
+
+  test("a null hash (the crop could not be hashed) is preserved as null, never coerced to a placeholder", () => {
+    const r = buildDetectionEvidenceRecord({ ...base, hash: null });
+    expect(r.hash).toBeNull();
+  });
+
+  test("id numbering follows the same sequential rule as every other evidence record", () => {
+    const existing = [rec({ id: "EVID-0401" }), rec({ id: "EVID-0402" })];
+    const r = buildDetectionEvidenceRecord({ ...base, existing });
+    expect(r.id).toBe("EVID-0403");
   });
 });

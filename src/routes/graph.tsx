@@ -19,8 +19,30 @@ import {
   AlertTriangle,
   Info,
   Sparkles,
+  Clock,
+  FolderOpen,
 } from "lucide-react";
-import { clearGraphSnapshot, readGraphSnapshot, saveGraphSnapshot, type GraphSnapshot } from "@/utils/graph-store";
+import {
+  clearGraphForCase,
+  clearGraphSnapshot,
+  getGraphForCase,
+  graphEvictedCases,
+  graphScopedCases,
+  readGraphSnapshot,
+  saveGraphSnapshot,
+  type GraphSnapshot,
+  type ScopedGraphSnapshot,
+} from "@/utils/graph-store";
+import { SnapshotProvenanceLine } from "@/components/snapshot-provenance";
+import { CaseSnapshotSelector } from "@/components/case-snapshot-selector";
+import {
+  UNSCOPED_SELECTION,
+  buildSnapshotOptions,
+  resolveSnapshotSelection,
+} from "@/utils/cases/case-snapshot-selection";
+import { MAX_SCOPED_CASES } from "@/utils/cases/case-scope";
+import { resolutionSummary, resolvedCaseEntities } from "@/utils/cases/case-entities";
+import { INVESTIGATIONS_CHANGED_EVENT, getInvestigations } from "@/utils/investigations-store";
 import { toMaltegoCsv } from "@/utils/maltego-export";
 import { getActiveTarget } from "@/utils/active-target";
 import {
@@ -48,6 +70,20 @@ import {
 const POLL_INTERVAL_MS = 1200;
 
 export const Route = createFileRoute("/graph")({
+  /**
+   * `?case=INV-1001` preselects a case's snapshot — so "View in Graph" from a
+   * case run, and Timeline↔Graph cross-links, keep the case they were opened
+   * with instead of silently landing on the unscoped/latest slot. Validation is
+   * strict about SHAPE, not existence: an id with no snapshot renders the
+   * selection's own empty state (see the `!hasGraph` branch), never a fallback.
+   */
+  validateSearch: (search: Record<string, unknown>): { case?: string } => {
+    const raw = search.case;
+    if (typeof raw !== "string") return {};
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > 64) return {};
+    return { case: trimmed };
+  },
   head: () => ({ meta: [{ title: "Knowledge Graph — Sentinel AI" }] }),
   component: Page,
 });
@@ -87,6 +123,11 @@ const WIDTH = 800;
 const HEIGHT = 560;
 
 function Page() {
+  // A case handed in via `?case=` (from a case run's "View in Graph", or the
+  // Timeline↔Graph cross-link). Seeds the case selection and forces the
+  // investigation source below.
+  const { case: requestedCase } = Route.useSearch();
+
   const [source, setSource] = useState<GraphSource>("investigation");
   const [ready, setReady] = useState(false);
 
@@ -97,7 +138,16 @@ function Page() {
   const [pathFrom, setPathFrom] = useState<string | null>(null);
 
   // ── Investigation source ────────────────────────────────────────────────
-  const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
+  //
+  // The analyst picks which case's snapshot to view. Nothing is inferred: the
+  // default is the unscoped/latest slot, which is exactly what /recon's "View
+  // in Graph" hand-off writes, so that hand-off keeps working.
+  const [selection, setSelection] = useState<string>(requestedCase ?? UNSCOPED_SELECTION);
+  const [cases, setCases] = useState<Array<{ id: string; target: string }>>([]);
+  const [scopedIds, setScopedIds] = useState<string[]>([]);
+  const [evictedIds, setEvictedIds] = useState<string[]>([]);
+  const [unscoped, setUnscoped] = useState<GraphSnapshot | null>(null);
+  const [scoped, setScoped] = useState<ScopedGraphSnapshot | null>(null);
 
   // "Generate" — runs the SAME real OSINT investigation /recon's
   // "OSINT Investigation" panel does (startOsintInvestigationJob +
@@ -113,17 +163,84 @@ function Page() {
   const [generateTarget, setGenerateTarget] = useState("");
   const generateStoppedRef = useRef(false);
 
-  // Client-only: the snapshot lives in localStorage, absent during SSR.
+  // Client-only: every store here is localStorage, absent during SSR.
   useEffect(() => {
-    const snap = readGraphSnapshot();
-    setSnapshot(snap);
-    // Default to whichever source actually has something. The snapshot is an
-    // explicit hand-off an analyst just performed, so it wins when present;
-    // otherwise land on the source that can still produce a graph rather than
-    // on an empty state.
-    if (!snap || snap.entities.length === 0) setSource("corpus");
-    setReady(true);
+    const load = () => {
+      setCases(getInvestigations().map((c) => ({ id: c.id, target: c.target })));
+      setScopedIds(graphScopedCases());
+      setEvictedIds(graphEvictedCases());
+      setUnscoped(readGraphSnapshot());
+    };
+    load();
+    window.addEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
+    return () => window.removeEventListener(INVESTIGATIONS_CHANGED_EVENT, load);
   }, []);
+
+  // Re-read per selection rather than caching: a run in another tab can land
+  // between selections, and a stale cache would show data the store no longer
+  // holds.
+  useEffect(() => {
+    setScoped(selection === UNSCOPED_SELECTION ? null : getGraphForCase(selection));
+    // Changing case is the natural refresh point for both lists: a run in
+    // another tab writes snapshots and evicts without firing an investigations
+    // event, so mount-time values can be stale by now.
+    setScopedIds(graphScopedCases());
+    setEvictedIds(graphEvictedCases());
+  }, [selection]);
+
+  const display = useMemo(
+    () => resolveSnapshotSelection(selection, scoped, unscoped, "graph", evictedIds),
+    [selection, scoped, unscoped, evictedIds],
+  );
+  /**
+   * The snapshot actually rendered, or null.
+   *
+   * `display.show === false` collapses to null on purpose — a selected case
+   * with no snapshot renders an empty state, never the latest run as a
+   * stand-in. `getGraphForCase` does return the unscoped slot as a labelled
+   * fallback, which is right for the case *panel* ("something is here and it
+   * isn't yours") and wrong here: the analyst asked for case A, so anything
+   * that is not case A's is not an answer.
+   */
+  const rawSnapshot = display.show ? display.snapshot : null;
+
+  /**
+   * The graph renders RESOLVED identities.
+   *
+   * The stored snapshot holds one entity per collector record, so `dns` and
+   * `shodan` reporting the same IP drew two nodes for one address. Resolution
+   * merges them and remaps every edge; entities and relationships are replaced
+   * together, because `viewFromInvestigation` filters edges to known node ids
+   * and a half-resolved snapshot would silently drop them.
+   *
+   * Storage is untouched — this is a view.
+   */
+  const resolvedEntities = useMemo(
+    () =>
+      rawSnapshot
+        ? resolvedCaseEntities({
+            entities: rawSnapshot.entities,
+            relationships: rawSnapshot.relationships,
+          })
+        : null,
+    [rawSnapshot],
+  );
+
+  const snapshot = useMemo(
+    () =>
+      rawSnapshot && resolvedEntities
+        ? {
+            ...rawSnapshot,
+            entities: resolvedEntities.entities,
+            relationships: resolvedEntities.relationships,
+          }
+        : null,
+    [rawSnapshot, resolvedEntities],
+  );
+  const options = useMemo(
+    () => buildSnapshotOptions(cases, scopedIds, !!unscoped, evictedIds),
+    [cases, scopedIds, unscoped, evictedIds],
+  );
 
   const runGenerate = async () => {
     const target = getActiveTarget().trim();
@@ -162,14 +279,24 @@ function Page() {
           );
           return;
         }
+        // Written to whichever slot the analyst is currently viewing, mirroring
+        // the case runs panel — a case selected here means the analyst wants
+        // THIS case's snapshot updated, not the unscoped/latest one.
+        const caseId = selection === UNSCOPED_SELECTION ? undefined : selection;
         saveGraphSnapshot({
           investigationId: started.investigationId,
+          caseId,
           target,
           savedAt: new Date().toISOString(),
           entities: data.entities,
           relationships: data.relationships,
         });
-        setSnapshot(readGraphSnapshot());
+        if (caseId) {
+          setScoped(getGraphForCase(caseId));
+          setScopedIds(graphScopedCases());
+        } else {
+          setUnscoped(readGraphSnapshot());
+        }
         setSelectedId(null);
       };
       void tick();
@@ -184,6 +311,22 @@ function Page() {
       generateStoppedRef.current = true;
     };
   }, []);
+
+  // Default to whichever source actually has something. The snapshot is an
+  // explicit hand-off an analyst just performed, so it wins when present;
+  // otherwise land on the source that can still produce a graph rather than
+  // on an empty state. Runs once — after that the analyst owns the choice.
+  useEffect(() => {
+    if (ready) return;
+    // A `?case=` hand-off means the analyst asked for a SPECIFIC case's graph,
+    // so stay on the investigation source even when the unscoped slot is empty —
+    // the selection's own empty state is the honest answer, not the corpus.
+    if (!requestedCase) {
+      const snap = readGraphSnapshot();
+      if (!snap || snap.entities.length === 0) setSource("corpus");
+    }
+    setReady(true);
+  }, [ready]);
 
   // ── Corpus source ───────────────────────────────────────────────────────
   const [target, setTarget] = useState(() => getActiveTarget());
@@ -359,9 +502,40 @@ function Page() {
     setQuery("");
   }, []);
 
+  /**
+   * Changing case must reset the view chrome, for the same reason changing
+   * source does: node ids are per-snapshot, so a selection or path endpoint
+   * carried across would either resolve to nothing or — worse — collide with a
+   * different entity that happens to share an id.
+   */
+  const switchSelection = useCallback((next: string) => {
+    setSelection(next);
+    setSelectedId(null);
+    setPathFrom(null);
+    setQuery("");
+  }, []);
+
+  /**
+   * Clears the slot the analyst is actually looking at.
+   *
+   * Before the selector existed there was only one slot, so `clearGraphSnapshot()`
+   * was unambiguous. Now it is not: leaving it as-is would mean pressing Clear
+   * while viewing case A wiped the *latest-run* slot and left A's graph on
+   * screen — a control that appears to do nothing, which is the "control with no
+   * handler" failure class this project already logged once.
+   */
   const clear = () => {
-    clearGraphSnapshot();
-    setSnapshot(null);
+    if (selection === UNSCOPED_SELECTION) {
+      clearGraphSnapshot();
+      setUnscoped(null);
+    } else {
+      clearGraphForCase(selection);
+      setScoped(getGraphForCase(selection));
+      setScopedIds(graphScopedCases());
+      // A manual Clear is NOT an eviction — the analyst chose it, storage
+      // pressure did not force it — so the ledger is deliberately not written.
+      setEvictedIds(graphEvictedCases());
+    }
     setSelectedId(null);
   };
 
@@ -435,17 +609,67 @@ function Page() {
       {/* ── Source-specific status line and controls ── */}
       {source === "investigation" && snapshot && snapshot.entities.length > 0 && (
         <div className="mx-6 mt-3 space-y-2">
-          <div className="flex items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
-            <span>
-              Investigation of <span className="font-bold text-foreground">{snapshot.target}</span> ·{" "}
-              {snapshot.entities.length} entities · {snapshot.relationships.length} relationships
-              {view.truncated &&
-                ` — showing the ${view.nodes.length} nearest ${rootNode ? "to the target" : "loaded"}`}
-              {" · saved "}
-              {new Date(snapshot.savedAt).toLocaleString()}
+          <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
+            <span className="flex flex-wrap items-center gap-1.5">
+              {/* Explicit selection, nothing inferred. */}
+              <CaseSnapshotSelector
+                options={options}
+                value={selection}
+                onChange={switchSelection}
+                label="Case"
+              />
+              {/* The snapshot's OWN metadata is authoritative, not the option
+                  the analyst picked. Without this, running case B then opening
+                  this page from case A showed B's graph with nothing marking
+                  it. See snapshot-provenance.tsx. */}
+              <SnapshotProvenanceLine caseId={snapshot.caseId} truncation={snapshot.truncation} />
+              <span>
+                Investigation of <span className="font-bold text-foreground">{snapshot.target}</span> ·{" "}
+                {snapshot.entities.length} entities · {snapshot.relationships.length} relationships
+                {view.truncated &&
+                  ` — showing the ${view.nodes.length} nearest ${rootNode ? "to the target" : "loaded"}`}
+                {" · saved "}
+                {new Date(snapshot.savedAt).toLocaleString()}
+              </span>
+              {/* Resolution is a view over the stored record, so it must be
+                  visible. A count that silently shrank would be worse than the
+                  duplicate nodes it replaced. */}
+              {resolvedEntities && rawSnapshot && resolvedEntities.mergedCount > 0 && (
+                <span className="basis-full text-console-amber">
+                  {resolutionSummary(resolvedEntities, rawSnapshot.entities.length)}
+                </span>
+              )}
             </span>
             <div className="flex items-center gap-1">
               {generateButton}
+              {/* Cross-link to the same case's workspace, where its
+                  contradictions, correlations and provenance already render.
+                  Carries the case so it opens scoped, not on the latest run.
+                  Only points at a case when one is selected; the
+                  unscoped/latest slot has no case workspace to open. */}
+              {selection !== UNSCOPED_SELECTION && (
+                <Link
+                  to="/investigations"
+                  search={{ case: selection }}
+                  title="Open this case in Investigations (contradictions, correlations, provenance)"
+                  className="inline-flex h-6 items-center gap-1 rounded px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                >
+                  <FolderOpen className="size-3" />
+                  Open case
+                </Link>
+              )}
+              {/* Cross-link to the same case's evidence timeline. Carries the
+                  case so /timeline opens on this snapshot's case, not the
+                  latest run; on the unscoped/latest slot it links there plainly. */}
+              <Link
+                to="/timeline"
+                search={{ case: selection === UNSCOPED_SELECTION ? undefined : selection }}
+                title="Open this case's evidence timeline"
+                className="inline-flex h-6 items-center gap-1 rounded px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+              >
+                <Clock className="size-3" />
+                View in Timeline
+              </Link>
               <Button
                 variant="ghost"
                 size="sm"
@@ -463,12 +687,22 @@ function Page() {
                 className="h-6 gap-1 px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="size-3" />
-                Clear
+                {/* Names the slot it will actually clear — see `clear()`. */}
+                {selection === UNSCOPED_SELECTION ? "Clear" : `Clear ${selection}`}
               </Button>
             </div>
           </div>
           {generateStatus}
         </div>
+      )}
+
+      {/* The latest-run slot is written by /recon AND by case runs, so it can
+          hold a case's snapshot. Saying so beats letting the option label
+          imply the data belongs to nobody. */}
+      {source === "investigation" && display.show && display.note && (
+        <p className="mx-6 mt-2 font-mono text-[10px] leading-relaxed text-console-amber">
+          {display.note}
+        </p>
       )}
 
       {source === "corpus" && (
@@ -493,10 +727,36 @@ function Page() {
       {/* ── Empty states ── */}
       {!hasGraph && source === "investigation" && (
         <div className="px-6 pt-4">
+          {/* The selector stays visible in the empty state. Hiding it would
+              strand an analyst who selected a case with no snapshot: no data
+              AND no way to select a different case. */}
+          <div className="mb-3 flex justify-center">
+            <CaseSnapshotSelector
+              options={options}
+              value={selection}
+              onChange={switchSelection}
+              label="Case"
+            />
+          </div>
           <EmptyState
             icon={<Network className="mx-auto mb-1.5 size-5 text-console-amber" />}
-            title="No Investigation Loaded"
-            message='Run an investigation on Recon and click "View in Graph", or press Generate below to run one for the current target directly — this page renders only what a real investigation actually returned, nothing seeded.'
+            /* The selection's OWN reason, not a generic blank. A case with no
+               snapshot must not fall through to the latest run — that is the
+               contamination case-scoping exists to prevent, and it is
+               otherwise invisible. */
+            title={display.show ? "No Investigation Loaded" : display.reason}
+            message={
+              display.show || selection === UNSCOPED_SELECTION
+                ? 'Run an investigation on Recon and click "View in Graph", or press Generate below to run one for the current target directly — this page renders only what a real investigation actually returned, nothing seeded.'
+                : display.state === "EVICTED"
+                  ? /* An evicted case is NOT an empty result. Saying so is the
+                       whole point of the eviction ledger — the snapshot
+                       existed, storage discarded it to stay under the cap, and
+                       it is not being reconstructed from anything. Re-running
+                       rebuilds it. */
+                    `This case produced a graph and it was discarded to stay under the ${MAX_SCOPED_CASES}-case storage cap. Nothing has been reconstructed or substituted. Re-run the case from Investigations to rebuild it.`
+                  : "This case has not produced a graph. Nothing is substituted for a missing snapshot — run it from Investigations, generate one below, or pick another case above."
+            }
           />
           <div className="mt-3 flex flex-col items-center gap-2">
             {generateButton}

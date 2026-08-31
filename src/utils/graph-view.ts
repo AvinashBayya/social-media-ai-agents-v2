@@ -46,6 +46,7 @@ import {
   COOCCURRENCE_CAVEAT,
   type EntityGraph,
 } from "./graph-build";
+import { RESOLUTION_SOURCE, contributingSourcesOf } from "./cases/case-entities";
 
 // ─── The model ─────────────────────────────────────────────────────────────
 
@@ -188,18 +189,46 @@ export function viewFromInvestigation(
     const facts: { label: string; value: string }[] = [];
     if (e) {
       facts.push({ label: "Value", value: e.value });
-      facts.push({ label: "Collector", value: e.source });
+
+      /**
+       * A merged entity's confidence is a DIFFERENT quantity.
+       *
+       * The graph renders resolved identities (`resolvedCaseEntities`), so a
+       * merged node carries `source: "entity-resolution"` and a corroboration
+       * score. Showing that under the same bare "Confidence" label as a
+       * collector's own observation invited reading one as the other. They are
+       * named apart, and the contributors are listed rather than hidden behind
+       * the resolver.
+       */
+      const merged = e.source === RESOLUTION_SOURCE;
+      facts.push({
+        label: merged ? "Identity" : "Collector",
+        value: merged ? `merged from ${contributingSourcesOf(e).join(", ")}` : e.source,
+      });
       // `confidence.value` is null until something actually computes a score —
       // never a placeholder. Rendering null as "0.00" would turn "nobody
       // scored this" into "scored, and worthless", which are opposite claims.
       facts.push({
-        label: "Confidence",
+        label: merged ? "Identity confidence (resolution)" : "Collector confidence",
         value: e.confidence.value === null ? "not scored" : e.confidence.value.toFixed(2),
       });
       // The reasons are what make a bare number trustworthy, so show them when
       // a score exists rather than leaving the analyst to trust the digits.
       if (e.confidence.reasons.length > 0) {
         facts.push({ label: "Confidence basis", value: e.confidence.reasons.join("; ") });
+      }
+      if (merged) {
+        const contributors = (e.metadata as Record<string, unknown> | undefined)?.contributorConfidences;
+        if (Array.isArray(contributors) && contributors.length > 0) {
+          facts.push({
+            label: "Contributor confidences",
+            value: contributors
+              .map((c: { source?: string; value?: number | null }) =>
+                `${c.source}: ${typeof c.value === "number" ? c.value : "not scored"}`,
+              )
+              .join(" · "),
+          });
+        }
       }
     }
     return {

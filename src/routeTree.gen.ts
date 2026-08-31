@@ -25,6 +25,7 @@ import { Route as SentimentRouteImport } from './routes/sentiment'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ReconRouteImport } from './routes/recon'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as OsintVerificationRouteImport } from './routes/osint-verification'
 import { Route as OsintRouteImport } from './routes/osint'
 import { Route as NewsRouteImport } from './routes/news'
 import { Route as NetworkRouteImport } from './routes/network'
@@ -121,6 +122,11 @@ const ProfileRoute = ProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OsintVerificationRoute = OsintVerificationRouteImport.update({
+  id: '/osint-verification',
+  path: '/osint-verification',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OsintRoute = OsintRouteImport.update({
   id: '/osint',
   path: '/osint',
@@ -213,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/osint-verification': typeof OsintVerificationRoute
   '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
@@ -246,6 +253,7 @@ export interface FileRoutesByTo {
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/osint-verification': typeof OsintVerificationRoute
   '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
@@ -280,6 +288,7 @@ export interface FileRoutesById {
   '/network': typeof NetworkRoute
   '/news': typeof NewsRoute
   '/osint': typeof OsintRoute
+  '/osint-verification': typeof OsintVerificationRoute
   '/profile': typeof ProfileRoute
   '/recon': typeof ReconRoute
   '/reports': typeof ReportsRoute
@@ -315,6 +324,7 @@ export interface FileRouteTypes {
     | '/network'
     | '/news'
     | '/osint'
+    | '/osint-verification'
     | '/profile'
     | '/recon'
     | '/reports'
@@ -348,6 +358,7 @@ export interface FileRouteTypes {
     | '/network'
     | '/news'
     | '/osint'
+    | '/osint-verification'
     | '/profile'
     | '/recon'
     | '/reports'
@@ -381,6 +392,7 @@ export interface FileRouteTypes {
     | '/network'
     | '/news'
     | '/osint'
+    | '/osint-verification'
     | '/profile'
     | '/recon'
     | '/reports'
@@ -415,6 +427,7 @@ export interface RootRouteChildren {
   NetworkRoute: typeof NetworkRoute
   NewsRoute: typeof NewsRoute
   OsintRoute: typeof OsintRoute
+  OsintVerificationRoute: typeof OsintVerificationRoute
   ProfileRoute: typeof ProfileRoute
   ReconRoute: typeof ReconRoute
   ReportsRoute: typeof ReportsRoute
@@ -547,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/osint-verification': {
+      id: '/osint-verification'
+      path: '/osint-verification'
+      fullPath: '/osint-verification'
+      preLoaderRoute: typeof OsintVerificationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/osint': {
       id: '/osint'
       path: '/osint'
@@ -671,6 +691,7 @@ const rootRouteChildren: RootRouteChildren = {
   NetworkRoute: NetworkRoute,
   NewsRoute: NewsRoute,
   OsintRoute: OsintRoute,
+  OsintVerificationRoute: OsintVerificationRoute,
   ProfileRoute: ProfileRoute,
   ReconRoute: ReconRoute,
   ReportsRoute: ReportsRoute,

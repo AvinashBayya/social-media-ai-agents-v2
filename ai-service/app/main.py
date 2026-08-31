@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.audio_events import classify_audio as run_classify_audio
 from app.describe import describe as run_describe
 from app.detect import detect as run_detect
 from app.errors import InvalidInput, ModelNotLoadedError, NotImplementedYet, register_exception_handlers
@@ -16,7 +17,11 @@ from app.loaders import registry
 from app.ocr import ocr as run_ocr
 from app.ocr_vlm import ocr_vlm as run_ocr_vlm
 from app.schemas import (
+    AudioEvent,
+    AudioEventsCoverage,
+    AudioEventsResult,
     ChatRequest,
+    ClosestMatch,
     DescribeResult,
     Detection,
     DetectResult,
@@ -211,6 +216,32 @@ async def phash_compare(
     hash2 = compute_phash(data2)
     distance = hamming(hash1, hash2)
     return PhashCompareResult(hamming=distance, near_duplicate=distance <= 10)
+
+
+@app.post("/ai/audio/events", response_model=AudioEventsResult)
+async def audio_events_endpoint(file: Optional[UploadFile] = File(None)) -> AudioEventsResult:
+    """Semantic sound-event classification (YAMNet) — see audio_events.py's
+    doc comment for the honesty framing. This is the one action on /videos
+    that sends audio off the browser to this service; the frontend gates it
+    behind its own explicit consent control, same pattern as Sarvam
+    transcription."""
+    if file is None:
+        raise InvalidInput("a WAV audio file is required")
+    try:
+        session, class_names = registry.get("yamnet")
+    except KeyError:
+        raise ModelNotLoadedError(f"yamnet: {registry.status()['yamnet']}")
+
+    data = await file.read()
+    result = run_classify_audio(
+        data, session, class_names, settings.AUDIO_EVENT_REPORT_THRESHOLD, settings.AUDIO_EVENT_REVIEW_THRESHOLD
+    )
+    return AudioEventsResult(
+        events=[AudioEvent(**e) for e in result["events"]],
+        coverage=AudioEventsCoverage(**result["coverage"]),
+        closest_below_threshold=[ClosestMatch(**c) for c in result["closest_below_threshold"]],
+        provenance={"model": "yamnet", "version": registry.status()["yamnet"]},
+    )
 
 
 @app.post("/ai/video")

@@ -89,18 +89,22 @@ describe("viewFromInvestigation", () => {
   });
 
   it("carries collector provenance into the detail rows", () => {
+    // A merged (resolved-identity) node labels these "Identity" /
+    // "Identity confidence (resolution)" instead — see the next block —
+    // because that confidence is a different quantity from a single
+    // collector's own observation and must not read as the same thing.
     const node = view.nodes.find((n) => n.id === "ip1");
     const labels = node!.facts.map((f) => f.label);
     expect(labels).toContain("Value");
     expect(labels).toContain("Collector");
-    expect(labels).toContain("Confidence");
+    expect(labels).toContain("Collector confidence");
   });
 
   it("renders an unscored confidence as 'not scored', never 0.00", () => {
     // `confidence.value` is null until something computes it. Showing 0.00
     // would turn "nobody scored this" into "scored, and worthless".
     const node = view.nodes[0];
-    const conf = node.facts.find((f) => f.label === "Confidence");
+    const conf = node.facts.find((f) => f.label === "Collector confidence");
     expect(conf?.value).toBe("not scored");
   });
 

@@ -192,6 +192,20 @@ export const ivreCollector: Collector<IvreRaw> = {
   /** Rule 5: everything else must still work when this is absent. */
   isOptional: true,
 
+  capability: {
+    sourceId: "ivre",
+    name: "IVRE",
+    collectionMode: "PASSIVE_DATASET",
+    activeCapable: true,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: true,
+    apiAvailable: true,
+    authorisationGated: true,
+    notes:
+      "READS an operator-owned scan database; execute() never emits a packet, hence PASSIVE_DATASET. But the stored data originates from Nmap, so activeCapable stays true and every call passes assertScanAuthorised() — deny-by-default, named authorising officer, mandatory expiry, no bypass flag.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<IvreRaw>> {
     const clock = startExecution();
     const base = baseUrlFromEnv();

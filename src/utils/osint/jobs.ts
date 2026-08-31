@@ -50,11 +50,13 @@ import type {
   CollectorEvidence,
   CollectorRelationship,
 } from "../collectors/result";
+import { parseInvestigationResult } from "../collectors/result";
 import type { CollectorRegistry } from "../collectors/registry";
 import { collectorRegistry } from "../collectors/registry";
 import { registerExistingCollectors } from "../collectors/existing";
 import { registerExternalCollectors } from "../collectors/external";
 import { registerPersonCollectors } from "../collectors/person";
+import { assertPassiveCollector } from "../collectors/passive-policy";
 import { dedupeEntitiesById, dedupeRelationships, mergeTargetSelfEntities } from "./merge";
 import type { OsintPlan } from "./query-planner";
 import { planInvestigation } from "./query-planner";
@@ -184,9 +186,28 @@ async function runJob(
   });
 
   try {
+    // Spec §2: "any adapter marked ACTIVE must be rejected by the orchestrator."
+    // Mirrors the same check in orchestrator.ts's runInvestigation() — this is
+    // the job pipeline's own last point before a non-passive adapter would
+    // touch the network, and both entry points need the gate independently.
+    assertPassiveCollector(collector);
     const outcome = await Promise.race([collector.execute(job.target), timeout]);
     clearTimeout(timer!);
-    const result = collector.normalize(outcome);
+
+    /**
+     * Validate at the boundary.
+     *
+     * `parseInvestigationResult` exists in `result.ts` specifically for this and
+     * had zero callers: `normalize()`'s output went straight into the store
+     * unchecked. A collector returning a malformed shape was therefore recorded
+     * as `completed`, which made a case run read COMPLETED off a garbage result.
+     *
+     * A schema mismatch is now that collector's own failure (caught below, this
+     * job goes `failed`), not the investigation's — every other collector's work
+     * is untouched. One bad adapter must not fail the run, and must not be
+     * counted as a success either.
+     */
+    const result = parseInvestigationResult(job.collector, collector.normalize(outcome));
     store.setResult(jobId, {
       entities: result.entities,
       relationships: result.relationships,

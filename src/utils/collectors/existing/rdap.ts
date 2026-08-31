@@ -128,6 +128,18 @@ export const rdapCollector: Collector<RdapRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "rdap",
+    name: "RDAP",
+    collectionMode: "PASSIVE_API",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "Registry records held by the registrar. No contact with the target.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<RdapRaw>> {
     const clock = startExecution();
     const hostname = toHostname(target.value);

@@ -278,8 +278,23 @@ computed returns `null` with a reason, never 0.
 
 **We do not build or claim a deepfake classifier.** Detectors trained on GAN-era fakes
 generalise poorly to diffusion models and collapse under the recompression social
-redistribution applies. With no GPU that would be a fabricated confidence value — the one
-thing the hard constraints forbid.
+redistribution applies. That would be a fabricated confidence value — the one thing the hard
+constraints forbid.
+
+**Verified directly, not just argued from principle (2026-08-26).** GPU is not the blocker —
+`ai-service` already runs CUDA inference on this exact machine (a GTX 1650, 4GB) for
+Grounding DINO, Florence-2 and InsightFace, so an earlier "no GPU" framing of this section was
+stale and has been removed. A 6-agent research-and-adversarially-verify workflow checked the
+three best real, permissively-licensed candidates that exist for face-swap, diffusion-image
+and voice-clone detection — CADDM (Apache-2.0), Community Forensics (MIT), XLSR-AASIST
+(MIT/Apache-2.0, the official ASVspoof-team release) — against genuine, independently
+re-fetched cross-domain benchmarks, not headline numbers. All three collapse to 45–53%
+accuracy, indistinguishable from a coin flip, specifically against the class of content that
+matters most: diffusion-era face swaps, 2025–2026 closed commercial image generators, and
+modern neural-codec-LM voice cloning. The verification pass also caught real integrity
+problems in evidence a shallower check would have trusted — fabricated author/venue citations
+in an "independent" benchmark paper, and a headline number misattributed from the wrong row of
+a comparison table. This is a correctness gap, not a resource gap, and no GPU closes it.
 
 Position taken instead: **provenance beats classification**. A C2PA Content Credential is a
 signature (verifies or does not, no false positives); a deepfake score is a guess. The only
@@ -386,9 +401,21 @@ framed as an unverified candidate match for analyst review, never a confirmed fi
 consistent with this project's EXIF-GPS/C2PA framing elsewhere — this is not yet decided
 for any UI that might surface it, because no frontend caller exists yet.
 
-**Not done:** no frontend code calls this service — `src/utils/imaging.ts`/`imaging-client.ts`
-still do everything client-side, independently. Wiring them together (or deciding not to) is
-unstarted work, not a regression.
+**Superseded 2026-08-28 — the "not done"/"no GPU" framing above is stale on three counts,
+verified directly rather than assumed.** This environment now has a GPU (`torch.cuda.is_available()`
+is `True`), a system Tesseract (`tesseract.exe` on PATH), and real vendored weights for
+Grounding DINO, Florence-2, InsightFace and YAMNet under `ai-service/models/` — `/health`
+confirms `grounding_dino: "loaded (cuda)"` and similarly for the others. **The frontend DOES
+call this service now**: `src/components/ai-analysis-panel.tsx` (shared by `/images` and
+`/videos`) calls `/ai/detect`, `/ai/describe` and `/ai/faces` via `src/utils/ai-service-client.ts`,
+with the "unverified candidate match for analyst review, never a confirmed finding" framing
+from the paragraph above already live in that UI, plus (2026-08-28) a bounding-box overlay,
+per-detection crop/zoom, and "save to Evidence Vault" — see the milestone entry in
+`PROJECT_MEMORY.md`. Live-verified against the real loaded model, not a mock: `curl`'d
+`/ai/detect` directly, then reproduced the identical detections end to end through the real
+browser UI. The historical paragraphs above are kept as an accurate record of what was true at
+those dates, not corrected in place — this note exists so a future session doesn't read them as
+still-current.
 
 **Deliberately not merged from the same source:** a local session-based auth/RBAC system
 (Prisma+SQLite, login, guards) was in the same source package but was not brought in — this
@@ -457,3 +484,15 @@ Windows path. If a tool ever receives a mangled `/`-prefixed argument, set:
 ```sh
 export MSYS_NO_PATHCONV=1
 ```
+
+**The real server runs on Node, not Bun — `Bun.*` globals will silently pass every test and
+then fail in the browser.** `vite.config.ts` sets `nitro({ preset: "node-server" })`, so the
+process that actually executes server functions (confirmed live 2026-08-31 by checking which
+OS process owned port 3000: `node.exe`) is plain Node.js. `bun test` and a standalone
+`bun run script.ts` both execute under Bun's own runtime, so they will never catch a `Bun`-only
+API — a real bug shipped exactly this way in `contact-email.ts` (`Bun.CryptoHasher`, silently
+broken server-side while `bun test` passed 17/17). Use `node:crypto`'s `createHash()` or
+Web-standard `globalThis.crypto.subtle` (already the pattern in `evidence.ts`'s `sha256OfFile`)
+for hashing, and generally treat "passes `bun test`" as proof of correctness only for
+runtime-agnostic code — anything reaching for a Bun-specific API needs a real browser/server
+check, not just a green test run.

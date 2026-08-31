@@ -42,6 +42,18 @@ export const shodanInternetDbCollector: Collector<ShodanRaw> = {
   requiresCredentials: false,
   isOptional: false,
 
+  capability: {
+    sourceId: "shodan-internetdb",
+    name: "Shodan InternetDB",
+    collectionMode: "PASSIVE_DATASET",
+    activeCapable: false,
+    allowed: true,
+    requiresAuth: false,
+    requiresManualAction: false,
+    apiAvailable: true,
+    notes: "Reads Shodan's own prior scan results. Sentinel sends the target nothing. Returns no geolocation — that needs the paid API, so the geo layer stays empty rather than faked.",
+  },
+
   async execute(target: CollectorTarget): Promise<CollectorRunOutcome<ShodanRaw>> {
     const clock = startExecution();
     let addresses: string[];
@@ -95,6 +107,8 @@ export const shodanInternetDbCollector: Collector<ShodanRaw> = {
           cpes: host.cpes,
           tags: host.tags,
           vulns: host.vulns,
+          devices: host.devices,
+          shodanUrl: host.shodanUrl,
         },
       });
 
