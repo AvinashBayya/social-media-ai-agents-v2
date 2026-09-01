@@ -547,7 +547,7 @@ function LocalNetworkPanel() {
             Wi-Fi Network Scanner & LAN Recon
           </span>
           <p className={`font-mono text-xs leading-relaxed ${DIM} mt-1`}>
-            Scan nearby Wi-Fi access points and view SSID, Signal %, Channel, Security, and BSSID MAC addresses using native <code className="text-console-green">netsh wlan show networks mode=bssid</code>.
+            Scan nearby Wi-Fi access points and view SSID, Signal %, Channel, Security, and BSSID MAC addresses via a real, forced scan through Windows' own <code className="text-console-green">WiFiAdapter</code> API (falls back to <code className="text-console-green">netsh</code> if unavailable).
           </p>
         </div>
         <Button
@@ -625,9 +625,9 @@ function LocalNetworkPanel() {
                   SCANNING FOR NEARBY WI-FI NETWORKS
                 </div>
 
-                <div className="relative size-64 rounded-full border-2 border-console-green/40 flex items-center justify-center shadow-[0_0_25px_rgba(34,197,94,0.15)] my-4">
-                  <div className="absolute size-48 rounded-full border border-console-green/30" />
-                  <div className="absolute size-32 rounded-full border border-console-green/20" />
+                <div className="relative size-72 rounded-full border-2 border-console-green/40 flex items-center justify-center shadow-[0_0_25px_rgba(34,197,94,0.15)] my-4">
+                  <div className="absolute size-56 rounded-full border border-console-green/30" />
+                  <div className="absolute size-36 rounded-full border border-console-green/20" />
                   <div className="absolute size-16 rounded-full border border-console-green/20" />
                   <div className="absolute size-2 rounded-full bg-console-green shadow-[0_0_8px_#22c55e]" />
 
@@ -647,28 +647,46 @@ function LocalNetworkPanel() {
                     />
                   </div>
 
-                  {data.wifiNetworks?.slice(0, 5).map((net, i) => {
-                    const angles = [-30, 45, 135, -120, 190];
-                    const angle = angles[i % angles.length];
-                    const radiusPercent = Math.max(25, 100 - net.signal * 0.7);
-                    const rad = (angle * Math.PI) / 180;
-                    const x = Math.cos(rad) * radiusPercent * 1.1;
-                    const y = Math.sin(rad) * radiusPercent * 1.1;
+                  {(() => {
+                    // Strongest signals shown on the radar itself — the full
+                    // list (however many were really found) is already the
+                    // scrollable panel on the left; the radar is a
+                    // supplementary view, not the primary data source, so it
+                    // doesn't need to fit everything.
+                    const shown = [...(data.wifiNetworks ?? [])].sort((a, b) => b.signal - a.signal).slice(0, 6);
+                    // Evenly spaced by rank, not a fixed lookup table — the
+                    // previous version used 5 hardcoded angles that could
+                    // land two high-signal (small-radius) networks at very
+                    // different angles but nearly the same tiny radius,
+                    // colliding regardless of angle. Spacing derived from
+                    // the real count guarantees angular separation scales
+                    // with how many are actually shown.
+                    const angleStep = (2 * Math.PI) / shown.length;
+                    return shown.map((net, i) => {
+                      const angle = i * angleStep - Math.PI / 2;
+                      // Stronger signal sits closer to center, but never
+                      // closer than 60px — a small radius compresses the
+                      // physical distance between angularly-separated labels
+                      // (arc length = radius × angle), which is the other
+                      // half of what caused the original collision.
+                      const radius = 60 + (100 - net.signal) * 0.55;
+                      const x = Math.cos(angle) * radius;
+                      const y = Math.sin(angle) * radius;
 
-                    return (
-                      <div
-                        key={net.ssid}
-                        className="absolute flex items-center gap-1.5 px-2 py-1 rounded-md bg-console-deep/90 border border-console-green/60 shadow-lg text-[9px] font-bold z-10 transition-all hover:scale-105"
-                        style={{
-                          transform: `translate(${x}px, ${y}px)`,
-                        }}
-                      >
-                        <Wifi className="size-3 text-console-green shrink-0 animate-pulse" />
-                        <span className="text-console-text truncate max-w-[90px]">{net.ssid}</span>
-                        <span className="text-console-green font-bold">{net.signal}%</span>
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div
+                          key={net.ssid + net.bssid}
+                          className="absolute flex items-center gap-1.5 px-2 py-1 rounded-md bg-console-deep/90 border border-console-green/60 shadow-lg text-[9px] font-bold z-10 transition-all hover:scale-105 hover:z-20"
+                          style={{ transform: `translate(${x}px, ${y}px)` }}
+                          title={`${net.ssid} — ${net.signal}%, ${net.security}, ch ${net.channel}`}
+                        >
+                          <Wifi className="size-3 text-console-green shrink-0 animate-pulse" />
+                          <span className="text-console-text truncate max-w-[76px]">{net.ssid}</span>
+                          <span className="text-console-green font-bold">{net.signal}%</span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
 
                 <div className="w-full rounded-md border border-console-border/70 bg-console-deep/80 p-3 space-y-1.5 text-[10px] text-console-muted">
@@ -681,7 +699,13 @@ function LocalNetworkPanel() {
                       <span className="text-console-green font-bold">✓</span> Scans only nearby visible Wi-Fi networks in range.
                     </li>
                     <li className="flex items-center gap-1.5">
-                      <span className="text-console-green font-bold">✓</span> Uses built-in Windows tool <code className="text-console-cyan">netsh</code>.
+                      <span className="text-console-green font-bold">✓</span> Forces a real Wi-Fi scan via Windows'{" "}
+                      <code className="text-console-cyan">WiFiAdapter</code> API — a properly awaited scan takes several
+                      real seconds, not an instant read of a stale cache.
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span className="text-console-green font-bold">✓</span> Radar shows the {Math.min(6, data.wifiNetworks?.length ?? 0)} strongest
+                      signals; the full list is on the left.
                     </li>
                   </ul>
                 </div>
@@ -716,11 +740,11 @@ function LocalNetworkPanel() {
                 </div>
                 <div className="rounded border border-console-border/40 bg-console-deep/60 p-2 space-y-0.5">
                   <span className="text-console-muted text-[10px] uppercase block font-bold">Host IPv4 Address</span>
-                  <span className="font-bold text-console-cyan text-xs font-mono">{data.connectedWifi.ipAddress || data.interfaces[0]?.ip || "192.168.1.100"}</span>
+                  <span className="font-bold text-console-cyan text-xs font-mono">{data.connectedWifi.ipAddress || data.interfaces[0]?.ip || "Not detected"}</span>
                 </div>
                 <div className="rounded border border-console-border/40 bg-console-deep/60 p-2 space-y-0.5">
                   <span className="text-console-muted text-[10px] uppercase block font-bold">Wi-Fi Gateway Router</span>
-                  <span className="font-bold text-console-amber text-xs font-mono">{data.connectedWifi.gatewayIp || "192.168.1.1"}</span>
+                  <span className="font-bold text-console-amber text-xs font-mono">{data.connectedWifi.gatewayIp || "Not detected"}</span>
                 </div>
               </div>
             </div>

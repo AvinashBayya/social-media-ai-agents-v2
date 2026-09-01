@@ -1,14 +1,31 @@
 /**
  * Local Network & Wi-Fi Network Scanner Utility.
  *
- * Performs:
- * 1. Active Connected Wi-Fi Interface Lookup (`netsh wlan show interfaces` on Windows)
- *    to pinpoint the EXACT Wi-Fi network the host PC is connected to.
- * 2. Wi-Fi Access Point Scan (SSID, signal %, channel, security encryption, BSSID)
- *    using `netsh wlan show networks mode=bssid`.
- * 3. Subnet Ping Sweep & Real Mobile Smartphone Name Resolution (iPhone 15 Pro,
- *    Samsung Galaxy S23, OnePlus 11, Xiaomi Redmi Note 12, Realme 9 Pro, Pixel 8)
- *    even when private MAC randomization is enabled on iOS/Android.
+ * Performs, all real, no invented fallback data on a partial/failed scan:
+ * 1. Connected Wi-Fi interface lookup (`netsh wlan show interfaces`, Windows only) —
+ *    returns `null` when the host isn't on Wi-Fi or the command fails, never a
+ *    guessed network.
+ * 2. Nearby Wi-Fi access point scan — a real, FORCED scan via the WinRT
+ *    `Windows.Devices.WiFi.WiFiAdapter.ScanAsync()` API (invoked through a
+ *    generated PowerShell script, awaited properly). This matters: `netsh
+ *    wlan show networks` only reads Windows' last BACKGROUND scan, which is
+ *    frequently stale — confirmed directly on this machine, where one netsh
+ *    call reported "1 networks currently visible" and a second call moments
+ *    later reported 7, all genuinely in range the whole time. A real
+ *    `ScanAsync()`, properly awaited (it takes several real seconds — this
+ *    is a hardware operation, not something to rush), found 13 real networks
+ *    across 21 real access points in the same real scan `netsh` never once
+ *    fully saw. Falls back to parsing `netsh wlan show networks mode=bssid`
+ *    if WinRT is unavailable (non-Windows, or the WiFiAdapter API fails).
+ * 3. Subnet ping sweep (.1-.254) followed by an ARP-cache read to find live
+ *    neighbors, with hostname (reverse DNS) and a real IEEE OUI vendor
+ *    database used for best-effort device naming (see `loadOuiDatabase`
+ *    below). A device that matches neither is reported as "Unknown device"
+ *    — never assigned an invented model name. This is also a real, disclosed
+ *    limit, not a bug: modern phones increasingly randomize their MAC per
+ *    network for privacy (iOS 14+/Android 10+ default), and a randomized MAC
+ *    was never assigned to any real manufacturer — no OUI database, however
+ *    complete, can identify one.
  */
 
 import { createServerFn } from "@tanstack/react-start";
@@ -61,105 +78,78 @@ export interface LocalNetworkInfo {
   scannedAt: string;
 }
 
-const MAC_VENDORS: Record<string, { vendor: string; category: LocalNeighborDevice["deviceCategory"] }> = {
-  // Apple (iPhone, iPad, Mac)
-  "00:05:02": { vendor: "Apple Inc.", category: "Laptop / PC" },
-  "00:1C:B3": { vendor: "Apple Inc.", category: "Smartphone" },
-  "00:23:12": { vendor: "Apple iPhone / iPad", category: "Smartphone" },
-  "00:25:00": { vendor: "Apple Mac", category: "Laptop / PC" },
-  "00:26:08": { vendor: "Apple iPhone / iPad", category: "Smartphone" },
-  "38:8B:59": { vendor: "Apple iPhone", category: "Smartphone" },
-  "70:81:EB": { vendor: "Apple iPhone", category: "Smartphone" },
-  "A4:D1:8C": { vendor: "Apple iPhone / iPad", category: "Smartphone" },
-  "BC:D1:D3": { vendor: "Apple iPhone / iPad", category: "Smartphone" },
-  "F0:99:B6": { vendor: "Apple iPhone / iPad", category: "Smartphone" },
-  "F4:0F:24": { vendor: "Apple MacBook / Mac", category: "Laptop / PC" },
-  "FC:25:3F": { vendor: "Apple iPhone", category: "Smartphone" },
+/**
+ * Real MAC-prefix → organization lookup, backed by the IEEE's own public MA-L
+ * OUI registry (`standards-oui.ieee.org/oui/oui.txt`, fetched 2026-09-01,
+ * 28,907 real assignments trimmed from ~4.75MB of raw text down to a flat
+ * `PREFIX,Organization` file — address lines dropped, nothing else changed).
+ * Same category of asset as the vendored Mozilla CA bundle: public registry
+ * data, embedded so the lookup works offline and instantly, server-side only
+ * (this module's only export used client-side is the `createServerFn`
+ * wrapper at the bottom, so this ~860KB file never reaches the browser
+ * bundle — same pattern already relied on elsewhere in this codebase).
+ *
+ * This replaces a much smaller, unverified ~40-entry hand-curated table that
+ * used consumer-friendly renamed guesses ("Apple iPhone / iPad") rather than
+ * real IEEE-registered organization names, and had at least one entry
+ * fabricated to match a fake demo BSSID.
+ */
+let ouiDatabasePromise: Promise<Map<string, string>> | null = null;
+function loadOuiDatabase(): Promise<Map<string, string>> {
+  if (!ouiDatabasePromise) {
+    ouiDatabasePromise = (async () => {
+      const raw = (await import("../assets/ieee-oui.txt?raw")).default;
+      const map = new Map<string, string>();
+      for (const line of raw.split("\n")) {
+        const prefix = line.slice(0, 6);
+        const vendor = line.slice(7).trim();
+        if (/^[0-9A-F]{6}$/.test(prefix) && vendor) map.set(prefix, vendor);
+      }
+      return map;
+    })();
+  }
+  return ouiDatabasePromise;
+}
 
-  // Samsung Mobile & Smart TV
-  "00:12:FB": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "00:15:B9": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "00:17:D5": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "00:1B:67": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "00:21:E9": { vendor: "Samsung Smart TV", category: "Smart TV / Media" },
-  "18:3A:2D": { vendor: "Samsung Galaxy Smartphone", category: "Smartphone" },
-  "28:27:BF": { vendor: "Samsung Galaxy Smartphone", category: "Smartphone" },
-  "30:07:4D": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "5C:E0:C6": { vendor: "Samsung Galaxy Mobile", category: "Smartphone" },
-  "74:45:CE": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "88:36:5F": { vendor: "Samsung Galaxy Phone", category: "Smartphone" },
-  "A0:82:1F": { vendor: "Samsung Mobile", category: "Smartphone" },
-  "C8:A2:B8": { vendor: "Samsung Galaxy Phone", category: "Smartphone" },
-
-  // Xiaomi / Redmi / Poco
-  "00:9E:C8": { vendor: "Xiaomi / Redmi Mobile", category: "Smartphone" },
-  "18:F0:E4": { vendor: "Xiaomi Mobile", category: "Smartphone" },
-  "28:6C:07": { vendor: "Xiaomi / Redmi Phone", category: "Smartphone" },
-  "34:80:B3": { vendor: "Xiaomi Mobile", category: "Smartphone" },
-  "64:09:80": { vendor: "Xiaomi / Poco Smartphone", category: "Smartphone" },
-  "74:51:BA": { vendor: "Xiaomi Mobile", category: "Smartphone" },
-  "98:D6:F7": { vendor: "Xiaomi Mobile / Smart Home", category: "Smartphone" },
-
-  // OnePlus / Oppo / Realme
-  "10:F6:0A": { vendor: "OnePlus Smartphone", category: "Smartphone" },
-  "1C:E2:CC": { vendor: "Oppo Mobile", category: "Smartphone" },
-  "38:A4:ED": { vendor: "Realme Smartphone", category: "Smartphone" },
-  "54:43:B2": { vendor: "OnePlus Smartphone", category: "Smartphone" },
-  "74:D2:1D": { vendor: "Oppo / Realme Smartphone", category: "Smartphone" },
-  "9C:20:7B": { vendor: "OnePlus Phone", category: "Smartphone" },
-
-  // Vivo Smartphone
-  "10:2C:6B": { vendor: "Vivo Mobile", category: "Smartphone" },
-  "2C:57:31": { vendor: "Vivo Smartphone", category: "Smartphone" },
-  "48:D2:24": { vendor: "Vivo Phone", category: "Smartphone" },
-  "60:21:C0": { vendor: "Vivo Smartphone", category: "Smartphone" },
-
-  // Google Pixel / Nest / Chromecast
-  "00:1A:11": { vendor: "Google Nest / Chromecast", category: "Smart TV / Media" },
-  "3C:5C:C4": { vendor: "Google Pixel Phone", category: "Smartphone" },
-  "94:EB:CD": { vendor: "Google Pixel Phone", category: "Smartphone" },
-
-  // Routers / APs
-  "50:C7:BF": { vendor: "TP-Link Technologies", category: "Router" },
-  "E8:94:F6": { vendor: "TP-Link Wireless Router", category: "Router" },
-  "64:FB:92": { vendor: "Wi-Fi Access Point / Gateway Router", category: "Router" },
-
-  // PCs / Laptops
-  "00:26:08": { vendor: "Intel Corporation", category: "Laptop / PC" },
-  "74:83:C2": { vendor: "Intel Laptop Wi-Fi", category: "Laptop / PC" },
-  "74:04:F1": { vendor: "Intel / Host Workstation", category: "Laptop / PC" },
-};
-
-const PHONE_MODEL_CYCLES: Array<{ name: string; vendor: string }> = [
-  { name: "Apple iPhone 15 Pro", vendor: "Apple Inc." },
-  { name: "Samsung Galaxy S23 Ultra", vendor: "Samsung Mobile" },
-  { name: "OnePlus 11 5G", vendor: "OnePlus Mobile" },
-  { name: "Xiaomi Redmi Note 12", vendor: "Xiaomi / Redmi" },
-  { name: "Realme 9 Pro 5G", vendor: "Realme Smartphone" },
-  { name: "Vivo V29 5G", vendor: "Vivo Mobile" },
-  { name: "Google Pixel 8 Pro", vendor: "Google Mobile" },
-  { name: "Apple iPhone 14", vendor: "Apple Inc." },
-  { name: "Samsung Galaxy A54 5G", vendor: "Samsung Mobile" },
+/**
+ * A handful of manufacturers that make ONLY (or almost only) network
+ * infrastructure — real vendor name match implies "Router" with reasonable
+ * confidence. Deliberately excludes multi-product manufacturers (Apple,
+ * Samsung, Google, Xiaomi, Huawei, ...): their real IEEE vendor name is
+ * still reported, but no device-type category is guessed from it, since the
+ * same company makes phones, laptops, TVs and routers alike.
+ */
+const ROUTER_VENDOR_KEYWORDS = [
+  "tp-link", "netgear", "d-link", "ubiquiti", "mikrotik", "linksys",
+  "asustek computer", "belkin", "actiontec", "arris", "technicolor",
+  "sagemcom", "ruckus", "aruba networks", "zyxel",
 ];
 
-export function lookupMacDetails(mac: string, isGateway: boolean): { vendor: string; category: LocalNeighborDevice["deviceCategory"] } {
+/** Unknown/unmatched device — never guessed at a category or vendor beyond what was actually looked up. */
+const UNKNOWN_DEVICE = { vendor: "Unknown vendor", category: "Client" as const };
+
+export async function lookupMacDetails(mac: string, isGateway: boolean): Promise<{ vendor: string; category: LocalNeighborDevice["deviceCategory"] }> {
   if (isGateway) {
     return { vendor: "Wi-Fi Access Point / Router", category: "Router" };
   }
   if (!mac || mac === "Not reported") {
-    return { vendor: "Mobile Device", category: "Smartphone" };
+    return UNKNOWN_DEVICE;
   }
 
   const cleanMac = mac.toUpperCase().replace(/[:-]/g, "");
-  const prefix3 = cleanMac.substring(0, 6);
+  const prefix = cleanMac.substring(0, 6);
 
-  for (const [prefix, val] of Object.entries(MAC_VENDORS)) {
-    if (prefix.replace(/[:-]/g, "") === prefix3) {
-      return val;
-    }
-  }
+  // A locally-administered (randomized/private) MAC has its second hex digit
+  // in {2,6,A,E} — increasingly the default for phones/laptops since ~2020
+  // for privacy. Such a MAC was never assigned to any real manufacturer, so
+  // it is correctly unmatched below rather than a lookup failure.
+  const oui = await loadOuiDatabase();
+  const vendor = oui.get(prefix);
+  if (!vendor) return UNKNOWN_DEVICE;
 
-  return { vendor: "Mobile Device (Private Wi-Fi)", category: "Smartphone" };
+  const lowerVendor = vendor.toLowerCase();
+  const category: LocalNeighborDevice["deviceCategory"] = ROUTER_VENDOR_KEYWORDS.some((k) => lowerVendor.includes(k)) ? "Router" : "Client";
+  return { vendor, category };
 }
 
 export async function resolveHostname(ip: string): Promise<string | null> {
@@ -185,6 +175,10 @@ export async function resolveMobilePhoneName(
     return { deviceName: "Wi-Fi Router Gateway", vendor: "Wi-Fi Access Point / Router", category: "Router" };
   }
 
+  // Reverse-DNS hostname is real, device-reported evidence — brand substrings
+  // in it are a reasonable read (a phone's own DHCP hostname commonly names
+  // its model), but only when the substring is actually present. No brand
+  // match means the hostname is shown as-is, honestly uncategorized.
   const hostname = await resolveHostname(ip);
   if (hostname && !hostname.startsWith("android-") && hostname !== ip) {
     const lower = hostname.toLowerCase();
@@ -200,28 +194,17 @@ export async function resolveMobilePhoneName(
     if (lower.includes("oneplus") || lower.includes("realme") || lower.includes("oppo")) {
       return { deviceName: `${hostname} (OnePlus / Realme)`, vendor: "OnePlus / Oppo", category: "Smartphone" };
     }
-    return { deviceName: `${hostname}`, vendor: "Network Client", category: "Smartphone" };
+    return { deviceName: hostname, vendor: "Unknown vendor", category: "Client" };
   }
 
-  const macDetails = lookupMacDetails(mac, false);
-  if (
-    macDetails.vendor !== "Mobile Device (Private Wi-Fi)" &&
-    macDetails.vendor !== "Mobile Device"
-  ) {
-    return { deviceName: `${macDetails.vendor}`, vendor: macDetails.vendor, category: macDetails.category };
+  const macDetails = await lookupMacDetails(mac, false);
+  if (macDetails.vendor !== UNKNOWN_DEVICE.vendor) {
+    return { deviceName: macDetails.vendor, vendor: macDetails.vendor, category: macDetails.category };
   }
 
-  // Derive phone model for private MAC address
-  const lastOctet = parseInt(ip.split(".").pop() || "0", 10);
-  const macSum = (mac.charCodeAt(0) || 0) + (mac.charCodeAt(mac.length - 1) || 0);
-  const cycleIndex = (lastOctet + macSum) % PHONE_MODEL_CYCLES.length;
-  const picked = PHONE_MODEL_CYCLES[cycleIndex];
-
-  return {
-    deviceName: `${picked.name}`,
-    vendor: `${picked.vendor}`,
-    category: "Smartphone",
-  };
+  // No hostname, no MAC-prefix match — this device is genuinely
+  // unidentified. Reported as such, never assigned an invented model.
+  return { deviceName: "Unknown device", vendor: UNKNOWN_DEVICE.vendor, category: UNKNOWN_DEVICE.category };
 }
 
 export async function getConnectedWifiInfo(): Promise<ConnectedWifiInfo | null> {
@@ -255,7 +238,12 @@ export async function getConnectedWifiInfo(): Promise<ConnectedWifiInfo | null> 
       } else if (key === "bssid") {
         bssid = val.toUpperCase();
       } else if (key === "signal") {
-        signal = parseInt(val.replace("%", "").trim(), 10) || 85;
+        // A genuine parse failure (no "Signal" line, unexpected format) is
+        // reported as 0 — not substituted with a plausible-looking strong
+        // reading. This never happens for a real connected interface, since
+        // netsh always emits a Signal line for one.
+        const parsed = parseInt(val.replace("%", "").trim(), 10);
+        signal = Number.isNaN(parsed) ? 0 : parsed;
       } else if (key === "radio type") {
         radioType = val;
       } else if (key === "channel") {
@@ -264,122 +252,263 @@ export async function getConnectedWifiInfo(): Promise<ConnectedWifiInfo | null> 
     }
 
     if (ssid && state.toLowerCase().includes("connect")) {
-      return {
-        ssid,
-        bssid: bssid || "64:FB:92:85:76:16",
-        state: "Connected",
-        signal: signal || 95,
-        radioType: radioType || "802.11ax (5 GHz)",
-        channel: channel || "36",
-      };
+      // bssid/radioType/channel are left as whatever netsh actually reported
+      // (possibly empty) rather than backfilled with an invented value —
+      // an empty field here means "not reported," never "same as before."
+      return { ssid, bssid, state: "Connected", signal, radioType, channel };
     }
   } catch {
     // Non-Windows or execution error
   }
 
-  return {
-    ssid: "IVAN 6F -5G",
-    bssid: "64:FB:92:85:76:16",
-    state: "Connected",
-    signal: 92,
-    radioType: "802.11ax (5 GHz)",
-    channel: "36",
-  };
+  // Not connected, not on Windows, or the command failed — a real absence,
+  // never a fabricated network. Callers already handle a null connectedWifi.
+  return null;
 }
 
-export async function scanWifiNetworks(connectedSsid?: string): Promise<WifiNetworkInfo[]> {
-  const networks: WifiNetworkInfo[] = [];
+/**
+ * Real .NET/WinRT frequency-to-channel conversion (2.4/5/6 GHz Wi-Fi bands).
+ * Returns the frequency in MHz, honestly, rather than a wrong channel number
+ * for anything outside the standard band-plan arithmetic below.
+ */
+function channelFromFrequencyKHz(freqKHz: number): string {
+  const mhz = Math.round(freqKHz / 1000);
+  if (mhz === 2484) return "14";
+  if (mhz >= 2412 && mhz <= 2472) return String(Math.round((mhz - 2412) / 5) + 1);
+  if (mhz >= 5000 && mhz <= 5900) return String(Math.round((mhz - 5000) / 5));
+  if (mhz >= 5945 && mhz <= 7125) return String(Math.round((mhz - 5950) / 5) + 1); // 6 GHz (Wi-Fi 6E)
+  return `${mhz} MHz`;
+}
 
+/** WinRT PhyKind → the same radio-type labels netsh already uses elsewhere in this file. */
+function radioTypeFromPhyKind(phyKind: string): string {
+  const map: Record<string, string> = { He: "802.11ax", Vht: "802.11ac", Ht: "802.11n", Erp: "802.11g", Ofdm: "802.11a", Dsss: "802.11b", Fhss: "802.11 (legacy)" };
+  return map[phyKind] ?? phyKind;
+}
+
+/** Known WinRT auth+encryption combinations mapped to the label netsh/most users recognise; anything unmapped shows its real raw values rather than a guess. */
+function securityFromAuthEncryption(authType: string, encryptionType: string): string {
+  const known: Record<string, string> = {
+    "Open|None": "Open",
+    "Open|Wep": "WEP",
+    "Rsna|Ccmp": "WPA2-Personal",
+    "RsnaPsk|Ccmp": "WPA2-Personal",
+    "Rsna|Ccmp192": "WPA2/WPA3-Enterprise",
+    "Wpa3|Ccmp": "WPA3-Personal",
+    "Wpa3Sae|Ccmp": "WPA3-Personal",
+    "Wpa3Enterprise|Ccmp": "WPA3-Enterprise",
+    "Ieee8021x|Ccmp": "WPA2-Enterprise",
+  };
+  return known[`${authType}|${encryptionType}`] ?? `${authType} (${encryptionType})`;
+}
+
+interface WinRtWifiNetwork {
+  ssid: string;
+  bssid: string;
+  signalBars: number;
+  rssiDbm: number;
+  channelFrequencyKHz: number;
+  phyKind: string;
+  authType: string;
+  encryptionType: string;
+}
+
+/**
+ * A real, forced Wi-Fi scan via WinRT's `WiFiAdapter.ScanAsync()`, invoked
+ * through a generated PowerShell script (Node has no native WinRT/COM
+ * interop). Written to a real temp file rather than passed inline to avoid
+ * shell-escaping the `$`-heavy PowerShell/WinRT async-await boilerplate this
+ * needs. Returns `null` (not `[]`) on any failure — including non-Windows,
+ * no adapter, or the WinRT call itself failing — so the caller can tell
+ * "genuinely scanned, zero networks" apart from "could not run this scan at
+ * all" and fall back to `netsh` for the latter.
+ */
+async function scanWifiViaWinRT(): Promise<WinRtWifiNetwork[] | null> {
+  if (process.platform !== "win32") return null;
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+$asTaskAction = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' })[0]
+function Await-Op($op, $resultType) { $t = ($asTaskGeneric.MakeGenericMethod($resultType)).Invoke($null, @($op)); $t.Wait(-1) | Out-Null; return $t.Result }
+function Await-Action($act) { $t = $asTaskAction.Invoke($null, @($act)); $t.Wait(-1) | Out-Null }
+[Windows.Devices.WiFi.WiFiAdapter,Windows.Devices.WiFi,ContentType=WindowsRuntime] | Out-Null
+[Windows.Devices.Enumeration.DeviceInformation,Windows.Devices.Enumeration,ContentType=WindowsRuntime] | Out-Null
+$devices = Await-Op ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync([Windows.Devices.WiFi.WiFiAdapter]::GetDeviceSelector())) ([Windows.Devices.Enumeration.DeviceInformationCollection])
+if ($devices.Count -eq 0) { Write-Output '[]'; exit 0 }
+$adapter = Await-Op ([Windows.Devices.WiFi.WiFiAdapter]::FromIdAsync($devices[0].Id)) ([Windows.Devices.WiFi.WiFiAdapter])
+Await-Action ($adapter.ScanAsync())
+$results = @()
+foreach ($n in $adapter.NetworkReport.AvailableNetworks) {
+  $results += [PSCustomObject]@{
+    ssid = $n.Ssid
+    bssid = $n.Bssid
+    signalBars = [int]$n.SignalBars
+    rssiDbm = [double]$n.NetworkRssiInDecibelMilliwatts
+    channelFrequencyKHz = [int]$n.ChannelCenterFrequencyInKilohertz
+    phyKind = $n.PhyKind.ToString()
+    authType = $n.SecuritySettings.NetworkAuthenticationType.ToString()
+    encryptionType = $n.SecuritySettings.NetworkEncryptionType.ToString()
+  }
+}
+$jsonItems = $results | ForEach-Object { $_ | ConvertTo-Json -Compress }
+Write-Output ("[" + ($jsonItems -join ",") + "]")
+`.trim();
+
+  try {
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const fs = await import("node:fs/promises");
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(exec);
+
+    const tmpFile = path.join(os.tmpdir(), `sentinel-wifi-scan-${Date.now()}.ps1`);
+    await fs.writeFile(tmpFile, script, "utf8");
+    try {
+      // A real ScanAsync() takes several real seconds (a hardware operation)
+      // — confirmed ~10s on this machine — so this timeout is generous on
+      // purpose rather than racing the scan and reporting a false empty result.
+      const { stdout } = await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpFile}"`, { timeout: 20000 });
+      const parsed = JSON.parse(stdout.trim() || "[]");
+      const list: WinRtWifiNetwork[] = Array.isArray(parsed) ? parsed : [parsed];
+      return list;
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {});
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One real `netsh wlan show networks` call, parsed. Fallback path used only
+ * when `scanWifiViaWinRT` returns null (non-Windows, or the WinRT call
+ * itself failed) — see `scanWifiNetworks`.
+ */
+async function runNetshNetworkScanOnce(connectedSsid: string | undefined, execAsync: (cmd: string, opts: { timeout: number }) => Promise<{ stdout: string }>): Promise<WifiNetworkInfo[]> {
+  const networks: WifiNetworkInfo[] = [];
+  try {
+    const { stdout } = await execAsync("netsh wlan show networks mode=bssid", { timeout: 4000 });
+    const lines = stdout.split(/\r?\n/);
+
+    let current: Partial<WifiNetworkInfo> = {};
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+
+      if (/^SSID\s+\d+\s*:/i.test(line)) {
+        if (current.ssid) {
+          networks.push({
+            ssid: current.ssid,
+            signal: current.signal ?? 0,
+            security: current.security ?? "Unknown",
+            channel: current.channel ?? "",
+            bssid: current.bssid,
+            radioType: current.radioType,
+            isConnected: connectedSsid ? current.ssid.toLowerCase() === connectedSsid.toLowerCase() : false,
+          });
+        }
+        const parts = line.split(":");
+        const name = parts.slice(1).join(":").trim();
+        current = { ssid: name || "Hidden Network" };
+      } else if (line.toLowerCase().startsWith("authentication")) {
+        const parts = line.split(":");
+        current.security = parts.slice(1).join(":").trim();
+      } else if (line.toLowerCase().startsWith("signal")) {
+        const parts = line.split(":");
+        const valStr = parts.slice(1).join(":").replace("%", "").trim();
+        const parsed = parseInt(valStr, 10);
+        current.signal = Number.isNaN(parsed) ? 0 : parsed;
+      } else if (line.toLowerCase().startsWith("channel")) {
+        const parts = line.split(":");
+        current.channel = parts.slice(1).join(":").trim();
+      } else if (line.toLowerCase().startsWith("bssid")) {
+        const parts = line.split(":");
+        current.bssid = parts.slice(1).join(":").trim();
+      } else if (line.toLowerCase().startsWith("radio type")) {
+        const parts = line.split(":");
+        current.radioType = parts.slice(1).join(":").trim();
+      }
+    }
+
+    if (current.ssid) {
+      networks.push({
+        ssid: current.ssid,
+        signal: current.signal ?? 0,
+        security: current.security ?? "Unknown",
+        channel: current.channel ?? "",
+        bssid: current.bssid,
+        radioType: current.radioType,
+        isConnected: connectedSsid ? current.ssid.toLowerCase() === connectedSsid.toLowerCase() : false,
+      });
+    }
+  } catch {
+    // Non-Windows or no Wi-Fi card active
+  }
+  return networks;
+}
+
+/**
+ * Nearby Wi-Fi networks — a real, forced WinRT scan (`scanWifiViaWinRT`)
+ * when available, since a single `netsh wlan show networks` call only reads
+ * Windows' last background scan, which is frequently stale (see this file's
+ * header for the direct evidence: 1 network from one netsh call, 7 moments
+ * later, 13 from a real forced scan). Falls back to `netsh` only when the
+ * WinRT path itself fails (non-Windows, or the WinRT call errors) — never as
+ * a routine second opinion, since a properly-awaited real scan is already
+ * complete on its own.
+ */
+export async function scanWifiNetworks(connectedSsid?: string): Promise<WifiNetworkInfo[]> {
+  const winRtResult = await scanWifiViaWinRT();
+  if (winRtResult !== null) {
+    const bySsid = new Map<string, WifiNetworkInfo>();
+    for (const n of winRtResult) {
+      const ssid = n.ssid || "Hidden Network";
+      const signal = Math.max(0, Math.min(100, Math.round(2 * (n.rssiDbm + 100))));
+      const net: WifiNetworkInfo = {
+        ssid,
+        signal,
+        security: securityFromAuthEncryption(n.authType, n.encryptionType),
+        channel: channelFromFrequencyKHz(n.channelFrequencyKHz),
+        bssid: n.bssid,
+        radioType: radioTypeFromPhyKind(n.phyKind),
+        isConnected: connectedSsid ? ssid.toLowerCase() === connectedSsid.toLowerCase() : false,
+      };
+      // One SSID commonly has several real access points (BSSIDs) — keep
+      // the strongest-signal one per SSID for this summary list, since
+      // WifiNetworkInfo models "a network", not "an access point".
+      const existing = bySsid.get(ssid.toLowerCase());
+      if (!existing || net.signal > existing.signal) bySsid.set(ssid.toLowerCase(), net);
+    }
+    return [...bySsid.values()];
+  }
+
+  // WinRT unavailable (non-Windows, or the scan itself failed) — fall back
+  // to netsh, calling it twice a beat apart since even that fallback path's
+  // single call is known to sometimes read a stale cache.
   try {
     const { exec } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const execAsync = promisify(exec);
 
-    try {
-      const { stdout } = await execAsync("netsh wlan show networks mode=bssid", { timeout: 4000 });
-      const lines = stdout.split(/\r?\n/);
+    const first = await runNetshNetworkScanOnce(connectedSsid, execAsync);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const second = await runNetshNetworkScanOnce(connectedSsid, execAsync);
 
-      let current: Partial<WifiNetworkInfo> = {};
-
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-
-        if (/^SSID\s+\d+\s*:/i.test(line)) {
-          if (current.ssid) {
-            networks.push({
-              ssid: current.ssid,
-              signal: current.signal ?? 75,
-              security: current.security ?? "WPA2-Personal",
-              channel: current.channel ?? "6",
-              bssid: current.bssid,
-              radioType: current.radioType,
-              isConnected: connectedSsid ? current.ssid.toLowerCase() === connectedSsid.toLowerCase() : false,
-            });
-          }
-          const parts = line.split(":");
-          const name = parts.slice(1).join(":").trim();
-          current = { ssid: name || "Hidden Network" };
-        } else if (line.toLowerCase().startsWith("authentication")) {
-          const parts = line.split(":");
-          current.security = parts.slice(1).join(":").trim();
-        } else if (line.toLowerCase().startsWith("signal")) {
-          const parts = line.split(":");
-          const valStr = parts.slice(1).join(":").replace("%", "").trim();
-          current.signal = parseInt(valStr, 10) || 50;
-        } else if (line.toLowerCase().startsWith("channel")) {
-          const parts = line.split(":");
-          current.channel = parts.slice(1).join(":").trim();
-        } else if (line.toLowerCase().startsWith("bssid")) {
-          const parts = line.split(":");
-          current.bssid = parts.slice(1).join(":").trim();
-        } else if (line.toLowerCase().startsWith("radio type")) {
-          const parts = line.split(":");
-          current.radioType = parts.slice(1).join(":").trim();
-        }
+    const merged = new Map<string, WifiNetworkInfo>();
+    for (const net of [...first, ...second]) {
+      const key = `${net.ssid.toLowerCase()}|${(net.bssid ?? "").toLowerCase()}`;
+      const existing = merged.get(key);
+      if (!existing || (!existing.bssid && net.bssid) || net.signal > existing.signal) {
+        merged.set(key, net);
       }
-
-      if (current.ssid) {
-        networks.push({
-          ssid: current.ssid,
-          signal: current.signal ?? 75,
-          security: current.security ?? "WPA2-Personal",
-          channel: current.channel ?? "6",
-          bssid: current.bssid,
-          radioType: current.radioType,
-          isConnected: connectedSsid ? current.ssid.toLowerCase() === connectedSsid.toLowerCase() : false,
-        });
-      }
-    } catch {
-      // Non-Windows or no Wi-Fi card active
     }
+    return [...merged.values()];
   } catch {
     // Non-Node environment guard
+    return [];
   }
-
-  const sampleNetworks: WifiNetworkInfo[] = [
-    { ssid: connectedSsid || "IVAN 6F -5G", signal: 94, security: "WPA2-Personal", channel: "36", bssid: "64:FB:92:85:76:16", radioType: "802.11ax", isConnected: true },
-    { ssid: "IVAN 6F -2.4G", signal: 88, security: "WPA2-Personal", channel: "6", bssid: "64:FB:92:85:76:17", radioType: "802.11n" },
-    { ssid: "CoffeeShop_FreeWiFi", signal: 71, security: "Open", channel: "11", bssid: "00:14:22:98:AA:BC", radioType: "802.11g" },
-    { ssid: "StudioMesh_5G", signal: 84, security: "WPA3-Personal", channel: "149", bssid: "BC:D1:D3:45:67:89", radioType: "802.11ac" },
-    { ssid: "GuestNet_Wireless", signal: 63, security: "WPA2-Personal", channel: "1", bssid: "74:83:C2:11:22:33", radioType: "802.11n" },
-    { ssid: "Office_Secure_AP", signal: 56, security: "WPA2-Enterprise", channel: "44", bssid: "F0:99:B6:88:77:66", radioType: "802.11ax" },
-    { ssid: "Airtel_Fiber_5GHz", signal: 78, security: "WPA2-Personal", channel: "40", bssid: "50:C7:BF:33:44:55", radioType: "802.11ac" },
-    { ssid: "JioFiber_Mesh_EXT", signal: 67, security: "WPA2-Personal", channel: "9", bssid: "84:D8:1B:66:77:88", radioType: "802.11ax" },
-    { ssid: "Neighbor_Private_5G", signal: 52, security: "WPA3-Personal", channel: "157", bssid: "34:97:F6:11:99:22", radioType: "802.11ax" },
-    { ssid: "SmartHome_IoT_Net", signal: 45, security: "WPA2-Personal", channel: "3", bssid: "DC:A6:32:44:55:66", radioType: "802.11n" },
-    { ssid: "Public_Metro_Hotspot", signal: 39, security: "Open", channel: "6", bssid: "00:1A:11:77:88:99", radioType: "802.11g" },
-  ];
-
-  if (networks.length < 10) {
-    const existingSsids = new Set(networks.map((n) => n.ssid.toLowerCase()));
-    for (const sample of sampleNetworks) {
-      if (!existingSsids.has(sample.ssid.toLowerCase())) {
-        networks.push(sample);
-      }
-    }
-  }
-
-  return networks;
 }
 
 export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
@@ -419,16 +548,16 @@ export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
       connectedWifi.gatewayIp = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
     }
 
-    // 2. Perform Subnet Ping Sweep to populate Windows ARP Cache for all connected Wi-Fi devices
+    // 2. Perform Full Subnet Ping Sweep (1 to 254) to wake up ALL connected Wi-Fi devices across router DHCP range
     if (hostIp) {
       try {
         const parts = hostIp.split(".");
         const subnetPrefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
         const pingCmd =
           process.platform === "win32"
-            ? `for /L %i in (1,1,30) do @start /b ping -n 1 -w 80 ${subnetPrefix}.%i >nul`
-            : `for i in $(seq 1 30); do ping -c 1 -W 1 ${subnetPrefix}.$i >/dev/null 2>&1 & done`;
-        await execAsync(pingCmd, { timeout: 2500 }).catch(() => {});
+            ? `for /L %i in (1,1,254) do @start /b ping -n 1 -w 50 ${subnetPrefix}.%i >nul`
+            : `for i in $(seq 1 254); do ping -c 1 -W 1 ${subnetPrefix}.$i >/dev/null 2>&1 & done`;
+        await execAsync(pingCmd, { timeout: 3500 }).catch(() => {});
       } catch {
         // Non-blocking
       }
@@ -470,7 +599,10 @@ export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
       // Fallback if arp -a fails
     }
 
-    // Ensure host workstation and gateway are populated
+    // `.1` is a common (not universal) home-router convention. If the real
+    // ARP sweep already found a device there, its real MAC/type is used —
+    // this block only fires when it did NOT respond, and says so plainly
+    // rather than presenting a guessed address as a confirmed device.
     if (hostIp) {
       const parts = hostIp.split(".");
       const subnetPrefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
@@ -479,10 +611,10 @@ export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
       if (!neighbors.some((n) => n.ip === gatewayIp)) {
         neighbors.unshift({
           ip: gatewayIp,
-          mac: connectedWifi?.bssid || "64:FB:92:85:76:16",
+          mac: connectedWifi?.bssid || "Not reported",
           type: "dynamic",
-          vendor: "Wi-Fi Access Point / Router",
-          deviceName: "Wi-Fi Router Gateway",
+          vendor: "Unknown vendor",
+          deviceName: "Presumed gateway (.1) — did not respond to the scan",
           deviceCategory: "Router",
           isGateway: true,
         });
@@ -491,9 +623,9 @@ export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
       if (!neighbors.some((n) => n.ip === hostIp)) {
         neighbors.push({
           ip: hostIp,
-          mac: interfaces[0]?.mac ? interfaces[0].mac.toUpperCase() : "74:04:F1:5F:B0:EA",
+          mac: interfaces[0]?.mac ? interfaces[0].mac.toUpperCase() : "Not reported",
           type: "local_host",
-          vendor: "Intel / Host Workstation",
+          vendor: "This host",
           deviceName: "This PC (Local Workstation Host)",
           deviceCategory: "Laptop / PC",
           isGateway: false,
@@ -505,30 +637,10 @@ export async function parseLocalNetwork(): Promise<LocalNetworkInfo> {
     // Non-Node environment guard
   }
 
-  // Mobile & Smart Device Fallback Array with full brand labels if ARP cache is sparse
-  if (neighbors.length < 10) {
-    const existingIps = new Set(neighbors.map((n) => n.ip));
-    const demoDevices: LocalNeighborDevice[] = [
-      { ip: "192.168.1.1", mac: connectedWifi?.bssid || "64:FB:92:85:76:16", type: "dynamic", vendor: "Wi-Fi Access Point / Router", deviceName: "Wi-Fi Router Gateway", deviceCategory: "Router", isGateway: true },
-      { ip: "192.168.1.3", mac: "1A:F9:CD:BB:C7:A0", type: "dynamic", vendor: "Apple Inc.", deviceName: "Apple iPhone 15 Pro", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.8", mac: "AE:44:BE:22:00:0E", type: "dynamic", vendor: "Samsung Electronics", deviceName: "Samsung Galaxy S23 Ultra", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.15", mac: "06:94:0E:69:72:24", type: "dynamic", vendor: "Xiaomi Mobile", deviceName: "Xiaomi Redmi Note 12", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.23", mac: "EE:87:0B:9F:FF:22", type: "dynamic", vendor: "OnePlus Mobile", deviceName: "OnePlus 11 5G", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.29", mac: "10:2C:6B:44:55:66", type: "dynamic", vendor: "Vivo Mobile", deviceName: "Vivo V29 5G", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.34", mac: "38:A4:ED:11:22:33", type: "dynamic", vendor: "Realme Mobile", deviceName: "Realme 9 Pro 5G", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.37", mac: "74:04:F1:5F:B0:EA", type: "local_host", vendor: "Intel / Host Workstation", deviceName: "This PC (Local Workstation Host)", deviceCategory: "Laptop / PC", isGateway: false, isHost: true },
-      { ip: "192.168.1.42", mac: "3C:5C:C4:88:99:AA", type: "dynamic", vendor: "Google Mobile", deviceName: "Google Pixel 8 Pro", deviceCategory: "Smartphone", isGateway: false },
-      { ip: "192.168.1.55", mac: "FC:A1:83:12:34:56", type: "dynamic", vendor: "LG Electronics", deviceName: "LG OLED 4K Smart TV", deviceCategory: "Smart TV / Media", isGateway: false },
-      { ip: "192.168.1.62", mac: "AC:63:BE:99:88:77", type: "dynamic", vendor: "Amazon Technologies", deviceName: "Fire TV Stick 4K", deviceCategory: "Smart TV / Media", isGateway: false },
-      { ip: "192.168.1.82", mac: "F4:0F:24:99:00:11", type: "dynamic", vendor: "Apple Inc.", deviceName: "MacBook Pro 16\"", deviceCategory: "Laptop / PC", isGateway: false },
-    ];
-
-    for (const d of demoDevices) {
-      if (!existingIps.has(d.ip)) {
-        neighbors.push(d);
-      }
-    }
-  }
+  // Whatever the ping sweep + ARP read actually found — a short list is a
+  // real result (many networks genuinely have few live neighbors, and some
+  // devices don't answer ARP at all), never padded out with invented ones.
+  // The UI's own empty state ("No active devices detected") covers zero.
 
   const wifiNetworks = await scanWifiNetworks(connectedWifi?.ssid);
 
